@@ -2756,7 +2756,7 @@
         },
         {
           "command": "1c-platform-tools.metadata.validateDump",
-          "when": "view == 1c-platform-tools-metadata-tree",
+          "when": "view == 1c-platform-tools-metadata-tree && 1c-platform-tools.metadata.mainFormat != edt",
           "group": "navigation@1"
         },
         {
@@ -2918,7 +2918,7 @@
         },
         {
           "command": "1c-platform-tools.metadata.validateDump",
-          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataSourceConfigLike( |$)/",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataSourceConfigLike( |$)/ && viewItem =~ /(^| )mdDesigner( |$)/",
           "group": "9_check@1"
         },
         {
@@ -3188,7 +3188,7 @@
         },
         {
           "command": "1c-platform-tools.metadata.addObject",
-          "when": "view == 1c-platform-tools-metadata-tree && viewItem == metadataSourceExternalArtifact",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataSourceExternalArtifact( |$)/",
           "group": "inline"
         },
         {
@@ -3253,7 +3253,7 @@
         },
         {
           "command": "1c-platform-tools.metadata.openSourceXml",
-          "when": "view == 1c-platform-tools-metadata-tree && (viewItem =~ /(^| )metadataSourceConfigLike( |$)/ || viewItem == metadataSourceUnsupported || viewItem =~ /(^| )(metadataObjectProperties(Subsystem)?|metadataLeafFile|metadataObjectForm)( |$)/)",
+          "when": "view == 1c-platform-tools-metadata-tree && (viewItem =~ /(^| )metadataSourceConfigLike( |$)/ || viewItem =~ /(^| )metadataSourceUnsupported( |$)/ || viewItem =~ /(^| )(metadataObjectProperties(Subsystem)?|metadataLeafFile|metadataObjectForm)( |$)/)",
           "group": "2_reveal@1"
         },
         {
@@ -3263,12 +3263,12 @@
         },
         {
           "command": "1c-platform-tools.metadata.compile",
-          "when": "view == 1c-platform-tools-metadata-tree && (viewItem =~ /(^| )metadataSourceConfigLike( |$)/ || viewItem == metadataSourceUnsupported || viewItem == metadataSourceExternalArtifact || viewItem =~ /(^| )metadataLeafFile( |$)/)",
+          "when": "view == 1c-platform-tools-metadata-tree && (viewItem =~ /(^| )metadataSourceConfigLike( |$)/ || viewItem =~ /(^| )metadataSourceUnsupported( |$)/ || viewItem =~ /(^| )metadataSourceExternalArtifact( |$)/ || viewItem =~ /(^| )metadataLeafFile( |$)/)",
           "group": "4_build@1"
         },
         {
           "command": "1c-platform-tools.metadata.addObject",
-          "when": "view == 1c-platform-tools-metadata-tree && (viewItem == metadataGroup_catalogs || viewItem == metadataGroupExt_catalogs || viewItem == metadataGroup_constants || viewItem == metadataGroupExt_constants || viewItem == metadataGroup_enums || viewItem == metadataGroupExt_enums || viewItem == metadataGroup_documents || viewItem == metadataGroupExt_documents || viewItem == metadataGroup_reports || viewItem == metadataGroupExt_reports || viewItem == metadataGroup_externalReports || viewItem == metadataGroupExt_externalReports || viewItem == metadataGroup_dataProcessors || viewItem == metadataGroupExt_dataProcessors || viewItem == metadataGroup_externalDataProcessors || viewItem == metadataGroupExt_externalDataProcessors || viewItem == metadataGroup_tasks || viewItem == metadataGroupExt_tasks || viewItem == metadataGroup_chartOfCharacteristicTypes || viewItem == metadataGroupExt_chartOfCharacteristicTypes || viewItem == metadataGroup_chartOfAccounts || viewItem == metadataGroupExt_chartOfAccounts || viewItem == metadataGroup_chartOfCalculationTypes || viewItem == metadataGroupExt_chartOfCalculationTypes || viewItem == metadataGroup_externalDataSources || viewItem == metadataGroupExt_externalDataSources || viewItem == metadataSubgroup_common_common_subsystem || viewItem == metadataSubgroupExt_common_common_subsystem || viewItem == metadataSubgroup_common_common_commonmodule || viewItem == metadataSubgroupExt_common_common_commonmodule || viewItem == metadataSubgroup_common_common_sessionparam || viewItem == metadataSubgroupExt_common_common_sessionparam || viewItem == metadataSubgroup_common_common_role || viewItem == metadataSubgroupExt_common_common_role || viewItem == metadataSubgroup_common_common_commonattribute || viewItem == metadataSubgroupExt_common_common_commonattribute || viewItem == metadataSubgroup_common_common_exchangeplan || viewItem == metadataSubgroupExt_common_common_exchangeplan || viewItem == metadataSubgroup_common_common_commonpicture || viewItem == metadataSubgroupExt_common_common_commonpicture || viewItem == metadataSubgroup_documents_documentNumerators || viewItem == metadataSubgroupExt_documents_documentNumerators || viewItem == metadataSourceExternalArtifact)",
+          "when": "view == 1c-platform-tools-metadata-tree && (viewItem == metadataGroup_catalogs || viewItem == metadataGroupExt_catalogs || viewItem == metadataGroup_constants || viewItem == metadataGroupExt_constants || viewItem == metadataGroup_enums || viewItem == metadataGroupExt_enums || viewItem == metadataGroup_documents || viewItem == metadataGroupExt_documents || viewItem == metadataGroup_reports || viewItem == metadataGroupExt_reports || viewItem == metadataGroup_externalReports || viewItem == metadataGroupExt_externalReports || viewItem == metadataGroup_dataProcessors || viewItem == metadataGroupExt_dataProcessors || viewItem == metadataGroup_externalDataProcessors || viewItem == metadataGroupExt_externalDataProcessors || viewItem == metadataGroup_tasks || viewItem == metadataGroupExt_tasks || viewItem == metadataGroup_chartOfCharacteristicTypes || viewItem == metadataGroupExt_chartOfCharacteristicTypes || viewItem == metadataGroup_chartOfAccounts || viewItem == metadataGroupExt_chartOfAccounts || viewItem == metadataGroup_chartOfCalculationTypes || viewItem == metadataGroupExt_chartOfCalculationTypes || viewItem == metadataGroup_externalDataSources || viewItem == metadataGroupExt_externalDataSources || viewItem == metadataSubgroup_common_common_subsystem || viewItem == metadataSubgroupExt_common_common_subsystem || viewItem == metadataSubgroup_common_common_commonmodule || viewItem == metadataSubgroupExt_common_common_commonmodule || viewItem == metadataSubgroup_common_common_sessionparam || viewItem == metadataSubgroupExt_common_common_sessionparam || viewItem == metadataSubgroup_common_common_role || viewItem == metadataSubgroupExt_common_common_role || viewItem == metadataSubgroup_common_common_commonattribute || viewItem == metadataSubgroupExt_common_common_commonattribute || viewItem == metadataSubgroup_common_common_exchangeplan || viewItem == metadataSubgroupExt_common_common_exchangeplan || viewItem == metadataSubgroup_common_common_commonpicture || viewItem == metadataSubgroupExt_common_common_commonpicture || viewItem == metadataSubgroup_documents_documentNumerators || viewItem == metadataSubgroupExt_documents_documentNumerators || viewItem =~ /(^| )metadataSourceExternalArtifact( |$)/)",
           "group": "3_create@1"
         },
         {
@@ -3288,7 +3288,7 @@
         },
         {
           "command": "1c-platform-tools.metadata.setChildNodeType",
-          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )mdChildEdit( |$)/",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )mdChildTyped( |$)/",
           "group": "5_edit@2"
         },
         {
@@ -3313,7 +3313,7 @@
         },
         {
           "command": "1c-platform-tools.cfe.borrowObject",
-          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataObjectProperties( |$)/",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataObjectProperties( |$)/ && viewItem =~ /(^| )mdDesigner( |$)/",
           "group": "3_create@9"
         },
         {
