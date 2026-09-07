@@ -25,7 +25,7 @@ import {
 	runEdtCommand,
 } from './edtRunner';
 import { showValidationFindings } from './edtDiagnostics';
-import { buildCommand, detectShellType } from '../../utils/commandUtils';
+import { buildProcessCommand } from '../../utils/commandUtils';
 import { createVRunnerTask, TaskOutputChain } from '../tasks/vrunnerTask';
 import { ensureMdSparrowRuntime } from '../metadata/mdSparrowBootstrap';
 import { runMdSparrowParamsMutation } from '../metadata/mdSparrowParams';
@@ -411,7 +411,7 @@ export async function openInEdt(): Promise<void> {
 	// Задача живёт, пока открыта сама EDT: закрытие редактора завершает и её
 	const task = createVRunnerTask({
 		name: `EDT ${installation.version}`,
-		command: buildCommand(installation.gui, ['-data', target.workspaceDir], detectShellType()),
+		command: buildProcessCommand(installation.gui, ['-data', target.workspaceDir]),
 		cwd: target.workspaceRoot,
 		definition: { type: '1c-edt', command: 'open' },
 	});
