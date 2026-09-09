@@ -41,6 +41,7 @@ import {
 	formModuleNextTo,
 	formatOfFile,
 	moduleFileOf,
+	objectDirectoryOf,
 	templateContentFileOf,
 	templateDescriptorFileOf,
 } from '../../shared/objectPaths';
@@ -97,6 +98,12 @@ export interface RegisterMetadataFeatureParams {
 }
 
 /** Правила поддержки: слова и порядок окна правила поддержки конфигуратора. */
+/** Подчинённые объекты в ответе о строении: вид и файл содержимого приходят вместе с именем. */
+interface ObjectChildrenDto {
+	forms?: { name?: string; formType?: string; contentFile?: string }[];
+	templates?: { name?: string; templateType?: string; contentFile?: string; binaryContent?: boolean }[];
+}
+
 const SUPPORT_RULE_PICKS: ReadonlyArray<{ readonly label: string; readonly mode: string }> = [
 	{ label: 'Объект поставщика не редактируется', mode: '0' },
 	{ label: 'Объект поставщика редактируется с сохранением поддержки', mode: '1' },
@@ -490,9 +497,15 @@ export function registerMetadataFeature(
 
 	async function openOrCreateModuleFile(modulePath: string): Promise<void> {
 		try {
-			const created = await ensureBslModuleFile(modulePath);
+			const state = await ensureBslModuleFile(modulePath);
+			if (state === 'binary') {
+				void vscode.window.showInformationMessage(
+					`Модуль защищён паролем и хранится двоичным: ${path.basename(modulePath, '.bsl')}.bin`
+				);
+				return;
+			}
 			await openTextFile(modulePath);
-			if (created) {
+			if (state === 'created') {
 				notifyQuiet(`Создан пустой модуль: ${path.basename(modulePath)}`);
 			}
 		} catch (e) {
@@ -517,6 +530,34 @@ export function registerMetadataFeature(
 			return;
 		}
 		void vscode.window.showInformationMessage('Выберите форму в дереве метаданных.');
+	}
+
+	/** Состав подчинённых объектов от md-sparrow: у формы и макета оттуда вид и файл содержимого. */
+	async function readObjectStructure(
+		objectXml: string,
+		cwd: string,
+		configurationXmlAbs?: string
+	): Promise<ObjectChildrenDto | undefined> {
+		const runtime = await ensureMdSparrowRuntime(context);
+		if (!runtime) {
+			return undefined;
+		}
+		const schema = configurationXmlAbs
+			? await mdSparrowSchemaFlagFromConfigurationXml(configurationXmlAbs)
+			: await mainSchemaFlag();
+		const result = await runMdSparrowParamsRead(
+			runtime,
+			{ op: 'cf-md-object-structure-get', objectXml, schemaVersion: schema },
+			{ cwd }
+		);
+		if (result.exitCode !== 0) {
+			return undefined;
+		}
+		try {
+			return JSON.parse(result.stdout.trim()) as ObjectChildrenDto;
+		} catch {
+			return undefined;
+		}
 	}
 
 	async function resolveFirstXmlInDir(dir: string): Promise<string | undefined> {
@@ -2024,7 +2065,20 @@ export function registerMetadataFeature(
 					void vscode.window.showInformationMessage('У формы нет объекта-владельца.');
 					return;
 				}
-				const formXml = formContentFileOf(owner.resourceUri.fsPath, node.name);
+				const objectFile = owner.resourceUri.fsPath;
+				const cwd = owner.metadataRootAbs ?? path.dirname(objectFile);
+				// Вид формы и файл её содержимого знает md-sparrow: у обычной формы файл свой
+				const structure = await readObjectStructure(objectFile, cwd, owner.configurationXmlAbs);
+				const form = structure?.forms?.find((entry) => entry.name === node.name);
+				if (form?.formType === 'ORDINARY') {
+					void vscode.window.showInformationMessage(
+						`Форма «${node.name}» обычная: её показывает только конфигуратор. Модуль формы открывается отсюда.`
+					);
+					return;
+				}
+				const formXml = form?.contentFile
+					? path.join(objectDirectoryOf(objectFile), form.contentFile)
+					: formContentFileOf(objectFile, node.name);
 				await openFormViewerForXml(formXml, formModuleNextTo(formXml), `${owner.name}.${node.name}`, {
 					metadataRootAbs: owner.metadataRootAbs,
 					configurationXmlAbs: owner.configurationXmlAbs,
@@ -2347,13 +2401,30 @@ export function registerMetadataFeature(
 				let title = '';
 				let cwd: string | undefined;
 				let configurationXmlAbs: string | undefined;
+				// Вид макета объекта уже спрошен у библиотеки, описание перечитывать незачем
+				let kindKnown = false;
 				if (item instanceof MetadataObjectNodeTreeItem && item.nodeKind === 'template' && item.owner.resourceUri) {
 					const objectFile = item.owner.resourceUri.fsPath;
-					// У макета EDT своего описания нет: вид макета записан в описании владельца
-					descriptorXml = templateDescriptorFileOf(objectFile, item.name) ?? objectFile;
-					templateXml = templateContentFileOf(objectFile, item.name);
-					title = `${item.owner.name}.${item.name}`;
 					cwd = item.owner.metadataRootAbs ?? path.dirname(item.owner.resourceUri.fsPath);
+					// Вид макета и файл его содержимого знает md-sparrow: у каждого вида свой файл
+					const structure = await readObjectStructure(objectFile, cwd, item.owner.configurationXmlAbs);
+					const template = structure?.templates?.find((entry) => entry.name === item.name);
+					if (!template) {
+						void vscode.window.showInformationMessage('Состав макетов объекта не прочитан.');
+						return;
+					}
+					if (template.templateType !== 'DATA_COMPOSITION_SCHEMA') {
+						void vscode.window.showInformationMessage('Макет не является схемой компоновки данных.');
+						return;
+					}
+					if (!template.contentFile) {
+						void vscode.window.showInformationMessage(`Рядом с макетом «${item.name}» нет файла содержимого.`);
+						return;
+					}
+					templateXml = path.join(objectDirectoryOf(objectFile), template.contentFile);
+					descriptorXml = templateXml;
+					kindKnown = true;
+					title = `${item.owner.name}.${item.name}`;
 					configurationXmlAbs = item.owner.configurationXmlAbs;
 				} else if (item instanceof MetadataLeafTreeItem && item.resourceUri) {
 					const file = item.resourceUri.fsPath;
@@ -2368,8 +2439,8 @@ export function registerMetadataFeature(
 					return;
 				}
 				try {
-					const descriptor = await fs.promises.readFile(descriptorXml, 'utf8');
-					if (!descriptor.includes('DataCompositionSchema')) {
+					const descriptor = kindKnown ? '' : await fs.promises.readFile(descriptorXml, 'utf8');
+					if (!kindKnown && !descriptor.includes('DataCompositionSchema')) {
 						void vscode.window.showInformationMessage('Макет не является схемой компоновки данных.');
 						return;
 					}
