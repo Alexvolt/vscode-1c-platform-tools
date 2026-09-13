@@ -33,7 +33,8 @@
 - **[ER-диаграммы](docs/er-diagrams.md)** — интерактивные схемы связей метаданных, экспорт в Mermaid, Draw.io, SVG, PNG.
 - **[Тестирование](docs/testing.md)** — панель тестирования VS Code: Vanessa, xUnit, YAxUnit, OneScript и 1bdd, запуск из редактора, статусы и переход к падению.
 - **[Отладка 1С](docs/debug.md)** — точки останова с условиями, изменение значений переменных, отладка расширений и внешних обработок, замер производительности.
-- **[AI и MCP](docs/ai-mcp.md)** — навыки для агентов, запуск команд через файл-триггер и MCP-сервер [mcp-1c-platform-tools](https://github.com/yellow-hammer/mcp-1c-platform-tools).
+- **[AI-агенты](docs/ai-mcp.md)** — навыки для агентов и запуск команд через файл-триггер.
+- **[MCP-сервер](https://yellow-hammer.github.io/vscode-1c-platform-tools/mcp/)** — агент вызывает команды расширения через MCP: установка, подключение, параметры инструментов и примеры фраз.
 - **[Docker и ibcmd](docs/docker.md)** — выполнение команд в контейнере без локальной платформы 1С, включая GitHub Codespaces.
 - **[Внешние компоненты](docs/components.md)** — отладчик, дерево метаданных, JRE, OVM и Allure: загрузка, свои сборки и работа без доступа к GitHub.
 - **[Сочетания клавиш](docs/keyboard.md)** — панели по номеру, синтаксический контроль как в конфигураторе.
@@ -49,7 +50,7 @@
 | Cursor, Windsurf, VSCodium | [Open VSX](https://open-vsx.org/extension/yellow-hammer/1c-platform-tools) |
 | Без доступа к маркетплейсу | файл `.vsix` из [релизов](https://github.com/yellow-hammer/vscode-1c-platform-tools/releases), `Extensions: Install from VSIX…` |
 
-В Cursor работают те же панели и команды; MCP там подключается своим файлом `.cursor/mcp.json` - его пишет команда расширения, см. [AI и MCP](docs/ai-mcp.md).
+В Cursor работают те же панели и команды; MCP там подключается своим файлом `.cursor/mcp.json` - его пишет команда расширения, см. [MCP-сервер](https://yellow-hammer.github.io/vscode-1c-platform-tools/mcp/).
 
 Расширение активируется для проекта 1С при наличии файла `packagedef` в корне рабочей папки. Панели **1С: Проекты** и **1С: Администрирование** работают и без открытого проекта: первая поможет найти и открыть нужный, вторая не привязана к рабочей области вовсе.
 
@@ -58,7 +59,7 @@
 - **Платформа 1С:Предприятие 8** — клиент, конфигуратор, `1cestart`, `rac`/`ras`, `ibsrv`, `ibcmd`.
 - **OneScript, OPM и vanessa-runner** — из раздела **Зависимости** в дереве **1С: Инструменты**.
 - **1С:EDT** — если исходный код ведётся в формате EDT, см. [Формат EDT](docs/edt.md).
-- **MCP** — расширение [mcp-1c-platform-tools](https://github.com/yellow-hammer/mcp-1c-platform-tools), если команды вызывает агент.
+- **MCP** — расширение [1C: Platform Tools MCP](https://marketplace.visualstudio.com/items?itemName=yellow-hammer.mcp-1c-platform-tools), если команды вызывает агент, см. [MCP-сервер](https://yellow-hammer.github.io/vscode-1c-platform-tools/mcp/).
 
 <img src="resources/brand/bird.png" alt="" width="28" align="left"> Без локальной 1С команды можно выполнять в Docker — см. [Docker и ibcmd](docs/docker.md).
 

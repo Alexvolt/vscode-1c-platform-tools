@@ -47,6 +47,9 @@ Thumbs.db
 CHANGELOG.md
 docs/.vitepress/cache/
 docs/.vitepress/dist/
+# Документация соседних репозиториев, которую подтягивает scripts/sync-docs.mjs
+docs/.vitepress/sync/
+docs/mcp/
 
 # Package manager
 package-lock.json.bak

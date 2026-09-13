@@ -67,7 +67,7 @@ const guides = [
 	{ text: 'Тестирование', link: '/testing' },
 	{ text: '1С: Список дел', link: '/todo' },
 	{ text: 'Отладка 1С', link: '/debug' },
-	{ text: 'AI и MCP', link: '/ai-mcp' },
+	{ text: 'AI-агенты', link: '/ai-mcp' },
 	{ text: 'Docker и ibcmd', link: '/docker' },
 	{ text: 'Формат EDT', link: '/edt' },
 	{ text: 'Внешние компоненты', link: '/components' },
@@ -115,7 +115,18 @@ export default defineConfig({
 				],
 			},
 		],
-		sidebar: [{ text: 'Руководства по функциям', items: guides }],
+		sidebar: [
+			{ text: 'Руководства по функциям', items: guides },
+			// Страницы приходят из репозитория MCP-сервера: docs/external-docs.json, scripts/sync-docs.mjs
+			{
+				text: 'MCP-сервер',
+				items: [
+					{ text: 'Установка и подключение', link: '/mcp/' },
+					{ text: 'Параметры инструментов', link: '/mcp/tool-parameters' },
+					{ text: 'Что писать агенту', link: '/mcp/examples' },
+				],
+			},
+		],
 		socialLinks: [
 			{
 				icon: {
