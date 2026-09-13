@@ -1,0 +1,7 @@
+[
+	{
+		"repository": "yellow-hammer/mcp-1c-platform-tools",
+		"source": "docs",
+		"target": "mcp"
+	}
+]

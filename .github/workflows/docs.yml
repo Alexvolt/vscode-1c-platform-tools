@@ -11,6 +11,11 @@ on:
       - 'package.json'
       - 'package-lock.json'
   workflow_dispatch:
+  # Раздел MCP приходит из соседнего репозитория: пересборка по его сигналу и раз в сутки
+  repository_dispatch:
+    types: [docs]
+  schedule:
+    - cron: '0 3 * * *'
 
 permissions:
   contents: read
