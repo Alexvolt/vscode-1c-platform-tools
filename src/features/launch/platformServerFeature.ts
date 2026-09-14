@@ -11,7 +11,7 @@ import { openLocalUrl } from '../../shared/remoteEnv';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { ServerUrls } from '../../shared/ibsrvPublication';
 import { DEBUG_TYPE } from '../debug/debugConstants';
-import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
+import { projectPaths } from '../../shared/projectPaths';
 import { uiOnlyHandler } from '../../shared/agentGate';
 import { PlatformServerManager, ServerState, PublicationSelection } from './platformServerManager';
 import { notifyQuiet } from '../../shared/notify';
@@ -240,6 +240,12 @@ async function startServerDebug(manager: PlatformServerManager): Promise<void> {
 	const debugPort = serverConfig.get<number>('debugPort', 1550);
 	const host = serverConfig.get<string>('host', 'localhost');
 
+	const configuration = (await projectPaths(workspaceFolder.uri.fsPath)).configuration?.dir;
+	if (configuration === undefined) {
+		vscode.window.showErrorMessage('Исходный код конфигурации в рабочей области не найден: отлаживать через сервер нечего.');
+		return;
+	}
+
 	if (manager.state === 'running') {
 		await manager.restart();
 	} else {
@@ -249,15 +255,12 @@ async function startServerDebug(manager: PlatformServerManager): Promise<void> {
 		return; // ошибка запуска уже показана менеджером
 	}
 
-	const configuration = (await projectPaths(workspaceFolder.uri.fsPath)).configuration?.dir;
-	const cfPath = configuration === '.' ? '' : configuration ?? CONVENTIONAL_PATHS.cf;
-
 	const started = await vscode.debug.startDebugging(workspaceFolder, {
 		type: DEBUG_TYPE,
 		request: 'attach',
 		name: 'Отладка 1С (автономный сервер)',
 		platformPath: process.platform === 'win32' ? '${env:PROGRAMFILES}/1cv8' : '/opt/1C/v8.3/x86_64',
-		rootProject: cfPath ? `\${workspaceFolder}/${cfPath}` : '${workspaceFolder}',
+		rootProject: configuration === '.' ? '${workspaceFolder}' : `\${workspaceFolder}/${configuration}`,
 		debugServerHost: host,
 		debugServerPort: debugPort,
 		autoAttachTypes: ['Server', 'ManagedClient'],

@@ -1,5 +1,8 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { DEBUG_TYPE } from './debugConstants';
+import { isEdtProject } from '../../shared/projectLayout';
 import { resolveFileIbConnectionString } from '../../shared/ibConnectionPath';
 import { logger } from '../../shared/logger';
 import { VRunnerManager } from '../../shared/vrunnerManager';
@@ -26,7 +29,10 @@ function templatePath(relative: string): string {
 	return normalized.length > 0 ? `\${workspaceFolder}/${normalized}` : '${workspaceFolder}';
 }
 
-/** Абсолютный путь в записи конфигурации запуска. */
+/** Лежит ли в каталоге исходный код конфигурации: выгрузка конфигуратора или проект EDT. */
+function hasConfigurationSources(directory: string): boolean {
+	return directory !== '' && (fs.existsSync(path.join(directory, 'Configuration.xml')) || isEdtProject(directory));
+}
 
 export class OnecDebugConfigurationProvoider implements vscode.DebugConfigurationProvider {
 	constructor(private readonly vrunner: VRunnerManager) {}
@@ -39,7 +45,13 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 		const paths = workspaceRoot ? await projectPaths(workspaceRoot) : undefined;
 		const asTemplate = (relative: string) => templatePath(relative === '.' ? '' : relative);
 
-		const rootProject = asTemplate(paths?.configuration?.dir ?? CONVENTIONAL_PATHS.cf);
+		const configurationDir = paths?.configuration?.dir;
+		if (workspaceRoot && configurationDir === undefined) {
+			void vscode.window.showWarningMessage(
+				'Исходный код конфигурации в рабочей области не найден: укажите в конфигурации запуска каталог rootProject.'
+			);
+		}
+		const rootProject = asTemplate(configurationDir ?? '');
 
 		// Расширения решения и тестовые: тесты YAxUnit живут отдельно от поставки,
 		// но отлаживать их нужно так же
@@ -142,6 +154,24 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 			password,
 			...(platformVersion ? { platformVersion } : {}),
 		};
+	}
+
+	resolveDebugConfigurationWithSubstitutedVariables(
+		_folder: vscode.WorkspaceFolder | undefined,
+		config: vscode.DebugConfiguration
+	): vscode.DebugConfiguration | undefined {
+		if (config.type !== DEBUG_TYPE) {
+			return config;
+		}
+		// Без исходного кода конфигурации адаптер не сопоставит точки останова с модулями
+		const rootProject = typeof config.rootProject === 'string' ? config.rootProject : '';
+		if (!hasConfigurationSources(rootProject)) {
+			void vscode.window.showErrorMessage(
+				`Исходный код конфигурации не найден в каталоге rootProject: ${rootProject || 'каталог не задан'}. Укажите выгрузку конфигуратора или проект 1С:EDT.`
+			);
+			return undefined;
+		}
+		return config;
 	}
 }
 

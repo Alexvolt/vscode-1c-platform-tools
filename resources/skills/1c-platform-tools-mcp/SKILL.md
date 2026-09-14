@@ -34,7 +34,8 @@ Read-only инструмент `env_status` возвращает JSON: акти�
 
 - `settingsFile` — файл настроек vanessa-runner относительно `projectPath`; перекрывает активный профиль для конкретного вызова (например, `tools/vrunner.init.json` для init-сценариев).
 - `ibConnection` — явная строка подключения к ИБ, перекрывает значение файла настроек.
-- `pathsOverride` — переопределение каталогов `src/cf`, `src/cfe`, `src/epf`, `src/erf`, `build/out`.
+
+Каталогов исходного кода инструменты не принимают: конфигурацию, расширения, внешние обработки и отчёты расширение находит в проекте само, в выгрузке конфигуратора и в проектах 1С:EDT.
 
 ### Дополнительные параметры операций
 
@@ -83,7 +84,7 @@ Read-only инструмент `env_status` возвращает JSON: акти�
 | Собрать *.cfe            | `cfe_compile`         |
 | Разобрать *.cfe          | `cfe_decompile`     |
 
-Тестовые расширения (`tests/cfe`): `test_loadExts`, `test_dumpExts`, `test_buildExts`,
+Тестовые расширения: `test_loadExts`, `test_dumpExts`, `test_compileExts`,
 `test_decompileExts` — параметр `extensions` работает так же.
 
 ## Внешние обработки и отчёты

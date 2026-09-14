@@ -9,6 +9,8 @@ description: Операции с платформой 1С в этом проек
 
 Выполняй операции 1С через команды расширения. **Ты должен сам выполнять команду**, а не просить пользователя: при запросе «Запусти Конфигуратор» — вызови `1c-platform-tools.run.designer`, при «Запусти Предприятие» — `1c-platform-tools.run.enterprise` и т.д. по таблице ниже. Используй инструмент выполнения команд редактора (Execute Command / runCommand / выполнить команду VS Code). **Не пиши пользователю «из чата вызвать нельзя» или «нажмите Ctrl+Shift+P»** — выполни команду сам. Только если в твоём наборе инструментов нет выполнения команд — тогда предложи пользователю палитру или панель «1С: Инструменты».
 
+Исходный код конфигурации и расширений расширение находит в проекте само: выгрузку конфигуратора или проекты 1С:EDT. Каталоги в команды не передаются.
+
 ## Информационные базы
 
 | Задача                                | Command ID                                          |
@@ -25,30 +27,30 @@ description: Операции с платформой 1С в этом проек
 
 | Задача                                | Command ID                                             |
 |---------------------------------------|--------------------------------------------------------|
-| Загрузить конфигурацию из src/cf      | `1c-platform-tools.cf.load`          |
+| Загрузить конфигурацию из исходного кода | `1c-platform-tools.cf.load`          |
 | Загрузить только изменения (git diff) | `1c-platform-tools.cf.loadIncrement` |
 | Загрузить из objlist.txt              | `1c-platform-tools.cf.loadByList`  |
 | Загрузить из 1Cv8.cf                  | `1c-platform-tools.cf.loadFile`           |
-| Выгрузить конфигурацию в src/cf       | `1c-platform-tools.cf.dump`            |
-| Выгрузить изменения в src/cf          | `1c-platform-tools.cf.dumpIncrement`   |
+| Выгрузить конфигурацию в исходный код | `1c-platform-tools.cf.dump`            |
+| Выгрузить изменения в исходный код    | `1c-platform-tools.cf.dumpIncrement`   |
 | Выгрузить в 1Cv8.cf                   | `1c-platform-tools.cf.unload`             |
-| Собрать 1Cv8.cf из src/cf             | `1c-platform-tools.cf.compile`                |
-| Разобрать 1Cv8.cf в src/cf            | `1c-platform-tools.cf.decompile`            |
+| Собрать 1Cv8.cf из исходного кода     | `1c-platform-tools.cf.compile`                |
+| Разобрать 1Cv8.cf в исходный код      | `1c-platform-tools.cf.decompile`            |
 
 ## Расширения
 
 | Задача                          | Command ID                                         |
 |---------------------------------|----------------------------------------------------|
-| Загрузить расширение из src/cfe | `1c-platform-tools.cfe.load`         |
+| Загрузить расширение из исходного кода | `1c-platform-tools.cfe.load`         |
 | Загрузить из objlist.txt        | `1c-platform-tools.cfe.loadByList` |
 | Загрузить из *.cfe              | `1c-platform-tools.cfe.loadFile`         |
-| Выгрузить расширение в src/cfe  | `1c-platform-tools.cfe.dump`           |
+| Выгрузить расширение в исходный код | `1c-platform-tools.cfe.dump`           |
 | Выгрузить в *.cfe               | `1c-platform-tools.cfe.unload`           |
-| Собрать *.cfe из src/cfe        | `1c-platform-tools.cfe.compile`               |
-| Разобрать *.cfe в src/cfe       | `1c-platform-tools.cfe.decompile`           |
+| Собрать *.cfe из исходного кода | `1c-platform-tools.cfe.compile`               |
+| Разобрать *.cfe в исходный код  | `1c-platform-tools.cfe.decompile`           |
 
-Тестовые расширения (YAxUnit и расширение с тестами) лежат отдельно, в `tests/cfe`
-(подкаталог корня тестов `path.tests`), и обслуживаются своими командами: `1c-platform-tools.test.loadExtensions`,
+Тестовые расширения (YAxUnit и расширение с тестами) лежат под каталогом тестов (`tests`, имя задаёт
+настройка `test.directoryName`) и обслуживаются своими командами: `1c-platform-tools.test.loadExtensions`,
 `test.dumpExtensions`, `test.compileExtensions`, `test.decompileExtensions`.
 
 ## Внешние обработки и отчёты
