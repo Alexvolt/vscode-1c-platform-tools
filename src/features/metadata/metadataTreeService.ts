@@ -121,12 +121,13 @@ export async function loadProjectMetadataTree(
 	projectRoot: string
 ): Promise<ProjectMetadataTreeDto> {
 	const abs = path.normalize(path.resolve(projectRoot));
-	const runtime = await ensureMdSparrowRuntime(context);
-	const cacheFile = cacheFilePath(context, 'project-metadata-tree', abs);
+	const runtime = await ensureMdSparrowRuntime(context, abs);
+	const params = await projectMetadataTreeParams(abs);
+	const cacheFile = cacheFilePath(context, 'project-metadata-tree', abs, params.cfDir);
 	const salt = async () => [
 		await runtimeSalt(runtime),
 		`поддержка:${supportEnabled()}`,
-		JSON.stringify(await projectMetadataTreeParams(abs)),
+		JSON.stringify(params),
 	];
 	const entry = await readCachedEntry(cacheFile, isProjectMetadataTreeDto);
 	if (entry) {
@@ -182,14 +183,14 @@ export async function projectMetadataTreeParams(projectRootAbs: string): Promise
 
 async function runProjectMetadataTreeWithRepair(context: vscode.ExtensionContext, abs: string) {
 	const initialRes = await runMdSparrowParamsRead(
-		await ensureMdSparrowRuntime(context),
+		await ensureMdSparrowRuntime(context, abs),
 		await projectMetadataTreeParams(abs),
 		{ cwd: abs }
 	);
 	if (initialRes.exitCode !== 0 && shouldRepairJarAndRetry(initialRes.stderr, initialRes.stdout)) {
 		log.warn('ошибка загрузки классов md-sparrow: очищаем кэш JAR и повторяем запуск');
 		await clearMdSparrowJarCache(context);
-		const repairedRuntime = await ensureMdSparrowRuntime(context);
+		const repairedRuntime = await ensureMdSparrowRuntime(context, abs);
 		return runMdSparrowParamsRead(repairedRuntime, await projectMetadataTreeParams(abs), {
 			cwd: abs,
 		});

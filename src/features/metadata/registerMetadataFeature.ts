@@ -1,5 +1,15 @@
 import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
 import { resolveProjectLayout, sameOrUnder } from '../../shared/projectLayout';
+import {
+	currentRoot,
+	onDidChangeCurrentProject,
+	onDidChangeProjects,
+	projectByRoot,
+	projectDisplayName,
+	projectOf,
+	runWithProject,
+} from '../../shared/workspaceProjects';
+import { onDidChangeProjectLayout } from '../../shared/projectLayoutWatch';
 import * as fs from 'node:fs';
 import { createEdtProject, validateEdtProject } from '../edt/edtCommands';
 import { edtProjectName } from '../edt/edtRunner';
@@ -75,6 +85,7 @@ import {
 	MetadataObjectSectionTreeItem,
 	MetadataSourceTreeItem,
 	childNodeSupport,
+	metadataCommandRoot,
 	objectModuleFilePath,
 	objectModuleKindsForType,
 	type MetadataTreeDataProvider,
@@ -147,6 +158,22 @@ export function extensionProjectDir(configurationMdo: string, name: string): str
 	return path.join(path.dirname(projectDir), `${edtProjectName(projectDir)}.${name}`);
 }
 
+const METADATA_TREE_VIEW_ID = '1c-platform-tools-metadata-tree';
+
+type CommandHandler = Parameters<typeof vscode.commands.registerCommand>[1];
+
+/**
+ * Команда над узлом дерева выполняется в проекте дерева, над файлом в проекте файла, выбор проекта не меняется.
+ * Без узла в аргументах команда выполняется в текущем проекте либо в корне вызова.
+ *
+ * @param treeRoot - Корень проекта, который показывает дерево
+ */
+function registerTreeCommand(id: string, handler: CommandHandler, treeRoot: () => string | undefined): vscode.Disposable {
+	return vscode.commands.registerCommand(id, (...args: unknown[]) =>
+		runWithProject(metadataCommandRoot(args, treeRoot(), projectOf), () => handler(...args))
+	);
+}
+
 /**
  * Регистрирует команды и runtime-обработчики фичи «1С: Метаданные».
  */
@@ -160,6 +187,9 @@ export function registerMetadataFeature(
 		metadataFilterProvider,
 		propertyPaletteProvider,
 	} = params;
+
+	const registerMetadataCommand = (id: string, handler: CommandHandler): vscode.Disposable =>
+		registerTreeCommand(id, handler, () => metadataTreeProvider.projectRoot);
 
 	const MD_SPARROW_CLI_ERR_PREVIEW = 500;
 	const artifactCommands = new ArtifactCommands();
@@ -184,13 +214,21 @@ export function registerMetadataFeature(
 		if (!metadataTreeProvider.getCachedTree()) {
 			await metadataTreeProvider.refresh();
 		}
-		const leaf = await metadataTreeProvider.findNodeForFile(uri.fsPath);
-		if (!leaf) {
+		const location = await metadataTreeProvider.locateFile(uri.fsPath, projectOf(uri));
+		if (location && 'otherProject' in location) {
+			const project = projectByRoot(location.otherProject);
+			void vscode.window.showInformationMessage(
+				`Файл относится к проекту ${project ? projectDisplayName(project) : location.otherProject}, а дерево метаданных показывает текущий проект.`
+			);
+			return;
+		}
+		if (!location) {
 			void vscode.window.showInformationMessage(
 				`Объект метаданных для файла не найден: ${path.basename(uri.fsPath)}`
 			);
 			return;
 		}
+		const leaf = location.node;
 		if (metadataTreeProvider.isHiddenByFilter(leaf)) {
 			const reset = 'Сбросить отбор';
 			const answer = await vscode.window.showWarningMessage(
@@ -284,7 +322,7 @@ export function registerMetadataFeature(
 
 	/** Каталоги расширений выгрузки конфигуратора из раскладки. */
 	async function listExtensionRoots(): Promise<string[]> {
-		const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const root = currentRoot();
 		if (!root) {
 			return [];
 		}
@@ -307,11 +345,11 @@ export function registerMetadataFeature(
 	 * определить схему XSD».
 	 */
 	async function mainSchemaFlag(): Promise<string | undefined> {
-		const cached = metadataTreeProvider.getCachedTree()?.mainSchemaVersionFlag;
+		const workspaceRoot = currentRoot();
+		const cached = metadataTreeProvider.cachedTreeOf(workspaceRoot)?.mainSchemaVersionFlag;
 		if (cached !== undefined) {
 			return cached;
 		}
-		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 		if (!workspaceRoot) {
 			return undefined;
 		}
@@ -796,7 +834,7 @@ export function registerMetadataFeature(
 		objectXmlPath: string,
 		objectType: 'ExternalReport' | 'ExternalDataProcessor'
 	): Promise<void> {
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? path.dirname(objectXmlPath);
+		const cwd = currentRoot() ?? path.dirname(objectXmlPath);
 		const schemaFlag = await mainSchemaFlag();
 		if (schemaFlag === undefined) {
 			void vscode.window.showWarningMessage('Не удалось определить схему для чтения свойств.');
@@ -812,7 +850,7 @@ export function registerMetadataFeature(
 	}
 
 	async function addExternalArtifact(sourceKind: 'externalErf' | 'externalEpf'): Promise<void> {
-		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const workspaceRoot = currentRoot();
 		if (!workspaceRoot) {
 			void vscode.window.showInformationMessage('Откройте папку проекта.');
 			return;
@@ -1287,7 +1325,7 @@ export function registerMetadataFeature(
 	}
 
 	function resolveErWorkspaceRoot(): string | undefined {
-		return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		return currentRoot();
 	}
 
 	function erObjectKey(objectType: string, name: string): string {
@@ -1311,7 +1349,7 @@ export function registerMetadataFeature(
 	}
 
 	const metadataDisposables: vscode.Disposable[] = [
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.er.openForObject',
 			async (item?: MetadataLeafTreeItem) => {
 			const node = resolveSelectedMetadataLeaf(item);
@@ -1342,7 +1380,7 @@ export function registerMetadataFeature(
 				}
 			}
 		),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.er.openCanvas', async () => {
+		registerMetadataCommand('1c-platform-tools.metadata.er.openCanvas', async () => {
 			const workspaceRoot = resolveErWorkspaceRoot();
 			if (!workspaceRoot) {
 				void vscode.window.showInformationMessage('Откройте папку проекта.');
@@ -1364,19 +1402,19 @@ export function registerMetadataFeature(
 				void vscode.window.showErrorMessage(message.slice(0, MD_SPARROW_CLI_ERR_PREVIEW));
 			}
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.refresh', () => {
+		registerMetadataCommand('1c-platform-tools.metadata.refresh', () => {
 			void metadataTreeProvider.refresh();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.revealInTree', async (uri?: vscode.Uri) => {
+		registerMetadataCommand('1c-platform-tools.metadata.revealInTree', async (uri?: vscode.Uri) => {
 			await revealMetadataObjectInTree(uri ?? vscode.window.activeTextEditor?.document.uri);
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.filters.reset', () => {
+		registerMetadataCommand('1c-platform-tools.metadata.filters.reset', () => {
 			metadataFilterProvider.clear();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.filters.collapseAll', () => {
+		registerMetadataCommand('1c-platform-tools.metadata.filters.collapseAll', () => {
 			metadataFilterProvider.collapseAll();
 		}),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.addObject',
 			async (...commandArgs: unknown[]) => {
 				const sourceKind = parseExternalArtifactSourceKindFromArgs(commandArgs);
@@ -1452,7 +1490,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.renameObject',
 			async (item?: MetadataLeafTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1483,7 +1521,7 @@ export function registerMetadataFeature(
 						if (!nextName) {
 							return;
 						}
-						const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+						const workspaceRoot = currentRoot();
 						const cwd = workspaceRoot ?? path.dirname(node.resourceUri.fsPath);
 						const schema = await mdSparrowSchemaFlagFromConfigurationXml(node.resourceUri.fsPath);
 						const runtime = await ensureMdSparrowRuntime(context);
@@ -1566,7 +1604,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.deleteObject',
 			async (item?: MetadataLeafTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1587,7 +1625,7 @@ export function registerMetadataFeature(
 						if (answer !== 'Удалить') {
 							return;
 						}
-						const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+						const workspaceRoot = currentRoot();
 						const cwd = workspaceRoot ?? path.dirname(node.resourceUri.fsPath);
 						const runtime = await ensureMdSparrowRuntime(context);
 						const res = await runMdSparrowParamsMutation(
@@ -1651,7 +1689,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.duplicateObject',
 			async (item?: MetadataLeafTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1678,7 +1716,7 @@ export function registerMetadataFeature(
 						if (!nextName) {
 							return;
 						}
-						const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+						const workspaceRoot = currentRoot();
 						const cwd = workspaceRoot ?? path.dirname(node.resourceUri.fsPath);
 						const schema = await mdSparrowSchemaFlagFromConfigurationXml(node.resourceUri.fsPath);
 						const runtime = await ensureMdSparrowRuntime(context);
@@ -1755,7 +1793,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.addChildNode',
 			async (item?: MetadataObjectNodeTreeItem | MetadataObjectSectionTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1832,7 +1870,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.renameChildNode',
 			async (item?: MetadataObjectNodeTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1853,7 +1891,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.deleteChildNode',
 			async (item?: MetadataObjectNodeTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1875,7 +1913,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.setChildNodeType',
 			async (item?: MetadataObjectNodeTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1887,7 +1925,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.duplicateChildNode',
 			async (item?: MetadataObjectNodeTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -1908,7 +1946,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.filterBySubsystem',
 			async (item?: MetadataLeafTreeItem) => {
 				const node = resolveSelectedMetadataLeaf(item);
@@ -1935,7 +1973,7 @@ export function registerMetadataFeature(
 				void vscode.window.showInformationMessage(`Фильтр подсистемы: ${node.name}`);
 			}
 		),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.clearSubsystemFilter', async () => {
+		registerMetadataCommand('1c-platform-tools.metadata.clearSubsystemFilter', async () => {
 			metadataTreeProvider.clearSubsystemFilter();
 			void vscode.commands.executeCommand(
 				'setContext',
@@ -1944,7 +1982,7 @@ export function registerMetadataFeature(
 			);
 			void vscode.window.showInformationMessage('Фильтр подсистемы сброшен.');
 		}),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.copyObjectName',
 			async (item?: MetadataLeafTreeItem) => {
 				const node = resolveSelectedMetadataLeaf(item);
@@ -1955,7 +1993,7 @@ export function registerMetadataFeature(
 				await vscode.env.clipboard.writeText(node.name);
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.copyObjectPath',
 			async (item?: MetadataLeafTreeItem) => {
 				const node = resolveSelectedMetadataLeaf(item);
@@ -1966,7 +2004,7 @@ export function registerMetadataFeature(
 				await vscode.env.clipboard.writeText(node.resourceUri.fsPath);
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openExternalConnectionModule',
 			async (item?: MetadataSourceTreeItem) => {
 				const source = resolveSelectedMetadataSource(item);
@@ -1982,7 +2020,7 @@ export function registerMetadataFeature(
 				await openTextFile(modulePath);
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openApplicationModule',
 			async (item?: MetadataSourceTreeItem) => {
 				const source = resolveSelectedMetadataSource(item);
@@ -2000,7 +2038,7 @@ export function registerMetadataFeature(
 				await openTextFile(modulePath);
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openSessionModule',
 			async (item?: MetadataSourceTreeItem) => {
 				const source = resolveSelectedMetadataSource(item);
@@ -2016,35 +2054,35 @@ export function registerMetadataFeature(
 				await openTextFile(modulePath);
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openObjectModule',
 			(item?: MetadataLeafTreeItem) => openObjectModuleOfKind(item, 'object')
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openRecordSetModule',
 			(item?: MetadataLeafTreeItem) => openObjectModuleOfKind(item, 'recordset')
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openManagerModule',
 			(item?: MetadataLeafTreeItem) => openObjectModuleOfKind(item, 'manager')
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openValueManagerModule',
 			(item?: MetadataLeafTreeItem) => openObjectModuleOfKind(item, 'valueManager')
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openModule',
 			(item?: MetadataLeafTreeItem) => openObjectModuleOfKind(item, 'module')
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openFormModule',
 			(item?: MetadataLeafTreeItem | MetadataObjectNodeTreeItem) => openFormModuleFromTree(item)
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.open',
 			(item?: MetadataLeafTreeItem) => openMetadataLeaf(item)
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openForm',
 			async (item?: MetadataObjectNodeTreeItem | MetadataLeafTreeItem) => {
 				const node = item ?? metadataTreeView.selection[0];
@@ -2086,7 +2124,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openProperties',
 			async (item?: vscode.TreeItem) => {
 				const selected = item ?? metadataTreeView.selection[0];
@@ -2212,7 +2250,7 @@ export function registerMetadataFeature(
 				await openObjectPropertiesTab(node);
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openFormContentXml',
 			async (item?: MetadataObjectNodeTreeItem | MetadataLeafTreeItem) => {
 				const selected = item ?? metadataTreeView.selection[0];
@@ -2236,7 +2274,7 @@ export function registerMetadataFeature(
 				await openTextFile(formContentFileOf(owner.resourceUri.fsPath, selected.name));
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openSourceXml',
 			async (item?: MetadataSourceTreeItem | MetadataLeafTreeItem) => {
 				const source = resolveSelectedMetadataSource(
@@ -2274,7 +2312,7 @@ export function registerMetadataFeature(
 				void vscode.window.showInformationMessage('XML для выбранного узла не найден.');
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.epf.addBspRegistration',
 			async (item?: MetadataLeafTreeItem) => {
 				const node = resolveSelectedMetadataLeaf(item instanceof MetadataLeafTreeItem ? item : undefined);
@@ -2320,7 +2358,7 @@ export function registerMetadataFeature(
 				notifyQuiet('Регистрация БСП добавлена');
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.cfe.borrowObject',
 			async (item?: MetadataLeafTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -2329,7 +2367,7 @@ export function registerMetadataFeature(
 						void vscode.window.showInformationMessage('Выберите объект конфигурации.');
 						return;
 					}
-					const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+					const root = currentRoot();
 					if (!root) {
 						return;
 					}
@@ -2382,7 +2420,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openCommandInterface',
 			async (item?: MetadataLeafTreeItem) => {
 				const node = resolveSelectedMetadataLeaf(item instanceof MetadataLeafTreeItem ? item : undefined);
@@ -2393,7 +2431,7 @@ export function registerMetadataFeature(
 				await openObjectPropertiesTab(node, 'commandInterface');
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.openDcs',
 			async (item?: vscode.TreeItem) => {
 				let templateXml: string | undefined;
@@ -2462,7 +2500,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.supportRemove',
 			async (item?: MetadataSourceTreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -2500,7 +2538,7 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.supportSetObjectMode',
 			async (item?: vscode.TreeItem) => {
 				await runMdSparrowMutation(async () => {
@@ -2572,9 +2610,9 @@ export function registerMetadataFeature(
 				});
 			}
 		),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.initEmptyCfe', async () => {
+		registerMetadataCommand('1c-platform-tools.metadata.initEmptyCfe', async () => {
 			await runMdSparrowMutation(async () => {
-				const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+				const root = currentRoot();
 				if (!root) {
 					void vscode.window.showInformationMessage('Нет открытой папки проекта.');
 					return;
@@ -2663,7 +2701,7 @@ export function registerMetadataFeature(
 				}
 			});
 		}),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.compile',
 			async (item?: vscode.TreeItem) => {
 				const node = item ?? metadataTreeView.selection[0];
@@ -2672,7 +2710,7 @@ export function registerMetadataFeature(
 					node instanceof MetadataSourceTreeItem &&
 					(node.sourceKind === 'externalErf' || node.sourceKind === 'externalEpf')
 				) {
-					const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+					const root = currentRoot();
 					if (!root) {
 						return;
 					}
@@ -2706,7 +2744,7 @@ export function registerMetadataFeature(
 				await compileMetadataTarget(artifactCommands, target.kind, target.sourceUri);
 			}
 		),
-		vscode.commands.registerCommand(
+		registerMetadataCommand(
 			'1c-platform-tools.metadata.validateDump',
 			async (item?: MetadataSourceTreeItem) => {
 				const source = resolveSelectedMetadataSource(item);
@@ -2768,7 +2806,7 @@ export function registerMetadataFeature(
 				}
 			}
 		),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.initEmptyCf', async () => {
+		registerMetadataCommand('1c-platform-tools.metadata.initEmptyCf', async () => {
 			// Формат спрашивается первым: у проекта EDT свой путь создания и свой каталог
 			const format = await vscode.window.showQuickPick(
 				[
@@ -2789,7 +2827,7 @@ export function registerMetadataFeature(
 				return;
 			}
 			await runMdSparrowMutation(async () => {
-				const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+				const workspaceRoot = currentRoot();
 				const main = metadataTreeProvider.configurationXml;
 				// Рядом с проектом EDT выгрузка встаёт в привычное место: его src выгрузкой не является
 				const cfRoot =
@@ -2844,18 +2882,18 @@ export function registerMetadataFeature(
 				}
 			});
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.metadata.getProjectTree', async () => {
-			const cached = metadataTreeProvider.getCachedTree();
+		registerMetadataCommand('1c-platform-tools.metadata.getProjectTree', async () => {
+			const root = currentRoot();
+			const cached = metadataTreeProvider.cachedTreeOf(root);
 			if (cached) {
 				return cached;
 			}
-			const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 			if (!root) {
 				return undefined;
 			}
 			return loadProjectMetadataTree(context, root);
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.components.update', uiOnlyHandler(
+		registerMetadataCommand('1c-platform-tools.components.update', uiOnlyHandler(
 			'Список компонентов выбирает человек галочками. Загрузка идёт при обычном использовании компонента.',
 			async () => {
 			const states = await readComponentStates(context);
@@ -2904,10 +2942,26 @@ export function registerMetadataFeature(
 			}
 		})),
 		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (e.affectsConfiguration('1c-platform-tools.metadata')) {
+			const runtime = [
+				'1c-platform-tools.metadata',
+				'1c-platform-tools.components.path.metadataJar',
+				'1c-platform-tools.components.autoload.metadataJar',
+				'1c-platform-tools.components.path.java',
+				'1c-platform-tools.components.autoload.java',
+			];
+			if (runtime.some((section) => e.affectsConfiguration(section))) {
 				void metadataTreeProvider.refresh();
 			}
 		}),
+		// Дерево показывает состав текущего проекта
+		onDidChangeCurrentProject(() => {
+			const refreshing = metadataTreeProvider.refreshForCurrentProject();
+			metadataFilterProvider.resetForProject();
+			void vscode.window.withProgress({ location: { viewId: METADATA_TREE_VIEW_ID } }, () => refreshing);
+		}),
+		onDidChangeProjectLayout(() => void metadataTreeProvider.syncWithProjectLayout()),
+		// Выделение подпроекта меняет раскладку родителя без события раскладки
+		onDidChangeProjects(() => void metadataTreeProvider.syncWithProjectLayout()),
 	];
 
 	return [...metadataDisposables, ...paletteSource];

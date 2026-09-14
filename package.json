@@ -31,6 +31,8 @@
         "1c-platform-tools.test.path.onebdd",
         "1c-platform-tools.server.path.platform",
         "1c-platform-tools.clusters.path.platform",
+        "1c-platform-tools.edt.path",
+        "1c-platform-tools.edt.vmargs",
         "1c-platform-tools.docker.enabled",
         "1c-platform-tools.docker.image"
       ]
@@ -67,10 +69,12 @@
   ],
   "activationEvents": [
     "workspaceContains:packagedef",
+    "workspaceContains:**/packagedef",
     "onCommand:1c-platform-tools.dependencies.initializePackagedef",
     "onCommand:1c-platform-tools.projects.create",
     "onView:1c-platform-tools-admin-clusters",
     "onView:1c-platform-tools-admin-infobases",
+    "onView:1c-platform-tools-projects-workspace",
     "onView:1c-platform-tools-projects-favorites",
     "onView:1c-platform-tools-projects-all",
     "onView:1c-platform-tools-projects-help",
@@ -109,6 +113,10 @@
               "type": "string"
             },
             "description": "Дополнительные аргументы команды vrunner"
+          },
+          "project": {
+            "type": "string",
+            "description": "Корень проекта: абсолютный путь или путь от папки рабочей области задачи"
           }
         }
       },
@@ -121,6 +129,10 @@
           "pipeline": {
             "type": "string",
             "description": "Идентификатор или название цепочки из .1cpt/pipelines.json"
+          },
+          "project": {
+            "type": "string",
+            "description": "Корень проекта: абсолютный путь или путь от папки рабочей области задачи"
           }
         }
       }
@@ -185,6 +197,11 @@
         }
       ],
       "1c-platform-tools-projects": [
+        {
+          "id": "1c-platform-tools-projects-workspace",
+          "name": "Рабочая область",
+          "contextualTitle": "Проекты рабочей области"
+        },
         {
           "id": "1c-platform-tools-projects-favorites",
           "name": "Избранное",
@@ -1605,10 +1622,62 @@
         "icon": "$(tools)"
       },
       {
-        "command": "1c-platform-tools.project.selectConfiguration",
-        "title": "Выбрать конфигурацию проекта",
+        "command": "1c-platform-tools.project.select",
+        "title": "Выбрать проект",
         "category": "1С: Проект",
-        "icon": "$(symbol-namespace)"
+        "icon": "$(repo)"
+      },
+      {
+        "command": "1c-platform-tools.project.list",
+        "title": "Список проектов",
+        "category": "1С: Проект"
+      },
+      {
+        "command": "1c-platform-tools.project.makeCurrent",
+        "title": "Сделать текущим",
+        "category": "1С: Проект",
+        "icon": "$(target)"
+      },
+      {
+        "command": "1c-platform-tools.project.initialize",
+        "title": "Инициализировать проект",
+        "category": "1С: Проект",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "1c-platform-tools.project.separateConfiguration",
+        "title": "Сделать отдельным проектом",
+        "category": "1С: Проект",
+        "icon": "$(repo-forked)"
+      },
+      {
+        "command": "1c-platform-tools.project.openInNewWindow",
+        "title": "Открыть в новом окне",
+        "category": "1С: Проект",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "1c-platform-tools.project.revealInExplorer",
+        "title": "Показать в проводнике",
+        "category": "1С: Проект"
+      },
+      {
+        "command": "1c-platform-tools.project.openTerminal",
+        "title": "Открыть терминал в проекте",
+        "category": "1С: Проект",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "1c-platform-tools.project.copyPath",
+        "title": "Копировать путь",
+        "category": "1С: Проект",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "1c-platform-tools.project.refresh",
+        "title": "Обновить",
+        "category": "1С: Проект",
+        "icon": "$(refresh)"
       },
       {
         "command": "1c-platform-tools.env.selectProfile",
@@ -2163,6 +2232,16 @@
         "when": "1c-platform-tools.is1CProject == true"
       },
       {
+        "view": "1c-platform-tools-projects-workspace",
+        "contents": "В рабочей области нет проекта 1С: ни в одной папке нет файла packagedef.\n[Инициализировать проект](command:1c-platform-tools.project.initialize)\n[Открыть проект из списка](command:1c-platform-tools.projects.listOpen)",
+        "when": "workspaceFolderCount != 0 && 1c-platform-tools.project.detecting == false && !1c-platform-tools.is1CProject && !1c-platform-tools.project.hasCandidates"
+      },
+      {
+        "view": "1c-platform-tools-projects-workspace",
+        "contents": "Откройте папку проекта 1С или создайте новый проект.\n[Открыть папку](command:vscode.openFolder)\n[Создать проект 1С](command:1c-platform-tools.projects.create)\n[Открыть проект из списка](command:1c-platform-tools.projects.listOpen)",
+        "when": "workspaceFolderCount == 0"
+      },
+      {
         "view": "1c-platform-tools-projects-favorites",
         "contents": "Нет избранных проектов.\n[Открыть папку](command:vscode.openFolder)\n[Настройка](command:1c-platform-tools.projects.openSettings)"
       },
@@ -2636,6 +2715,34 @@
         {
           "command": "1c-platform-tools.metadata.supportRemove",
           "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.project.list",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.project.makeCurrent",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.project.separateConfiguration",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.project.openInNewWindow",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.project.revealInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.project.openTerminal",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.project.copyPath",
+          "when": "false"
         }
       ],
       "debug/toolBar": [
@@ -2889,6 +2996,21 @@
           "command": "1c-platform-tools.metadata.openSettings",
           "when": "view == 1c-platform-tools-metadata-tree",
           "group": "navigation@20"
+        },
+        {
+          "command": "1c-platform-tools.project.refresh",
+          "when": "view == 1c-platform-tools-projects-workspace",
+          "group": "navigation@30"
+        },
+        {
+          "command": "1c-platform-tools.project.select",
+          "when": "view == 1c-platform-tools-tools-commands && 1c-platform-tools.project.multiple",
+          "group": "navigation@19"
+        },
+        {
+          "command": "1c-platform-tools.project.select",
+          "when": "view == 1c-platform-tools-metadata-tree && 1c-platform-tools.project.multiple",
+          "group": "navigation@19"
         }
       ],
       "view/item/context": [
@@ -3016,6 +3138,56 @@
           "command": "1c-platform-tools.metadata.validateDump",
           "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataSourceConfigLike( |$)/",
           "group": "9_check@1"
+        },
+        {
+          "command": "1c-platform-tools.project.makeCurrent",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem == workspaceProject",
+          "group": "inline"
+        },
+        {
+          "command": "1c-platform-tools.project.separateConfiguration",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem == workspaceExtraConfiguration",
+          "group": "inline"
+        },
+        {
+          "command": "1c-platform-tools.project.initialize",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem == workspaceCandidate",
+          "group": "inline"
+        },
+        {
+          "command": "1c-platform-tools.project.makeCurrent",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem == workspaceProject",
+          "group": "0_current@1"
+        },
+        {
+          "command": "1c-platform-tools.project.openInNewWindow",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem =~ /^workspaceProject(Current)?$/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "1c-platform-tools.project.revealInExplorer",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem =~ /^workspaceProject(Current)?$/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "1c-platform-tools.project.openTerminal",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem =~ /^workspaceProject(Current)?$/",
+          "group": "1_open@3"
+        },
+        {
+          "command": "1c-platform-tools.project.copyPath",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem =~ /^workspaceProject(Current)?$/",
+          "group": "2_copy@1"
+        },
+        {
+          "command": "1c-platform-tools.project.separateConfiguration",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem == workspaceExtraConfiguration",
+          "group": "0_project@1"
+        },
+        {
+          "command": "1c-platform-tools.project.initialize",
+          "when": "view == 1c-platform-tools-projects-workspace && viewItem == workspaceCandidate",
+          "group": "0_project@1"
         },
         {
           "command": "1c-platform-tools.projects.openInNewWindow",
@@ -3791,7 +3963,7 @@
           {
             "id": "step16-edt",
             "title": "Проект 1С:EDT",
-            "description": "Проект 1С:EDT расширение находит само и работает с ним теми же панелями и командами; для команд над исходным кодом нужна установленная EDT.\n\n[Открыть панель «1С: Инструменты»](command:workbench.view.extension.1c-platform-tools-tools)\n[Выбрать конфигурацию проекта](command:1c-platform-tools.project.selectConfiguration)",
+            "description": "Проект 1С:EDT расширение находит само и работает с ним теми же панелями и командами; для команд над исходным кодом нужна установленная EDT.\n\n[Открыть панель «1С: Инструменты»](command:workbench.view.extension.1c-platform-tools-tools)",
             "media": {
               "markdown": "walkthrough/step16-edt.md"
             }
@@ -3808,6 +3980,7 @@
           "1c-platform-tools.vrunner.path.executable": {
             "type": "string",
             "default": "vrunner",
+            "scope": "resource",
             "description": "Путь к vrunner (vanessa-runner)"
           },
           "1c-platform-tools.execution.useTasks": {
@@ -3838,21 +4011,25 @@
           "1c-platform-tools.vrunner.path.initSettings": {
             "type": "string",
             "default": "tools/vrunner.init.json",
+            "scope": "resource",
             "description": "Путь к файлу настроек инициализации vrunner (vrunner.init.json)"
           },
           "1c-platform-tools.env.defaultProfile": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Идентификатор env-профиля по умолчанию (имя X из env.X.json; пусто: базовый env.json). Активный профиль выбирается локально и не коммитится, переопределяя это значение. Подставляется во все команды vrunner через --settings."
           },
           "1c-platform-tools.path.out": {
             "type": "string",
             "default": "build/out",
+            "scope": "resource",
             "description": "Путь к результатам сборки"
           },
           "1c-platform-tools.path.dist": {
             "type": "string",
             "default": "build/dist",
+            "scope": "resource",
             "description": "Каталог хранения шаблонов (cf, cfu, файлы настроек объединения). Используется в группе «Поддержка» при выборе файлов."
           },
           "1c-platform-tools.cfe.selected": {
@@ -3861,7 +4038,8 @@
               "type": "string"
             },
             "default": [],
-            "markdownDescription": "Список расширений, с которыми работают команды группы «Расширения» и установка версии расширений. Расширение называют именем его каталога, путём к каталогу относительно рабочей области или именем из метаданных, регистр не важен. Заданный список команды используют без интерактивного выбора. Если он пуст, при запуске команды показывается окно выбора с чекбоксами, а выбор запоминается для проекта."
+            "scope": "resource",
+            "markdownDescription": "Список расширений, с которыми работают команды группы «Расширения» и установка версии расширений. Расширение называют именем его каталога, путём к каталогу от корня проекта или именем из метаданных, регистр не важен. Заданный список команды используют без интерактивного выбора. Если он пуст, при запуске команды показывается окно выбора с чекбоксами, а выбор запоминается для проекта."
           },
           "1c-platform-tools.cf.load.updateDb": {
             "type": "string",
@@ -3906,6 +4084,7 @@
               "**/*.md",
               "**/*.feature"
             ],
+            "scope": "resource",
             "description": "Glob-паттерны для поиска файлов при сканировании списка TODO."
           },
           "1c-platform-tools.todo.exclude": {
@@ -3920,6 +4099,7 @@
               "vendor",
               "build"
             ],
+            "scope": "resource",
             "description": "Сегменты пути для исключения при сканировании (например: oscript_modules, node_modules)."
           },
           "1c-platform-tools.todo.tags": {
@@ -3934,6 +4114,7 @@
               "HACK",
               "BUG"
             ],
+            "scope": "resource",
             "description": "Теги для поиска в комментариях (регистр не учитывается)."
           }
         }
@@ -3952,6 +4133,7 @@
               ".git",
               "oscript_modules"
             ],
+            "scope": "resource",
             "description": "Сегменты пути, которые пропускают и панель артефактов, и поиск каталогов исходного кода. Например: .git, oscript_modules."
           }
         }
@@ -3961,6 +4143,12 @@
         "id": "1c-platform-tools.projects",
         "order": 3,
         "properties": {
+          "1c-platform-tools.project.default": {
+            "type": "string",
+            "default": "",
+            "scope": "window",
+            "markdownDescription": "Проект, который считается текущим, пока другой не выбран явно: абсолютный путь, путь относительно первой папки рабочей области или имя папки рабочей области. Пусто: первый проект по порядку папок."
+          },
           "1c-platform-tools.projects.path.baseFolders": {
             "type": "array",
             "items": {
@@ -4134,56 +4322,67 @@
           "1c-platform-tools.components.autoload.adapter": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Загружать отладчик с GitHub Releases и обновлять его автоматически. Выключите, если путь задан в components.path.adapter."
           },
           "1c-platform-tools.components.path.adapter": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Отладчик: полный путь к своей сборке адаптера, исполняемый файл OnecDebugAdapter или OnecDebugAdapter.dll (запускается через dotnet). Пусто: используется загруженный с GitHub."
           },
           "1c-platform-tools.components.autoload.metadataJar": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Загружать дерево метаданных (md-sparrow) с GitHub Releases и обновлять его автоматически. Выключите, если путь задан в components.path.metadataJar."
           },
           "1c-platform-tools.components.path.metadataJar": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Дерево метаданных: полный путь к своей сборке md-sparrow-*-all.jar. Пусто: используется загруженная с GitHub."
           },
           "1c-platform-tools.components.autoload.java": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Скачивать portable JRE 21 для дерева метаданных. Выключите, если путь задан в components.path.java или java доступна в PATH."
           },
           "1c-platform-tools.components.path.java": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Java: полный путь к java или javaw для дерева метаданных. Пусто: portable JRE из кэша либо java из PATH."
           },
           "1c-platform-tools.components.autoload.ovm": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Загружать OVM с GitHub Releases и обновлять его автоматически. Выключите, если путь задан в components.path.ovm."
           },
           "1c-platform-tools.components.path.ovm": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "OVM: полный путь к своему ovm.exe. Пусто: используется загруженный с GitHub."
           },
           "1c-platform-tools.components.autoload.allure": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Загружать Allure с GitHub Releases и обновлять его автоматически. Выключите, если путь задан в components.path.allure или allure доступен в PATH."
           },
           "1c-platform-tools.components.path.allure": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Allure: полный путь к запускаемому файлу (bin/allure.bat или bin/allure). Пусто: используется загруженный с GitHub либо allure из PATH."
           },
           "1c-platform-tools.components.path.oscript": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "OneScript: полный путь к oscript.exe. Пусто: сначала берётся установка OVM, затем oscript из PATH. Задайте явно, если установок несколько и нужна конкретная."
           }
         }
@@ -4196,16 +4395,19 @@
           "1c-platform-tools.test.panelEnabled": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Интеграция тестов 1С с панелью тестирования VS Code (Test Explorer): дерево тестов, кнопки запуска в редакторе, статусы и переход к месту падения."
           },
           "1c-platform-tools.test.path.features": {
             "type": "string",
             "default": "features",
+            "scope": "resource",
             "description": "Каталог feature-файлов Vanessa Automation (относительно корня проекта)."
           },
           "1c-platform-tools.test.directoryName": {
             "type": "string",
             "default": "tests",
+            "scope": "resource",
             "pattern": "^[^\\\\/]*$",
             "patternErrorMessage": "Имя одного каталога, без слэшей.",
             "markdownDescription": "Имя каталога тестов. Всё, что лежит под каталогом с этим именем, считается тестовым: расширения, обработки и отчёты оттуда идут командами тестового окружения. Регистр не важен. Пусто: `tests`."
@@ -4213,6 +4415,7 @@
           "1c-platform-tools.test.path.onescriptTests": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "markdownDescription": "Каталог тестов OneScript (1testrunner/OneUnit) относительно корня проекта: у скриптовых тестов маркеров нет, поэтому каталог задаётся настройкой. Пусто: каталог тестов из `#1c-platform-tools.test.directoryName#`."
           },
           "1c-platform-tools.test.cfe.selected": {
@@ -4221,7 +4424,8 @@
               "type": "string"
             },
             "default": [],
-            "markdownDescription": "Список тестовых расширений, с которыми работают команды тестовых расширений. Расширение называют именем его каталога, путём к каталогу относительно рабочей области или именем из метаданных, регистр не важен. Заданный список команды используют без интерактивного выбора. Если он пуст, при запуске команды показывается окно выбора с чекбоксами, а выбор запоминается для проекта. Расширения решения перечисляет `#1c-platform-tools.cfe.selected#`."
+            "scope": "resource",
+            "markdownDescription": "Список тестовых расширений, с которыми работают команды тестовых расширений. Расширение называют именем его каталога, путём к каталогу от корня проекта или именем из метаданных, регистр не важен. Заданный список команды используют без интерактивного выбора. Если он пуст, при запуске команды показывается окно выбора с чекбоксами, а выбор запоминается для проекта. Расширения решения перечисляет `#1c-platform-tools.cfe.selected#`."
           },
           "1c-platform-tools.test.exclude": {
             "type": "array",
@@ -4232,41 +4436,49 @@
               "oscript_modules",
               "build"
             ],
+            "scope": "resource",
             "description": "Сегменты пути, исключаемые при поиске тестов в панели тестирования (например: oscript_modules, build, vendor). build исключён, чтобы не находить собранные обработки и отчёты прогонов."
           },
           "1c-platform-tools.test.path.reports": {
             "type": "string",
             "default": "build/out/testapi",
+            "scope": "resource",
             "description": "Каталог временных файлов прогонов из панели тестирования (относительно корня проекта; должен быть внутри workspace для работы в Docker). Используется, только если пути отчётов не настроены в env.json/tools проекта."
           },
           "1c-platform-tools.test.path.yaxunitConfig": {
             "type": "string",
             "default": "tools/yaxunit.json",
+            "scope": "resource",
             "description": "Базовый конфиг YAxUnit (RunUnitTests), если секция yaxunit активного профиля не задаёт свой. Панель тестирования накладывает на него фильтр по выбранному модулю или тесту и берёт из него reportPath."
           },
           "1c-platform-tools.test.frameworks.vanessa": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Показывать в панели тестирования сценарии Vanessa Automation (.feature)."
           },
           "1c-platform-tools.test.frameworks.xunit": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Показывать в панели тестирования тестовые обработки xUnit/Vanessa-ADD (исходники в каталоге тестов; перед прогоном собираются в .epf). Активен только при наличии исходного кода конфигурации: тесты выполняются в информационной базе."
           },
           "1c-platform-tools.test.frameworks.yaxunit": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Показывать в панели тестирования тесты YAxUnit (общие модули тестового расширения в каталоге расширений)."
           },
           "1c-platform-tools.test.frameworks.onescript": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Показывать в панели тестирования тесты OneScript (*.os в каталоге тестов): классический стиль (ИсполняемыеСценарии) и аннотации &Тест."
           },
           "1c-platform-tools.test.frameworks.onebdd": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Показывать в панели тестирования BDD-сценарии 1bdd (.feature в OneScript-проектах). Активен только в проектах без исходников конфигурации: в проектах 1С фичи относятся к Vanessa Automation."
           },
           "1c-platform-tools.test.onescriptRunner": {
@@ -4277,16 +4489,19 @@
               "oneunit"
             ],
             "default": "auto",
+            "scope": "resource",
             "description": "Раннер тестов OneScript. auto выбирает OneUnit при наличии в oscript_modules/bin, иначе 1testrunner. Оба пишут jUnit-отчёт: 1testrunner через xddReportPath, OneUnit через --junit."
           },
           "1c-platform-tools.test.path.onescriptRunner": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Путь к раннеру тестов OneScript (1testrunner/oneunit). Поддерживаются относительные пути от корня проекта (например ./oscript_modules/bin/oneunit.bat). Пусто: локальная установка oscript_modules/bin, затем PATH."
           },
           "1c-platform-tools.test.path.onebdd": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Путь к раннеру 1bdd. Поддерживаются относительные пути от корня проекта. Пусто: локальная установка oscript_modules/bin, затем PATH."
           }
         }
@@ -4298,31 +4513,37 @@
           "1c-platform-tools.server.path.platform": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Каталог установки платформы 1С для поиска ibsrv (автономный сервер). Пусто: определяется автоматически (%PROGRAMFILES%\\1cv8 в Windows, /opt/1cv8/x86_64 и /opt/1C/v8.3/x86_64 в Linux). Бинарь ищется в bin/, напрямую в каталоге версии и в самой базе."
           },
           "1c-platform-tools.server.platformVersion": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Версия платформы для автономного сервера (например 8.3.27.1936 или префикс 8.3.27). Пусто: берётся наибольшая установленная."
           },
           "1c-platform-tools.server.host": {
             "type": "string",
             "default": "localhost",
+            "scope": "resource",
             "description": "Сетевой интерфейс автономного сервера (localhost, any или IP)."
           },
           "1c-platform-tools.server.port": {
             "type": "number",
             "default": 8314,
+            "scope": "resource",
             "description": "HTTP-порт автономного сервера. Стабильный порт делает сервер совместимым с подключением vanessa-runner 3 через --ibsrv-attach --ibsrv-port."
           },
           "1c-platform-tools.server.httpBase": {
             "type": "string",
             "default": "ib",
+            "scope": "resource",
             "description": "Базовый путь публикации информационной базы. Например ib даёт http://localhost:8314/ib/. Пусто или / означает корень сайта."
           },
           "1c-platform-tools.server.directRegPort": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "pattern": "^$|^[0-9]{1,5}$",
             "patternErrorMessage": "Укажите номер порта или оставьте пусто.",
             "description": "Порт регистрации прямого соединения (--direct-regport). Пусто: умолчание платформы 1541. Задайте свой, если порт занят установленным сервером 1С."
@@ -4330,6 +4551,7 @@
           "1c-platform-tools.server.directRange": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "pattern": "^$|^[0-9]{1,5}:[0-9]{1,5}$",
             "patternErrorMessage": "Укажите диапазон в формате нижний:верхний, например 1660:1691.",
             "description": "Диапазон портов прямого соединения (--direct-range) в формате нижний:верхний. Пусто: умолчание платформы 1560:1591."
@@ -4337,36 +4559,43 @@
           "1c-platform-tools.server.path.data": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Каталог данных автономного сервера (сеансовые данные, журнал, конфиг публикации publication.yaml). Относительный путь считается от корня проекта. Пусто: build/ibsrv в корне проекта."
           },
           "1c-platform-tools.server.distributeLicenses": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Разрешить автономному серверу выдачу клиентских лицензий (позволяет работать и отлаживать без отдельной лицензии)."
           },
           "1c-platform-tools.server.publishOData": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Публиковать стандартный интерфейс OData."
           },
           "1c-platform-tools.server.publishWebServices": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Публиковать Web-сервисы (SOAP) приложения по умолчанию."
           },
           "1c-platform-tools.server.publishHttpServices": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "description": "Публиковать HTTP-сервисы приложения по умолчанию."
           },
           "1c-platform-tools.server.debug": {
             "type": "boolean",
             "default": false,
+            "scope": "resource",
             "description": "Включить порт отладки автономного сервера (HTTP), чтобы цеплять отладчик расширения."
           },
           "1c-platform-tools.server.debugPort": {
             "type": "number",
             "default": 1550,
+            "scope": "resource",
             "description": "TCP-порт сервера отладки автономного сервера (при server.debug = true)."
           }
         }
@@ -4379,21 +4608,25 @@
           "1c-platform-tools.edt.path": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Каталог установки 1С:EDT или каталог со списком установленных версий. Пусто: определяется автоматически (в Windows это installations внутри 1cedtstart, в Linux /opt/1C/1CE/components). EDT ставится своим установщиком с releases.1c.ru, расширение её не загружает."
           },
           "1c-platform-tools.edt.version": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Версия 1С:EDT, когда установлено несколько: 2026.1 или начало номера. Пусто: старшая из найденных. Проект, созданный старшей версией, младшая не откроет."
           },
           "1c-platform-tools.edt.workspace": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Каталог рабочей области 1С:EDT для команд расширения. Пусто: каталог сборки проекта, а у проекта EDT, открытого как рабочая область, временный каталог. Рабочую область 1cedtcli занимает монопольно, поэтому общий временный каталог не подходит."
           },
           "1c-platform-tools.edt.timeoutSeconds": {
             "type": "number",
             "default": 3600,
+            "scope": "resource",
             "minimum": 60,
             "description": "Сколько ждать команду 1cedtcli. Импорт большой конфигурации занимает десятки минут."
           },
@@ -4403,6 +4636,7 @@
               "type": "string"
             },
             "default": [],
+            "scope": "resource",
             "description": "Дополнительные аргументы JVM для 1cedtcli, например -Xmx8g. Большим конфигурациям памяти по умолчанию не хватает."
           }
         }

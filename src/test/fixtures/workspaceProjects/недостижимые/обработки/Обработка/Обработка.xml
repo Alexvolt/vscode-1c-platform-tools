@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+	<ExternalDataProcessor uuid="3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f">
+		<Properties>
+			<Name>Обработка</Name>
+		</Properties>
+	</ExternalDataProcessor>
+</MetaDataObject>

@@ -22,6 +22,8 @@ import { createVRunnerTask, type TaskOutputChain } from '../tasks/vrunnerTask';
 import { logger } from '../../shared/logger';
 import { findEdtInstallations, pickEdtInstallation, type EdtInstallation } from '../../shared/edtLocator';
 import { isEdtProject } from '../../shared/projectLayout';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import { currentRoot } from '../../shared/workspaceProjects';
 
 const log = logger.scope('edt');
 
@@ -113,10 +115,12 @@ export interface EdtSettings {
 }
 
 /**
- * Читает настройки EDT.
+ * Читает настройки EDT проекта.
+ *
+ * @param root - Корень проекта
  */
-export function readEdtSettings(): EdtSettings {
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
+export function readEdtSettings(root: string | undefined = currentRoot()): EdtSettings {
+	const config = projectConfiguration(root);
 	return {
 		path: config.get<string>('edt.path', ''),
 		version: config.get<string>('edt.version', ''),
@@ -163,7 +167,11 @@ export function edtStagingRoot(workspaceRoot: string, buildPath: string): string
  * @param workspaceRoot - Корень рабочей области VS Code
  * @param buildPath - Каталог сборки проекта
  */
-export function edtWorkspaceDir(workspaceRoot: string, buildPath: string, settings: EdtSettings = readEdtSettings()): string {
+export function edtWorkspaceDir(
+	workspaceRoot: string,
+	buildPath: string,
+	settings: EdtSettings = readEdtSettings(workspaceRoot)
+): string {
 	const configured = settings.workspace.trim();
 	if (configured) {
 		return path.isAbsolute(configured) ? configured : path.join(workspaceRoot, configured);

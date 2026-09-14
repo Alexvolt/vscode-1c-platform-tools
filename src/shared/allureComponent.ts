@@ -21,6 +21,8 @@ import {
 	resolveGithubToken,
 	type ReleaseComponentSpec,
 } from './githubReleaseLoader';
+import { projectConfiguration } from './projectConfiguration';
+import { currentRoot } from './workspaceProjects';
 
 /**
  * Релизы Allure: нужен архив `allure-<версия>.zip`, внутри которого лежит
@@ -69,11 +71,12 @@ export function findAllureBinary(extractRoot: string): string | undefined {
  * который при необходимости загружается и обновляется.
  *
  * @param context - Контекст расширения (кэш живёт в globalStorage)
+ * @param root - Корень проекта, для которого читаются настройки компонентов
  * @returns Абсолютный путь к `allure` или имя команды для поиска в PATH
  * @throws Error если автозагрузка выключена, а свой путь не задан или неверен
  */
-export async function ensureAllure(context: vscode.ExtensionContext): Promise<string> {
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
+export async function ensureAllure(context: vscode.ExtensionContext, root: string | undefined = currentRoot()): Promise<string> {
+	const config = projectConfiguration(root);
 	const override = config.get<string>('components.path.allure', '').trim();
 	if (override) {
 		if (override.includes('${')) {

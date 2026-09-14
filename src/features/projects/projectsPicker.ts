@@ -11,6 +11,9 @@ import { sortProjects } from './sorter';
 import type { ProjectsStack } from './stack';
 import { InvocationSource } from './constants';
 import { normalizePath } from './pathUtils';
+import { sameProjectRoot } from '../../shared/workspaceProjects';
+import { workspaceProjectItems, type WorkspaceProjectPickItem } from './workspaceProjectPicker';
+import type { WorkspaceProjectsSource } from './workspaceProjectsSource';
 
 export interface PickedProject {
 	name: string;
@@ -20,6 +23,66 @@ export interface PickedProject {
 export interface PickedResult {
 	item: PickedProject;
 	openInNewWindow: boolean;
+	/** Проект этого окна: выбор делает его текущим. */
+	inWindow?: boolean;
+}
+
+/** Проекты этого окна для списка проектов. */
+export type WindowProjects = Pick<WorkspaceProjectsSource, 'snapshotNow' | 'listProjects' | 'selectedRoot' | 'selectProject'>;
+
+/** Пункт списка проектов. */
+export interface ProjectListItem extends vscode.QuickPickItem {
+	path: string;
+	/** Проект этого окна. */
+	inWindow?: boolean;
+}
+
+/**
+ * Пункты списка: проекты этого окна, затем избранное и все проекты без проектов окна.
+ * @param windowItems — проекты окна из окна выбора проекта
+ * @param favorites — избранное
+ * @param detected — найденные проекты
+ */
+export function projectListItems(
+	windowItems: readonly WorkspaceProjectPickItem[],
+	favorites: ReadonlyArray<{ label: string; description: string }>,
+	detected: ReadonlyArray<{ label: string; description: string }>
+): ProjectListItem[] {
+	const inWindow = windowItems.flatMap((item): ProjectListItem[] =>
+		item.pick?.kind === 'project'
+			? [{ label: item.label, description: item.description, iconPath: item.iconPath, path: item.pick.root, inWindow: true }]
+			: []
+	);
+	const outsideWindow = (entry: { description: string }) => !inWindow.some((item) => sameProjectRoot(item.path, entry.description));
+	return [
+		...(inWindow.length > 0
+			? [{ label: 'Рабочая область', kind: vscode.QuickPickItemKind.Separator, path: '' }, ...inWindow]
+			: []),
+		{ label: 'Избранное', kind: vscode.QuickPickItemKind.Separator, path: '' },
+		...favorites.filter(outsideWindow).map((f) => ({ ...f, path: f.description })),
+		{ label: 'Все проекты', kind: vscode.QuickPickItemKind.Separator, path: '' },
+		...detected.filter(outsideWindow).map((d) => ({ ...d, path: d.description })),
+	];
+}
+
+/**
+ * Выбранное в списке: проект окна как есть, остальное после проверки пути.
+ * @param item — пункт списка
+ * @param openInNewWindow — нажата кнопка «Открыть в новом окне»
+ * @param store — хранилище избранного
+ */
+export function pickedFromItem(
+	item: ProjectListItem,
+	openInNewWindow: boolean,
+	store: ProjectStorage | undefined
+): PickedResult | undefined {
+	if (item.inWindow) {
+		return { item: { name: item.label, rootPath: item.path }, openInNewWindow: false, inWindow: true };
+	}
+	if (!validatePath(item, store)) {
+		return undefined;
+	}
+	return { item: { name: item.label, rootPath: normalizePath(item.path) }, openInNewWindow };
 }
 
 function validatePath(item: vscode.QuickPickItem, store: ProjectStorage | undefined): boolean {
@@ -85,7 +148,8 @@ export async function pickProjects(
 	showNewWindowBtn: boolean,
 	source: InvocationSource,
 	recent: ProjectsStack,
-	context: vscode.ExtensionContext
+	context: vscode.ExtensionContext,
+	windowProjects?: WindowProjects
 ): Promise<PickedResult | undefined> {
 	const cfg = vscode.workspace.getConfiguration('1c-platform-tools');
 	const hideCurrent = cfg.get<boolean>('projects.removeCurrentProjectFromList', true);
@@ -98,7 +162,8 @@ export async function pickProjects(
 		favorites = sortProjects(favorites);
 	}
 
-	const detectedPaths = await locator.locateProjects();
+	const [detectedPaths] = await Promise.all([locator.locateProjects(), windowProjects?.listProjects()]);
+	// eslint-disable-next-line no-restricted-syntax -- из всех проектов убирается открытая папка окна
 	const currentFsPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 	let detected = detectedPaths
 		.filter((p) => !hideCurrent || path.normalize(p) !== path.normalize(currentFsPath))
@@ -106,12 +171,10 @@ export async function pickProjects(
 		.map((p) => ({ label: path.basename(p) || p, description: p }));
 	detected = sortProjects(detected);
 
-	const items: Array<vscode.QuickPickItem & { path: string }> = [
-		{ label: 'Избранное', kind: vscode.QuickPickItemKind.Separator, path: '' },
-		...favorites.map((f) => ({ ...f, path: f.description })),
-		{ label: 'Все проекты', kind: vscode.QuickPickItemKind.Separator, path: '' },
-		...detected.map((d) => ({ ...d, path: d.description })),
-	];
+	const windowItems = windowProjects
+		? workspaceProjectItems(windowProjects.snapshotNow(), windowProjects.selectedRoot(), false)
+		: [];
+	const items = projectListItems(windowItems, favorites, detected);
 
 	const visibleCount = items.filter((i) => i.kind !== vscode.QuickPickItemKind.Separator).length;
 	if (visibleCount === 0) {
@@ -127,43 +190,25 @@ export async function pickProjects(
 	};
 
 	return new Promise<PickedResult | undefined>((resolve) => {
-		const picker = vscode.window.createQuickPick();
+		const picker = vscode.window.createQuickPick<ProjectListItem>();
 		picker.placeholder = 'Выберите проект...';
 		picker.matchOnDescription = searchFullPath;
 		picker.items = items.map((it) => ({
 			...it,
-			buttons: showNewWindowBtn ? [newWindowBtn] : [],
+			buttons: showNewWindowBtn && !it.inWindow ? [newWindowBtn] : [],
 		}));
 
 		picker.onDidChangeSelection((selected) => {
 			const it = selected[0];
 			if (!it || it.kind === vscode.QuickPickItemKind.Separator) {return;}
-			const p = 'path' in it ? (it as { path: string }).path : (it.description as string);
-			if (!validatePath(it, store)) {
-				resolve(undefined);
-				picker.hide();
-				return;
-			}
-			resolve({
-				item: { name: it.label, rootPath: normalizePath(p) },
-				openInNewWindow: false,
-			});
+			resolve(pickedFromItem(it, false, store));
 			picker.hide();
 		});
 
 		picker.onDidTriggerItemButton((ev) => {
 			const it = ev.item;
 			if (!it || it.kind === vscode.QuickPickItemKind.Separator) {return;}
-			const p = 'path' in it ? (it as { path: string }).path : (it.description as string);
-			if (!validatePath(it, store)) {
-				resolve(undefined);
-				picker.hide();
-				return;
-			}
-			resolve({
-				item: { name: it.label, rootPath: normalizePath(p) },
-				openInNewWindow: true,
-			});
+			resolve(pickedFromItem(it, true, store));
 			picker.hide();
 		});
 
@@ -246,9 +291,14 @@ export async function openPickedProject(
 	forceNew: boolean,
 	source: InvocationSource,
 	recent: ProjectsStack,
-	_context: vscode.ExtensionContext
+	_context: vscode.ExtensionContext,
+	windowProjects?: Pick<WindowProjects, 'selectProject'>
 ): Promise<void> {
 	if (!picked) {return;}
+	if (picked.inWindow) {
+		await windowProjects?.selectProject(picked.item.rootPath);
+		return;
+	}
 	if (!picked.openInNewWindow && !forceNew) {
 		if (!(await canSwitchOnActiveWindow(source))) {return;}
 	}

@@ -10,6 +10,7 @@ import {
 	getSetVersionProcessorCommandName
 } from '../features/tools/commandNames';
 import { pickExtensions } from '../features/extensions/extensionPicker';
+import { projectMemento } from '../shared/projectState';
 import { extensionEntries } from '../features/extensions/extensionRoots';
 import { logger } from '../shared/logger';
 import { configurationScope } from '../shared/activeConfiguration';
@@ -44,7 +45,7 @@ export class SetVersionCommands extends BaseCommand {
 	 * @returns Удалась ли запись
 	 */
 	private async stampEdtProject(configurationMdo: string, version: string, workspaceRoot: string): Promise<boolean> {
-		const runtime = await ensureMdSparrowRuntime(this.context);
+		const runtime = await ensureMdSparrowRuntime(this.context, workspaceRoot);
 		const res = await runMdSparrowParamsMutation(
 			runtime,
 			{
@@ -192,7 +193,7 @@ export class SetVersionCommands extends BaseCommand {
 			return;
 		}
 
-		const selected = await pickExtensions(extensions, this.vrunner.getWorkspaceMemento());
+		const selected = await pickExtensions(extensions, projectMemento());
 		if (selected === undefined) {
 			// Отмена quickpick — команда не выполняется
 			return;

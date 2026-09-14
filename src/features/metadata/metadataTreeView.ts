@@ -19,6 +19,9 @@ import { ensureMdSparrowRuntime } from './mdSparrowBootstrap';
 import { runMdSparrowParamsRead, supportEnabled } from './mdSparrowParams';
 import { mdSparrowSchemaFlagFromConfigurationXml } from './mdSparrowSchemaVersion';
 import { offerGithubTokenOnRateLimit } from '../../shared/githubToken';
+import { configurationScope } from '../../shared/activeConfiguration';
+import { currentRoot, outsideProject, sameProjectRoot } from '../../shared/workspaceProjects';
+import { METADATA_EXPANDED_SOURCES_STATE, projectMemento } from '../../shared/projectState';
 import { ADOPTED_HINT, SUPPORT_HINTS, adoptedIcon, initAdoptedIcons, isAdopted, supportIcon } from './objectBelonging';
 import {
 	childKindHasType,
@@ -1321,8 +1324,64 @@ function themeIconFromGroupHint(hint: string): vscode.ThemeIcon {
 	return new vscode.ThemeIcon(id);
 }
 
-/** Ключ состояния рабочей области: какие источники дерева раскрыты. */
-const EXPANDED_SOURCES_KEY = '1c-platform-tools.metadata.expandedSources';
+/**
+ * Файл, по которому команда над узлом дерева узнаёт свой проект.
+ *
+ * @param arg - Аргумент команды: узел дерева или адрес файла
+ */
+export function metadataCommandTarget(arg: unknown): vscode.Uri | string | undefined {
+	if (arg instanceof vscode.Uri) {
+		return arg;
+	}
+	if (arg instanceof MetadataObjectNodeTreeItem || arg instanceof MetadataObjectSectionTreeItem) {
+		return metadataCommandTarget(arg.owner);
+	}
+	if (
+		arg instanceof MetadataSourceTreeItem ||
+		arg instanceof MetadataMdGroupTreeItem ||
+		arg instanceof MetadataMdSubgroupTreeItem ||
+		arg instanceof MetadataLeafTreeItem
+	) {
+		return arg.resourceUri ?? arg.configurationXmlAbs ?? arg.metadataRootAbs;
+	}
+	if (arg instanceof vscode.TreeItem) {
+		return arg.resourceUri;
+	}
+	return undefined;
+}
+
+/** Узел дерева метаданных. */
+function isMetadataTreeNode(arg: unknown): boolean {
+	return (
+		arg instanceof MetadataSourceTreeItem ||
+		arg instanceof MetadataMdGroupTreeItem ||
+		arg instanceof MetadataMdSubgroupTreeItem ||
+		arg instanceof MetadataLeafTreeItem ||
+		arg instanceof MetadataObjectSectionTreeItem ||
+		arg instanceof MetadataObjectNodeTreeItem
+	);
+}
+
+/**
+ * Проект команды: у узла дерева метаданных проект дерева, у файла проект файла.
+ *
+ * @param args - Аргументы команды
+ * @param treeRoot - Корень проекта, который показывает дерево
+ * @param projectOfFile - Проект файла
+ */
+export function metadataCommandRoot(
+	args: readonly unknown[],
+	treeRoot: string | undefined,
+	projectOfFile: (target: vscode.Uri | string) => string | undefined
+): string | undefined {
+	for (const arg of args) {
+		const target = metadataCommandTarget(arg);
+		if (target !== undefined) {
+			return treeRoot !== undefined && isMetadataTreeNode(arg) ? treeRoot : projectOfFile(target);
+		}
+	}
+	return undefined;
+}
 
 export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 	private readonly _onDidChange = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
@@ -1344,11 +1403,8 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 
 	/** Кэш последнего успешного дерева (для API). */
 	private _sourceItems: MetadataSourceTreeItem[] = [];
-	/**
-	 * Раскрытые источники: дерево перестраивается целиком, и без этого каждое обновление
-	 * возвращало бы раскрытой основную конфигурацию, а свёрнутыми - расширения.
-	 */
-	private _expandedSources: Set<string> | undefined;
+	/** Номер последнего чтения: ответ, прочитанный для прежнего проекта, в дерево не попадает. */
+	private _refreshGeneration = 0;
 	private readonly _groupsBySource = new Map<string, MetadataMdGroupTreeItem[]>();
 	private readonly _subgroupsByGroup = new Map<string, MetadataMdSubgroupTreeItem[]>();
 	private readonly _leavesByGroup = new Map<string, MetadataLeafTreeItem[]>();
@@ -1362,17 +1418,48 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 	private readonly _tabularAttrsByNode = new Map<string, MetadataObjectNodeTreeItem[]>();
 	private readonly _nestedSubsystemChildrenByLeaf = new Map<string, MetadataSubsystemChildTreeItem[]>();
 	private readonly _subsystemsBySource = new Map<string, Map<string, MetadataLeafTreeItem>>();
+	/** Конфигурация, чей состав прочитан в дерево. */
+	private _contentConfigurationDir: string | undefined;
 
 	constructor(private readonly _context: vscode.ExtensionContext) {
-		initAdoptedIcons(path.join(_context.globalStorageUri.fsPath, 'metadata-tree-icons'));}
+		initAdoptedIcons(path.join(_context.globalStorageUri.fsPath, 'metadata-tree-icons'));
+	}
 
-	/** Раскрытые источники из состояния рабочей области; пусто - состояние ещё не сохраняли. */
-	private expandedSources(): Set<string> | undefined {
-		if (this._expandedSources === undefined) {
-			const saved = this._context.workspaceState.get<string[]>(EXPANDED_SOURCES_KEY);
-			this._expandedSources = saved === undefined ? undefined : new Set(saved);
+	/**
+	 * Текущий проект сменился: отбор по подсистемам снимается, состав прежнего проекта
+	 * убирается сразу, состав нового читается заново.
+	 */
+	async refreshForCurrentProject(): Promise<void> {
+		this._subsystemFilter = undefined;
+		const refreshing = this.refresh();
+		this._onDidChange.fire(undefined);
+		await refreshing;
+	}
+
+	/** Раскладка проекта изменилась: дерево перечитывается, когда сменилась конфигурация проекта. */
+	async syncWithProjectLayout(): Promise<void> {
+		const root = this._workspaceRoot;
+		if (!root) {
+			return;
 		}
-		return this._expandedSources;
+		try {
+			const scope = await configurationScope(root);
+			if (scope.configuration?.dir !== this._contentConfigurationDir) {
+				await this.refresh();
+			}
+		} catch (e) {
+			log.warn(`раскладка проекта: ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
+	/**
+	 * Раскрытые источники проекта дерева; пусто - состояние ещё не сохраняли. Дерево
+	 * перестраивается целиком, и без этого каждое обновление возвращало бы раскрытой
+	 * основную конфигурацию, а свёрнутыми - расширения.
+	 */
+	private expandedSources(): Set<string> | undefined {
+		const saved = projectMemento(this._workspaceRoot).get<string[]>(METADATA_EXPANDED_SOURCES_STATE);
+		return saved === undefined ? undefined : new Set(saved);
 	}
 
 	/**
@@ -1390,8 +1477,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		} else {
 			current.delete(sourceId);
 		}
-		this._expandedSources = current;
-		void this._context.workspaceState.update(EXPANDED_SOURCES_KEY, [...current]);
+		void projectMemento(this._workspaceRoot).update(METADATA_EXPANDED_SOURCES_STATE, [...current]);
 	}
 
 	/**
@@ -1401,8 +1487,46 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		return this._dto;
 	}
 
-	private workspaceRoot(): string | undefined {
-		return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	/** Корень проекта, чей состав показывает дерево. */
+	get projectRoot(): string | undefined {
+		return this._workspaceRoot;
+	}
+
+	/**
+	 * Узел файла в дереве; без узла проект файла, если дерево показывает другой проект.
+	 *
+	 * @param fileAbs - Абсолютный путь файла
+	 * @param fileProject - Проект файла
+	 */
+	async locateFile(
+		fileAbs: string,
+		fileProject: string | undefined
+	): Promise<{ node: vscode.TreeItem } | { otherProject: string } | undefined> {
+		const node = await this.findNodeForFile(fileAbs);
+		if (node) {
+			return { node };
+		}
+		return fileProject !== undefined && this._workspaceRoot !== undefined && !sameProjectRoot(fileProject, this._workspaceRoot)
+			? { otherProject: fileProject }
+			: undefined;
+	}
+
+	/**
+	 * Прочитанное дерево, если оно принадлежит проекту `root`.
+	 *
+	 * @param root - Корень проекта
+	 */
+	cachedTreeOf(root: string | undefined): ProjectMetadataTreeDto | undefined {
+		return this.showsProject(root) ? this._dto : undefined;
+	}
+
+	private showsProject(root: string | undefined): boolean {
+		return root !== undefined && this._workspaceRoot !== undefined && sameProjectRoot(root, this._workspaceRoot);
+	}
+
+	/** Дерево показывает выбранный проект, а не корень вызова команды. */
+	private selectedRoot(): string | undefined {
+		return outsideProject(() => currentRoot());
 	}
 
 	/**
@@ -1416,7 +1540,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		if (main?.metadataRootAbs) {
 			return main.metadataRootAbs;
 		}
-		const root = this.workspaceRoot();
+		const root = currentRoot();
 		if (!root) {
 			return undefined;
 		}
@@ -1436,11 +1560,16 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		return path.join(cf, 'Configuration.xml');
 	}
 
+	/** Основная конфигурация из дерева, если дерево показывает проект, в котором выполняется вызов. */
 	private mainSource(): MetadataSourceTreeItem | undefined {
+		if (!this.showsProject(currentRoot())) {
+			return undefined;
+		}
 		return this._sourceItems.find((item) => item.sourceKind === 'main');
 	}
 
 	async refresh(): Promise<void> {
+		const generation = ++this._refreshGeneration;
 		this._lastError = undefined;
 		this._dto = undefined;
 		this._sourceItems = [];
@@ -1456,7 +1585,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		this._nestedSubsystemChildrenByLeaf.clear();
 		this._subsystemsBySource.clear();
 
-		const root = this.workspaceRoot();
+		const root = this.selectedRoot();
 		this._workspaceRoot = root;
 		if (!root) {
 			this._lastError = 'Нет открытой папки workspace';
@@ -1465,8 +1594,14 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		}
 
 		try {
-			this._dto = await loadProjectMetadataTree(this._context, root);
-			this.rebuildItemCache(root, this._dto);
+			const configurationDir = (await configurationScope(root)).configuration?.dir;
+			const dto = await loadProjectMetadataTree(this._context, root);
+			if (generation !== this._refreshGeneration) {
+				return;
+			}
+			this._contentConfigurationDir = configurationDir;
+			this._dto = dto;
+			this.rebuildItemCache(root, dto);
 			// Панель дерева показывает проверку выгрузки только конфигуратору: у проекта EDT своя проверка
 			const main = this._dto.sources.find((source) => source.kind === 'main');
 			void vscode.commands.executeCommand(
@@ -1475,6 +1610,9 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 				main?.configurationXmlRelativePath ? formatOfFile(main.configurationXmlRelativePath) : 'designer'
 			);
 		} catch (e) {
+			if (generation !== this._refreshGeneration) {
+				return;
+			}
 			const msg = e instanceof Error ? e.message : String(e);
 			log.error(`дерево: ${msg}`);
 			this._lastError = msg;
@@ -1733,12 +1871,12 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		if (!this._workspaceRoot) {
 			return [];
 		}
-		if (this._lastError && !element) {
-			const errItem = new vscode.TreeItem(this._lastError, vscode.TreeItemCollapsibleState.None);
-			errItem.iconPath = metadataSvgIcon(this._context.extensionUri, 'common.svg');
-			return [errItem];
-		}
 		if (!element) {
+			if (this._lastError) {
+				const errItem = new vscode.TreeItem(this._lastError, vscode.TreeItemCollapsibleState.None);
+				errItem.iconPath = metadataSvgIcon(this._context.extensionUri, 'common.svg');
+				return [errItem];
+			}
 			if (this._textFilter && !this.anySourceHasMatches()) {
 				const empty = new vscode.TreeItem(
 					`Ничего не найдено: «${this._textFilter.query}»`,
@@ -2171,7 +2309,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 			return out;
 		}
 		try {
-			const runtime = await ensureMdSparrowRuntime(this._context);
+			const runtime = await ensureMdSparrowRuntime(this._context, this._workspaceRoot);
 			const res = await runMdSparrowParamsRead(
 				runtime,
 				{ op: 'cf-support-object-states', objectXml: leaf.resourceUri.fsPath },
@@ -2210,7 +2348,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		if (schema === undefined) {
 			throw new Error('Не удалось определить схему XSD для структуры объекта.');
 		}
-		const runtime = await ensureMdSparrowRuntime(this._context);
+		const runtime = await ensureMdSparrowRuntime(this._context, this._workspaceRoot);
 		const res = await runMdSparrowParamsRead(
 			runtime,
 			{ op: 'cf-md-object-structure-get', objectXml: leaf.resourceUri.fsPath, schemaVersion: schema },
@@ -2234,7 +2372,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		}
 		try {
 			const schema = await mdSparrowSchemaFlagFromConfigurationXml(leaf.configurationXmlAbs);
-			const runtime = await ensureMdSparrowRuntime(this._context);
+			const runtime = await ensureMdSparrowRuntime(this._context, this._workspaceRoot);
 			const res = await runMdSparrowParamsRead(
 				runtime,
 				{ op: 'cf-md-object-get', objectXml: leaf.resourceUri.fsPath, schemaVersion: schema },

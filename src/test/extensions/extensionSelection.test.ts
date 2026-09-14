@@ -1,6 +1,8 @@
 import * as assert from 'node:assert';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { pickExtensions } from '../../features/extensions/extensionPicker';
+import { EXTENSION_SELECTION_STATE, projectMemento, TEST_EXTENSION_SELECTION_STATE } from '../../shared/projectState';
 import {
 	cfeStem,
 	getStoredExtensionSelection,
@@ -187,6 +189,23 @@ suite('extensionSelection: области выбора', () => {
 		await setStoredExtensionSelection(memento, ['РасширениеРешения'], 'solution');
 
 		assert.deepStrictEqual(getStoredExtensionSelection(memento), ['РасширениеРешения']);
+	});
+
+	test('выбор расширений хранится в состоянии своего проекта', async () => {
+		const first = projectMemento(path.resolve('/w/первый'));
+		const second = projectMemento(path.resolve('/w/второй'));
+		try {
+			await setStoredExtensionSelection(first, ['РасширениеРешения']);
+			await setStoredExtensionSelection(first, ['ТестовоеРасширение'], 'tests');
+
+			assert.deepStrictEqual(first.get(EXTENSION_SELECTION_STATE), ['РасширениеРешения']);
+			assert.deepStrictEqual(first.get(TEST_EXTENSION_SELECTION_STATE), ['ТестовоеРасширение']);
+			assert.strictEqual(getStoredExtensionSelection(second), undefined);
+			assert.strictEqual(getStoredExtensionSelection(second, 'tests'), undefined);
+		} finally {
+			await setStoredExtensionSelection(first, undefined);
+			await setStoredExtensionSelection(first, undefined, 'tests');
+		}
 	});
 });
 

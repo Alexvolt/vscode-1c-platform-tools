@@ -41,6 +41,8 @@ export class MetadataFilterViewProvider implements vscode.WebviewViewProvider {
 	private _view: vscode.WebviewView | undefined;
 	private _roots: SubsystemNode[] = [];
 	private _loading: Promise<void> | undefined;
+	/** Дерево метаданных сменилось, пока подсистемы читались: прочитанное устарело. */
+	private _reloadRequested = false;
 	private readonly _checked = new Set<string>();
 	private readonly _options: Record<FilterOptionKey, boolean> = { includeNested: true, includeParents: false };
 	private _applyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -79,19 +81,27 @@ export class MetadataFilterViewProvider implements vscode.WebviewViewProvider {
 		void this.reload();
 	}
 
-	/** Читает подсистемы через md-sparrow; параллельные вызовы ждут один и тот же запрос. */
-	private async reload(): Promise<void> {
-		if (!this._loading) {
-			this._loading = loadSubsystemTrees(this._context, this._treeProvider)
-				.then((roots) => {
-					this._roots = roots;
-				})
-				.finally(() => {
-					this._loading = undefined;
-				});
+	/**
+	 * Читает подсистемы через md-sparrow. Вызов во время чтения не запускает второе, а
+	 * повторяет чтение после текущего: прочитанное по прежнему дереву не показывается.
+	 */
+	private reload(): Promise<void> {
+		this._reloadRequested = true;
+		this._loading ??= this.readWhileRequested().finally(() => {
+			this._loading = undefined;
+		});
+		return this._loading;
+	}
+
+	private async readWhileRequested(): Promise<void> {
+		while (this._reloadRequested) {
+			this._reloadRequested = false;
+			const roots = await loadSubsystemTrees(this._context, this._treeProvider);
+			if (!this._reloadRequested) {
+				this._roots = roots;
+				this.pushTree();
+			}
 		}
-		await this._loading;
-		this.pushTree();
 	}
 
 	collapseAll(): void {
@@ -103,6 +113,29 @@ export class MetadataFilterViewProvider implements vscode.WebviewViewProvider {
 		this._checked.clear();
 		void this._view?.webview.postMessage({ type: 'clearChecked' });
 		this.scheduleApply();
+	}
+
+	/**
+	 * Сменился проект: флажки и подсистемы прежнего проекта убираются, отбор снимается
+	 * сразу, без паузы перед применением.
+	 */
+	resetForProject(): void {
+		if (this._applyTimer) {
+			clearTimeout(this._applyTimer);
+			this._applyTimer = undefined;
+		}
+		this._checked.clear();
+		this._roots = [];
+		if (this._loading) {
+			this._reloadRequested = true;
+		}
+		this.pushTree();
+		this._onSelectionChanged({
+			roots: [],
+			checkedPaths: new Set(),
+			includeNested: this._options.includeNested,
+			includeParents: this._options.includeParents,
+		});
 	}
 
 	private onMessage(msg: unknown): void {

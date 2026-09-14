@@ -23,6 +23,7 @@ import { resolveProjectLayout, type SourceRoot } from '../../shared/projectLayou
 import { sourcePath } from '../../shared/objectPaths';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { logger } from '../../shared/logger';
+import { terminalProjectRoot } from '../tasks/terminalProjects';
 
 const log = logger.scope('tools');
 
@@ -149,25 +150,31 @@ export function findTerminalLinkMatches(line: string): TerminalLinkMatch[] {
 /** Ссылка терминала с разобранной целью. */
 interface ResolvedTerminalLink extends vscode.TerminalLink {
 	target: TerminalLinkTarget;
+	/** Корень проекта команды, напечатавшей строку. */
+	root: string | undefined;
 }
 
 /**
  * Провайдер ссылок терминала: открывает исходник по клику в выводе команд.
+ * Пути разрешаются в проекте команды, которая писала в терминал; в терминале
+ * без команд расширения в текущем проекте.
  */
 export class SourceTerminalLinkProvider implements vscode.TerminalLinkProvider<ResolvedTerminalLink> {
 	constructor(private readonly vrunner: VRunnerManager) {}
 
 	provideTerminalLinks(context: vscode.TerminalLinkContext): ResolvedTerminalLink[] {
+		const root = terminalProjectRoot(context.terminal) ?? this.vrunner.getWorkspaceRoot();
 		return findTerminalLinkMatches(context.line).map((match) => ({
 			startIndex: match.startIndex,
 			length: match.length,
 			target: match.target,
+			root,
 			tooltip: match.target.kind === 'metadata' ? 'Открыть модуль' : 'Открыть файл',
 		}));
 	}
 
 	async handleTerminalLink(link: ResolvedTerminalLink): Promise<void> {
-		const file = await this.resolveTarget(link.target);
+		const file = await resolveTerminalLinkTarget(link.target, link.root);
 		if (!file) {
 			void vscode.window.showWarningMessage('Не нашли исходник для этой ссылки.');
 			return;
@@ -182,44 +189,49 @@ export class SourceTerminalLinkProvider implements vscode.TerminalLinkProvider<R
 		}
 	}
 
-	/** Абсолютный путь к существующему файлу либо undefined. */
-	private async resolveTarget(target: TerminalLinkTarget): Promise<string | undefined> {
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
-		if (target.kind === 'file') {
-			const candidate = path.isAbsolute(target.file)
-				? target.file
-				: workspaceRoot
-					? path.resolve(workspaceRoot, target.file)
-					: undefined;
-			return candidate && (await exists(candidate)) ? candidate : undefined;
-		}
-		return workspaceRoot ? this.resolveMetadata(target.metadataPath, workspaceRoot) : undefined;
+}
+
+/**
+ * Файл цели ссылки: относительный путь и путь по метаданным разрешаются в проекте.
+ *
+ * @param target - Цель ссылки
+ * @param root - Корень проекта
+ * @returns Абсолютный путь к существующему файлу либо undefined
+ */
+export async function resolveTerminalLinkTarget(target: TerminalLinkTarget, root: string | undefined): Promise<string | undefined> {
+	if (target.kind === 'file') {
+		const candidate = path.isAbsolute(target.file)
+			? target.file
+			: root
+				? path.resolve(root, target.file)
+				: undefined;
+		return candidate && (await exists(candidate)) ? candidate : undefined;
+	}
+	return root ? resolveMetadataInProject(target.metadataPath, root) : undefined;
+}
+
+/**
+ * Ищет модуль по пути метаданных во всех корнях исходников проекта.
+ *
+ * Порядок: конфигурация, расширения, прочие корни. Формат берётся у самого
+ * корня, поэтому в одном проекте могут лежать и выгрузка конфигуратора, и проект EDT.
+ */
+async function resolveMetadataInProject(metadataPath: string, root: string): Promise<string | undefined> {
+	let roots: SourceRoot[];
+	try {
+		const layout = await resolveProjectLayout(root);
+		roots = [
+			...(layout.configuration ? [layout.configuration] : []),
+			...layout.extensions,
+			...layout.testExtensions,
+			...layout.others,
+		];
+	} catch (error) {
+		log.info(`раскладка проекта не прочиталась: ${String(error)}`);
+		return undefined;
 	}
 
-	/**
-	 * Ищет модуль по пути метаданных во всех корнях рабочей области.
-	 *
-	 * Порядок: конфигурация, расширения, прочие корни. Формат берётся у самого
-	 * корня, поэтому в одной рабочей области могут лежать и выгрузка
-	 * конфигуратора, и проект EDT.
-	 */
-	private async resolveMetadata(metadataPath: string, workspaceRoot: string): Promise<string | undefined> {
-		let roots: SourceRoot[];
-		try {
-			const layout = await resolveProjectLayout(workspaceRoot);
-			roots = [
-				...(layout.configuration ? [layout.configuration] : []),
-				...layout.extensions,
-				...layout.testExtensions,
-				...layout.others,
-			];
-		} catch (error) {
-			log.info(`раскладка проекта не прочиталась: ${String(error)}`);
-			return undefined;
-		}
-
-		return resolveMetadataInRoots(metadataPath, roots);
-	}
+	return resolveMetadataInRoots(metadataPath, roots);
 }
 
 /**

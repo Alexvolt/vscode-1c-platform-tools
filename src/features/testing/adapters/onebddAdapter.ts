@@ -11,6 +11,7 @@ import { resolveConfigPath } from '../projectTestConfig';
 import { normalizeGlobBase, directorySegments } from './adapterUtils';
 import { hasConfigurationSources } from './xunitAdapter';
 import { DEFAULT_TESTING } from '../../../shared/pathDefaults';
+import { projectConfiguration } from '../../../shared/projectConfiguration';
 
 /**
  * Адаптер 1bdd — BDD-сценарии для OneScript-проектов
@@ -36,7 +37,7 @@ export class OneBddAdapter implements TestFrameworkAdapter {
 	constructor(private readonly vrunner: VRunnerManager) {}
 
 	public async isEnabled(): Promise<boolean> {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(this.vrunner.getWorkspaceRoot());
 		if (!config.get<boolean>('test.frameworks.onebdd', true)) {
 			return false;
 		}
@@ -45,7 +46,7 @@ export class OneBddAdapter implements TestFrameworkAdapter {
 	}
 
 	public getIncludeGlobs(): string[] {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(this.vrunner.getWorkspaceRoot());
 		const base = normalizeGlobBase(config.get<string>('test.path.features', DEFAULT_TESTING.featuresPath));
 		return [`${base}/**/*.feature`];
 	}
@@ -59,7 +60,7 @@ export class OneBddAdapter implements TestFrameworkAdapter {
 	}
 
 	public describeFileLocation(fileUri: vscode.Uri, workspaceRoot: string) {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(workspaceRoot);
 		const base = config.get<string>('test.path.features', DEFAULT_TESTING.featuresPath);
 		return { segments: directorySegments(fileUri.fsPath, base, workspaceRoot) };
 	}
@@ -94,8 +95,8 @@ export class OneBddAdapter implements TestFrameworkAdapter {
 	 * проекта) → локальная установка oscript_modules/bin → PATH
 	 */
 	private getRunnerCommand(): string {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
 		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+		const config = projectConfiguration(workspaceRoot);
 		const customPath = config.get<string>('test.path.onebdd', '').trim();
 
 		if (customPath.length > 0) {

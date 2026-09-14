@@ -2,16 +2,25 @@
  * Дерево «1С: Артефакты»: данные из {@link scanArtifacts}.
  *
  * - `refresh` отменяет предыдущий скан и передаёт {@link vscode.CancellationToken} в сканер.
+ * - При нескольких проектах разделы группируются по проекту, выбранный проект первым.
  * - У элементов артефактов `resourceUri` — каталог/файл для команд сборки и vrunner; открытие в редакторе
- *   выполняется по корневому файлу (`ArtifactItem.openTargetUri`).
+ *   выполняется по корневому файлу (`ArtifactItem.openTargetUri`), `projectRoot` — корень проекта артефакта.
  *
  * @module projectArtifactsView
  */
 
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { scanArtifacts, type Artifact, type ArtifactsScanResult } from './artifactsScanner';
+import { scanArtifacts, type Artifact, type ProjectArtifacts } from './artifactsScanner';
 import type { SourceFormat } from '../../shared/projectLayout';
+import { projectScanRoots } from '../../shared/workspaceProjects';
+import {
+	CURRENT_PROJECT_DESCRIPTION,
+	isSelectedRoot,
+	projectLabel,
+	sameScanRoots,
+	selectedFirst,
+} from './projectScan';
 
 // Ключ сохранения режима вида дерева (список/каталоги). Историческое имя
 // 'featuresView' сохранено намеренно, чтобы не сбрасывать настройку пользователей.
@@ -59,7 +68,7 @@ export class ProjectArtifactsTreeDataProvider
 		ArtifactTreeItem | undefined | null | void
 	> = this._onDidChangeTreeData.event;
 
-	private _scanResult: ArtifactsScanResult | null = null;
+	private _scanResult: ProjectArtifacts[] | null = null;
 	private readonly _context: vscode.ExtensionContext;
 	private _scanCts: vscode.CancellationTokenSource | undefined;
 
@@ -89,6 +98,22 @@ export class ProjectArtifactsTreeDataProvider
 			}
 			cts.dispose();
 		}
+	}
+
+	/**
+	 * Выбранный проект сменился: тот же набор проектов перерисовывается в новом
+	 * порядке, другой сканируется заново.
+	 */
+	onCurrentProjectChanged(): void {
+		const scanned = this._scanResult;
+		if (!scanned) {
+			return;
+		}
+		if (sameScanRoots(scanned.map((result) => result.root), projectScanRoots())) {
+			this._onDidChangeTreeData.fire(undefined);
+			return;
+		}
+		void this.refresh();
 	}
 
 	getViewMode(): ArtifactsViewMode {
@@ -125,8 +150,12 @@ export class ProjectArtifactsTreeDataProvider
 			return this.getRootItems(result);
 		}
 
+		if (element instanceof ProjectItem) {
+			return this.getSectionItems(element.result);
+		}
+
 		if (element instanceof SectionItem) {
-			return this.getSectionChildren(element.sectionId, result);
+			return this.getSectionChildren(element.sectionId, element.result);
 		}
 
 		if (element.contextValue === 'artifactsFolderGroup') {
@@ -136,7 +165,14 @@ export class ProjectArtifactsTreeDataProvider
 		return [];
 	}
 
-	private getRootItems(result: ArtifactsScanResult): ArtifactTreeItem[] {
+	private getRootItems(results: ProjectArtifacts[]): ArtifactTreeItem[] {
+		if (results.length > 1) {
+			return selectedFirst(results, (result) => result.root).map((result) => new ProjectItem(result));
+		}
+		return results.length === 1 ? this.getSectionItems(results[0]) : [];
+	}
+
+	private getSectionItems(result: ProjectArtifacts): ArtifactTreeItem[] {
 		const sections: SectionMeta[] = [
 			{
 				id: 'configurations',
@@ -165,25 +201,25 @@ export class ProjectArtifactsTreeDataProvider
 		];
 
 		return sections.map(
-			(s) => new SectionItem(s.label, s.count, s.icon, s.id)
+			(s) => new SectionItem(s.label, s.count, s.icon, s.id, result)
 		);
 	}
 
 	private getSectionChildren(
 		sectionId: string,
-		result: ArtifactsScanResult
+		result: ProjectArtifacts
 	): ArtifactTreeItem[] {
 		const viewMode = this.getViewMode();
 
 		switch (sectionId) {
 			case 'configurations':
-				return this.buildArtifactItems(result.configurations, viewMode);
+				return this.buildArtifactItems(result.configurations, viewMode, result.root);
 			case 'extensions':
-				return this.buildArtifactItems(result.extensions, viewMode);
+				return this.buildArtifactItems(result.extensions, viewMode, result.root);
 			case 'processors':
-				return this.buildArtifactItems(result.processors, viewMode);
+				return this.buildArtifactItems(result.processors, viewMode, result.root);
 			case 'reports':
-				return this.buildArtifactItems(result.reports, viewMode);
+				return this.buildArtifactItems(result.reports, viewMode, result.root);
 			default:
 				return [];
 		}
@@ -191,7 +227,8 @@ export class ProjectArtifactsTreeDataProvider
 
 	private buildArtifactItems(
 		items: Artifact[],
-		viewMode: ArtifactsViewMode
+		viewMode: ArtifactsViewMode,
+		root: string
 	): ArtifactTreeItem[] {
 		const sorted = [...items].sort((a, b) =>
 			a.relativePath.localeCompare(b.relativePath, undefined, {
@@ -204,6 +241,7 @@ export class ProjectArtifactsTreeDataProvider
 			return sorted.map((a) =>
 				this.artifactToItem(
 					a,
+					root,
 					dupes.has(a.name.toLowerCase())
 						? parentDirName(a.relativePath)
 						: undefined
@@ -211,12 +249,13 @@ export class ProjectArtifactsTreeDataProvider
 			);
 		}
 
-		return this.buildHierarchy(sorted, (a) => this.artifactToItem(a));
+		return this.buildHierarchy(sorted, (a) => this.artifactToItem(a, root), root);
 	}
 
 	private buildHierarchy<T extends { relativePath: string }>(
 		items: T[],
-		toItem: (a: T) => ArtifactTreeItem
+		toItem: (a: T) => ArtifactTreeItem,
+		root: string
 	): ArtifactTreeItem[] {
 		const byDir = new Map<string, T[]>();
 		const rootItems: T[] = [];
@@ -238,7 +277,7 @@ export class ProjectArtifactsTreeDataProvider
 			a.localeCompare(b, undefined, { sensitivity: 'base' })
 		);
 
-		const tree = this.buildFolderTree(dirs, byDir, toItem);
+		const tree = this.buildFolderTree(dirs, byDir, toItem, root);
 		result.push(...tree);
 
 		return result;
@@ -247,7 +286,8 @@ export class ProjectArtifactsTreeDataProvider
 	private buildFolderTree<T extends { relativePath: string }>(
 		dirs: string[],
 		byDir: Map<string, T[]>,
-		toItem: (a: T) => ArtifactTreeItem
+		toItem: (a: T) => ArtifactTreeItem,
+		projectRoot: string
 	): FolderGroupItem[] {
 		interface DirNode {
 			items: T[];
@@ -278,8 +318,6 @@ export class ProjectArtifactsTreeDataProvider
 				current = node.children;
 			}
 		}
-
-		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
 		function toFolderGroup(
 			pathPrefix: string,
@@ -318,7 +356,7 @@ export class ProjectArtifactsTreeDataProvider
 				pathPrefix && !hasParentInTree
 					? `${pathPrefix.replaceAll('/', ' › ')} › ${name}`
 					: name;
-			return new FolderGroupItem(fullPath, label, children, workspaceRoot);
+			return new FolderGroupItem(fullPath, label, children, projectRoot);
 		}
 
 		const result: FolderGroupItem[] = [];
@@ -333,6 +371,7 @@ export class ProjectArtifactsTreeDataProvider
 
 	private artifactToItem(
 		a: Artifact,
+		root: string,
 		parentDirDescription?: string
 	): ArtifactTreeItem {
 		const label = a.name;
@@ -347,6 +386,7 @@ export class ProjectArtifactsTreeDataProvider
 			icon,
 			isBinary,
 			openTargetUri,
+			root,
 			parentDirDescription,
 			a.format
 		);
@@ -361,16 +401,34 @@ interface SectionMeta {
 }
 
 type ArtifactTreeItem =
+	| ProjectItem
 	| SectionItem
 	| FolderGroupItem
 	| ArtifactItem;
+
+/** Группа проекта, когда проектов несколько. */
+class ProjectItem extends vscode.TreeItem {
+	constructor(public readonly result: ProjectArtifacts) {
+		super(
+			projectLabel(result.root),
+			isSelectedRoot(result.root)
+				? vscode.TreeItemCollapsibleState.Expanded
+				: vscode.TreeItemCollapsibleState.Collapsed
+		);
+		this.description = isSelectedRoot(result.root) ? CURRENT_PROJECT_DESCRIPTION : undefined;
+		this.tooltip = result.root;
+		this.iconPath = new vscode.ThemeIcon('repo');
+		this.contextValue = 'artifactsProject';
+	}
+}
 
 class SectionItem extends vscode.TreeItem {
 	constructor(
 		label: string,
 		count: number,
 		icon: string,
-		public readonly sectionId: string
+		public readonly sectionId: string,
+		public readonly result: ProjectArtifacts
 	) {
 		super(
 			label,
@@ -389,13 +447,10 @@ class FolderGroupItem extends vscode.TreeItem {
 		public readonly folderPath: string,
 		label: string,
 		public readonly children: ArtifactTreeItem[],
-		workspaceRoot: string
+		projectRoot: string
 	) {
 		super(label, vscode.TreeItemCollapsibleState.Expanded);
-		const fullPath = workspaceRoot
-			? path.join(workspaceRoot, folderPath)
-			: folderPath;
-		this.resourceUri = vscode.Uri.file(fullPath);
+		this.resourceUri = vscode.Uri.file(path.join(projectRoot, folderPath));
 		this.contextValue = 'artifactsFolderGroup';
 	}
 }
@@ -414,6 +469,7 @@ class ArtifactItem extends vscode.TreeItem {
 		icon: string,
 		_isBinary: boolean,
 		openTargetUri: vscode.Uri,
+		public readonly projectRoot: string,
 		parentDirDescription?: string,
 		format?: SourceFormat
 	) {

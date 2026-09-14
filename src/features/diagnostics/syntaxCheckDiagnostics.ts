@@ -13,6 +13,7 @@ import { parseSyntaxCheckFindings, SyntaxCheckFinding, SyntaxCheckSeverity } fro
 import { resolveProjectLayout, type SourceRoot } from '../../shared/projectLayout';
 import { resolveMetadataInRoots } from '../tools/terminalLinks';
 import { extractQuotedIdentifier, findIdentifierOffsets, LineMap } from './bslLocator';
+import { onDidChangeCurrentProject, outsideProject, runWithProject } from '../../shared/workspaceProjects';
 
 const log = logger.scope('syntax-check');
 
@@ -30,7 +31,8 @@ const DEFAULT_JUNIT_REL = 'build/out/syntax-check/junit/junit.xml';
  * стандартный путь. Обновление завязано на FileSystemWatcher по файлу отчёта:
  * UI-режим запускает vrunner в терминале «выстрелил и забыл», поэтому опираться
  * на момент завершения команды нельзя — перечитываем отчёт по факту перезаписи.
- * Перезапуск env.json меняет путь → watcher пересоздаётся.
+ * Перезапуск env.json меняет путь → watcher пересоздаётся. Смена текущего
+ * проекта очищает диагностику и переводит watcher'ы на новый проект.
  *
  * Номера строк vrunner не выдаёт: каждая находка ставится в начало файла модуля
  * (range 0:0). Метаданные, не разложившиеся в .bsl (справка, неизвестные типы),
@@ -42,6 +44,9 @@ export class SyntaxCheckDiagnostics implements vscode.Disposable {
 	/** Watcher'ы, пересоздаваемые при reconfigure (файл отчёта + активный env-файл) */
 	private readonly reconfigurableListeners: vscode.Disposable[] = [];
 
+	/** Номер последней настройки: результаты прежних перечитываний не публикуются. */
+	private generation = 0;
+
 	constructor(private readonly vrunner: VRunnerManager) {
 		this.collection = vscode.languages.createDiagnosticCollection('1c-syntax-check');
 		this.disposables.push(this.collection);
@@ -49,6 +54,13 @@ export class SyntaxCheckDiagnostics implements vscode.Disposable {
 		// Смена активного профиля запуска меняет читаемый env-файл и путь к отчёту
 		this.disposables.push(
 			this.vrunner.onDidChangeActiveEnvProfile(() => void this.reconfigure())
+		);
+		// Находки прежнего проекта к новому не относятся
+		this.disposables.push(
+			onDidChangeCurrentProject(() => {
+				this.collection.clear();
+				void this.reconfigure();
+			})
 		);
 		// Дефолтный профиль может задаваться настройкой
 		this.disposables.push(
@@ -63,10 +75,11 @@ export class SyntaxCheckDiagnostics implements vscode.Disposable {
 	}
 
 	/**
-	 * Пересоздаёт watcher'ы (активный env-файл + файл отчёта) и перечитывает отчёт
+	 * Пересоздаёт watcher'ы (активный env-файл + файл отчёта) выбранного проекта и перечитывает отчёт
 	 */
 	private async reconfigure(): Promise<void> {
-		const root = this.vrunner.getWorkspaceRoot();
+		const generation = ++this.generation;
+		const root = outsideProject(() => this.vrunner.getWorkspaceRoot());
 
 		for (const listener of this.reconfigurableListeners.splice(0)) {
 			listener.dispose();
@@ -76,28 +89,34 @@ export class SyntaxCheckDiagnostics implements vscode.Disposable {
 			return;
 		}
 
-		// Следим за активным env-файлом: правка пути/опции syntax-check → пересборка
-		const envWatcher = vscode.workspace.createFileSystemWatcher(
-			new vscode.RelativePattern(root, this.vrunner.getActiveEnvFile())
-		);
-		this.reconfigurableListeners.push(
-			envWatcher,
-			envWatcher.onDidChange(() => void this.reconfigure()),
-			envWatcher.onDidCreate(() => void this.reconfigure()),
-			envWatcher.onDidDelete(() => void this.reconfigure())
-		);
+		await runWithProject(root, async () => {
+			const envFile = this.vrunner.getActiveEnvFile();
+			const junitAbs = await this.resolveJunitPath(root);
+			if (generation !== this.generation) {
+				return;
+			}
 
-		// Следим за файлом отчёта: перезапись после прогона → обновление диагностики
-		const junitAbs = await this.resolveJunitPath(root);
-		const junitWatcher = vscode.workspace.createFileSystemWatcher(buildWatchPattern(root, junitAbs));
-		this.reconfigurableListeners.push(
-			junitWatcher,
-			junitWatcher.onDidChange(() => void this.refresh()),
-			junitWatcher.onDidCreate(() => void this.refresh()),
-			junitWatcher.onDidDelete(() => this.clear())
-		);
+			// Следим за активным env-файлом: правка пути/опции syntax-check → пересборка
+			const envWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, envFile));
+			// Следим за файлом отчёта: перезапись после прогона → обновление диагностики
+			const junitWatcher = vscode.workspace.createFileSystemWatcher(buildWatchPattern(root, junitAbs));
+			this.reconfigurableListeners.push(
+				envWatcher,
+				envWatcher.onDidChange(() => void this.reconfigure()),
+				envWatcher.onDidCreate(() => void this.reconfigure()),
+				envWatcher.onDidDelete(() => void this.reconfigure()),
+				junitWatcher,
+				junitWatcher.onDidChange(() => void this.refreshRoot(root, generation)),
+				junitWatcher.onDidCreate(() => void this.refreshRoot(root, generation)),
+				junitWatcher.onDidDelete(() => {
+					if (generation === this.generation) {
+						this.clear();
+					}
+				})
+			);
 
-		await this.refresh();
+			await this.refreshRoot(root, generation);
+		});
 	}
 
 	/**
@@ -128,35 +147,51 @@ export class SyntaxCheckDiagnostics implements vscode.Disposable {
 	}
 
 	/**
-	 * Перечитывает отчёт и публикует диагностику (или очищает, если отчёта нет)
+	 * Перечитывает отчёт проекта, в котором выполняется вызов, и публикует диагностику (или очищает, если отчёта нет)
 	 */
-	public async refresh(): Promise<void> {
-		const root = this.vrunner.getWorkspaceRoot();
+	public refresh(): Promise<void> {
+		return this.refreshRoot(this.vrunner.getWorkspaceRoot());
+	}
+
+	/**
+	 * Перечитывает отчёт проекта и публикует диагностику.
+	 *
+	 * @param root - Корень проекта
+	 * @param generation - Настройка, от которой идёт перечитывание; устаревшее ничего не публикует
+	 */
+	private async refreshRoot(root: string | undefined, generation?: number): Promise<void> {
+		const actual = (): boolean => generation === undefined || generation === this.generation;
 		if (!root) {
 			this.collection.clear();
 			return;
 		}
 
-		const junitAbs = await this.resolveJunitPath(root);
-		let xml: string;
-		try {
-			xml = await fs.readFile(junitAbs, 'utf8');
-		} catch {
-			// Отчёта ещё нет — показывать нечего
-			this.collection.clear();
-			return;
-		}
+		await runWithProject(root, async () => {
+			const junitAbs = await this.resolveJunitPath(root);
+			let xml: string;
+			try {
+				xml = await fs.readFile(junitAbs, 'utf8');
+			} catch {
+				// Отчёта ещё нет — показывать нечего
+				if (actual()) {
+					this.collection.clear();
+				}
+				return;
+			}
 
-		let findings: SyntaxCheckFinding[];
-		try {
-			findings = parseSyntaxCheckFindings(xml);
-		} catch (error) {
-			// Битый XML (например, vrunner пишет файл прямо сейчас) — не трогаем текущую диагностику
-			log.warn(`не удалось разобрать ${junitAbs}: ${(error as Error).message}`);
-			return;
-		}
+			let findings: SyntaxCheckFinding[];
+			try {
+				findings = parseSyntaxCheckFindings(xml);
+			} catch (error) {
+				// Битый XML (например, vrunner пишет файл прямо сейчас) — не трогаем текущую диагностику
+				log.warn(`не удалось разобрать ${junitAbs}: ${(error as Error).message}`);
+				return;
+			}
 
-		await this.publish(findings, root);
+			if (actual()) {
+				await this.publish(findings, root);
+			}
+		});
 	}
 
 	/**

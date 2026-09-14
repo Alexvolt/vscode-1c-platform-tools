@@ -1,7 +1,6 @@
 import * as assert from 'node:assert';
 import * as path from 'node:path';
 import { activeSourceGlobBases, testProcessorGlobBases } from '../../features/testing/adapters/adapterUtils';
-import { initActiveConfiguration, setActiveConfiguration } from '../../shared/activeConfiguration';
 import { invalidateProjectLayout } from '../../shared/projectLayout';
 import type { VRunnerManager } from '../../shared/vrunnerManager';
 
@@ -15,39 +14,15 @@ function vrunnerAt(workspaceRoot: string): VRunnerManager {
 	} as unknown as VRunnerManager;
 }
 
-/** Хранилище выбора конфигурации в памяти. */
-function memoryContext(): unknown {
-	const values = new Map<string, unknown>();
-	return {
-		workspaceState: {
-			get: (key: string) => values.get(key),
-			update: async (key: string, value: unknown) => {
-				values.set(key, value);
-			},
-			keys: () => [...values.keys()],
-		},
-	};
-}
-
 suite('базы поиска тестов в раскладке EDT', () => {
-	setup(async () => {
+	setup(() => {
 		invalidateProjectLayout();
-		initActiveConfiguration(memoryContext() as never);
-		await setActiveConfiguration(undefined);
 	});
 
-	test('базы берутся у активной конфигурации и её расширений', async () => {
+	test('базы берутся у конфигурации проекта и всех его расширений', async () => {
 		const bases = await activeSourceGlobBases(vrunnerAt(EDT_WORKSPACE));
 
-		assert.deepStrictEqual(bases.sort(), ['ssl31', 'ssl31._ДемоРасширение'].sort());
-	});
-
-	test('смена конфигурации меняет базы поиска', async () => {
-		await setActiveConfiguration(path.join(EDT_WORKSPACE, 'учёт'));
-
-		const bases = await activeSourceGlobBases(vrunnerAt(EDT_WORKSPACE));
-
-		assert.deepStrictEqual(bases.sort(), ['учёт', 'учёт.РасширениеУчёта'].sort());
+		assert.deepStrictEqual(bases.sort(), ['ssl31', 'ssl31._ДемоРасширение', 'учёт.РасширениеУчёта'].sort());
 	});
 
 	test('проекты с тестовыми обработками отдаются отдельно, обработки решения панели не нужны', async () => {

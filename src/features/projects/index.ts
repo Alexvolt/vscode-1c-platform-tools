@@ -9,7 +9,7 @@ export { AutodetectProvider } from './autodetectProvider';
 export { ProjectsProviders } from './providers';
 export { pickProjects, openPickedProject, pickFavoritesToConfigure, canSwitchOnActiveWindow, shouldOpenInNewWindow } from './projectsPicker';
 export { pickTags } from './tagsPicker';
-export { showStatusBar, updateStatusBar } from './statusBar';
+export { showStatusBar } from './statusBar';
 export { getProjectsFilePath, expandHomePath, normalizePath } from './pathUtils';
 export { InvocationSource } from './constants';
 export type { Project } from './project';

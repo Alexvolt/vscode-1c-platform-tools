@@ -17,7 +17,8 @@ import { logger } from '../../shared/logger';
 import { ENV_DEFAULTS, AUTUMN_DEFAULTS } from '../serviceFiles/envDefaults';
 import { buildEnvJsonWithSections } from '../serviceFiles/envJsonBuilder';
 import { isAgentOptions, uiOnlyHandler } from '../../shared/agentGate';
-import { invalidateHooksCache } from '../../shared/commandHooks';
+import { currentRoot, onDidChangeCurrentProject, outsideProject, runWithProject } from '../../shared/workspaceProjects';
+import { inCurrentProject } from '../../commands/projectScope';
 import {
 	ensureEnvProfileStatusBar,
 	refreshEnvProfileStatusBar,
@@ -513,13 +514,14 @@ export function registerLaunchFeature(
 	isProjectRef: ProjectRef
 ): vscode.Disposable[] {
 	const vrunner = VRunnerManager.getInstance(context);
-	const refresh = () => refreshEnvProfileStatusBar(isProjectRef.current);
+	// Строка состояния показывает профиль выбранного проекта, а не проекта вызова
+	const refresh = () => outsideProject(() => refreshEnvProfileStatusBar(isProjectRef.current));
 
 	ensureEnvProfileStatusBar();
 	refresh();
 
 	const disposables: vscode.Disposable[] = [
-		vscode.commands.registerCommand('1c-platform-tools.env.selectProfile', (profileId?: unknown) => {
+		vscode.commands.registerCommand('1c-platform-tools.env.selectProfile', inCurrentProject((profileId?: unknown) => {
 			// строковый аргумент — неинтерактивный вызов (агент, web-сессия agent-клиента)
 			if (typeof profileId === 'string' && profileId.trim() !== '') {
 				return selectProfileById(vrunner, refresh, profileId);
@@ -541,8 +543,8 @@ export function registerLaunchFeature(
 				};
 			}
 			return selectProfile(vrunner, refresh);
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.env.openProfileEditor', async (target?: vscode.Uri) => {
+		})),
+		vscode.commands.registerCommand('1c-platform-tools.env.openProfileEditor', inCurrentProject(async (target?: vscode.Uri) => {
 			// Кнопка над открытым файлом передаёт его сам: редактор нужен для него,
 			// а не для активного профиля проекта
 			if (target instanceof vscode.Uri) {
@@ -563,8 +565,8 @@ export function registerLaunchFeature(
 				return;
 			}
 			await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(fullPath), '1c-platform-tools.profileEditor');
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.env.status', async () => {
+		})),
+		vscode.commands.registerCommand('1c-platform-tools.env.status', inCurrentProject(async () => {
 			// read-only состояние окружения запуска: без окон, доступно агенту
 			await vrunner.getVRunnerVersion();
 			const workspaceRoot = vrunner.getWorkspaceRoot();
@@ -604,18 +606,18 @@ export function registerLaunchFeature(
 				stderr: '',
 				status,
 			};
-		}),
+		})),
 		vscode.commands.registerCommand('1c-platform-tools.env.createProfile', uiOnlyHandler(
 			'Имя профиля запрашивается в окне VS Code; профиль создаётся пользователем или файлом env.<id>.json.',
-			() => createProfile(vrunner, refresh)
+			inCurrentProject(() => createProfile(vrunner, refresh))
 		)),
 		vscode.commands.registerCommand('1c-platform-tools.env.setOverrides', uiOnlyHandler(
 			'Временные параметры задаются в окнах VS Code; для агента передавайте settingsFile или ibConnection в вызове.',
-			() => editOverrides(vrunner, refresh)
+			inCurrentProject(() => editOverrides(vrunner, refresh))
 		)),
-		vscode.commands.registerCommand('1c-platform-tools.env.clearOverrides', () => clearOverrides(vrunner, refresh)),
+		vscode.commands.registerCommand('1c-platform-tools.env.clearOverrides', inCurrentProject(() => clearOverrides(vrunner, refresh))),
 		vscode.commands.registerCommand('1c-platform-tools.env.statusBarRefresh', () => refresh()),
-		vscode.commands.registerCommand('1c-platform-tools.env.refreshVersion', async (): Promise<StructuredCommandResult> => {
+		vscode.commands.registerCommand('1c-platform-tools.env.refreshVersion', inCurrentProject(async (): Promise<StructuredCommandResult> => {
 			const version = await vrunner.getVRunnerVersion(true);
 			refresh();
 			const message = version
@@ -628,9 +630,8 @@ export function registerLaunchFeature(
 				stdout: version ? message : '',
 				stderr: version ? '' : message,
 			};
-		}),
+		})),
 		vrunner.onDidChangeVRunnerVersion(() => refresh()),
-		vrunner.watchVRunnerInstallation(),
 		vscode.workspace.onDidChangeWorkspaceFolders(() => refresh()),
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration('1c-platform-tools.env.defaultProfile')) {
@@ -640,46 +641,75 @@ export function registerLaunchFeature(
 		{ dispose: disposeEnvProfileStatusBar },
 	];
 
-	// Создание/удаление env-профилей и служебных файлов → обновляем статус-бар и
-	// дерево; .git/HEAD — чтобы значения с ${gitBranch} обновлялись при смене ветки
-	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-	if (workspaceFolder) {
-		const watcher = vscode.workspace.createFileSystemWatcher(
-			new vscode.RelativePattern(
-				workspaceFolder,
-				'{env*.json,autumn-properties*.json,.gitignore,.gitattributes,tools/**,.1cpt/**,.git/HEAD}'
-			)
-		);
-		const onFsChange = () => {
-			// Хуки читаются с кэшем: без сброса правка .1cpt/hooks.json не действует до перезагрузки окна
-			invalidateHooksCache(workspaceFolder.uri.fsPath);
+	// Наблюдатель файлов смотрит в текущий проект и пересоздаётся при его смене
+	let projectWatch: vscode.Disposable | undefined;
+	const watchProject = (root: string | undefined): void => {
+		projectWatch?.dispose();
+		projectWatch = root === undefined ? undefined : watchProjectFiles(root, vrunner, isProjectRef, refresh);
+	};
+	watchProject(currentRoot());
+
+	disposables.push(
+		vrunner.watchVRunnerInstallation(),
+		onDidChangeCurrentProject((change) => {
+			watchProject(change.current);
 			refresh();
-			// Вне проекта 1С дерева нет, а команда обновления ответила бы уведомлением на каждую смену ветки
-			if (isProjectRef.current) {
-				void vscode.commands.executeCommand('1c-platform-tools.tools.refresh').then(undefined, () => undefined);
-			}
-		};
-		// Удалили файл активного именованного профиля — возвращаемся к базовому
-		const onFsDelete = async () => {
-			const activeId = vrunner.getActiveEnvProfileId();
-			if (activeId !== DEFAULT_PROFILE_ID && !vrunner.discoverEnvProfiles().some((profile) => profile.id === activeId)) {
-				await vrunner.setActiveEnvProfileId(DEFAULT_PROFILE_ID);
-			}
-			onFsChange();
-		};
-		// Предложение про .gitignore — только при появлении файла в открытом окне:
-		// для давно существующего файла тост при каждом запуске был бы навязчивым
-		const onFsCreate = (uri: vscode.Uri) => {
-			onFsChange();
-			if (isProjectRef.current && path.basename(uri.fsPath) === LOCAL_OVERRIDES_FILE) {
-				void suggestGitignoreForLocalOverrides(workspaceFolder.uri.fsPath);
-			}
-		};
-		watcher.onDidCreate(onFsCreate);
-		watcher.onDidChange(onFsChange);
-		watcher.onDidDelete(() => void onFsDelete());
-		disposables.push(watcher);
-	}
+			void vrunner.getVRunnerVersion();
+		}),
+		new vscode.Disposable(() => projectWatch?.dispose())
+	);
 
 	return disposables;
+}
+
+/**
+ * Следит за профилями и служебными файлами проекта: создание и удаление обновляют
+ * строку состояния и дерево, `.git/HEAD` обновляет значения с `${gitBranch}`.
+ *
+ * @param root - Корень проекта
+ * @param vrunner - Менеджер vrunner
+ * @param isProjectRef - Изменяемая ссылка на признак проекта 1С
+ * @param refresh - Обновление строки состояния
+ */
+function watchProjectFiles(
+	root: string,
+	vrunner: VRunnerManager,
+	isProjectRef: ProjectRef,
+	refresh: () => void
+): vscode.Disposable {
+	const watcher = vscode.workspace.createFileSystemWatcher(
+		new vscode.RelativePattern(
+			root,
+			'{env*.json,autumn-properties*.json,.gitignore,.gitattributes,tools/**,.1cpt/**,.git/HEAD}'
+		)
+	);
+	const onFsChange = () => {
+		refresh();
+		// Вне проекта 1С дерева нет, а команда обновления ответила бы уведомлением на каждую смену ветки
+		if (isProjectRef.current) {
+			void vscode.commands.executeCommand('1c-platform-tools.tools.refresh').then(undefined, () => undefined);
+		}
+	};
+	// Удалили файл активного именованного профиля — возвращаемся к базовому
+	const onFsDelete = () => runWithProject(root, async () => {
+		const activeId = vrunner.getActiveEnvProfileId();
+		if (activeId !== DEFAULT_PROFILE_ID && !vrunner.discoverEnvProfiles().some((profile) => profile.id === activeId)) {
+			await vrunner.setActiveEnvProfileId(DEFAULT_PROFILE_ID);
+		}
+		onFsChange();
+	});
+	// Предложение про .gitignore — только при появлении файла в открытом окне:
+	// для давно существующего файла тост при каждом запуске был бы навязчивым
+	const onFsCreate = (uri: vscode.Uri) => {
+		onFsChange();
+		if (isProjectRef.current && path.basename(uri.fsPath) === LOCAL_OVERRIDES_FILE) {
+			void suggestGitignoreForLocalOverrides(root);
+		}
+	};
+	return vscode.Disposable.from(
+		watcher,
+		watcher.onDidCreate(onFsCreate),
+		watcher.onDidChange(onFsChange),
+		watcher.onDidDelete(() => void onFsDelete())
+	);
 }

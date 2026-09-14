@@ -1,17 +1,24 @@
 import * as assert from 'node:assert';
 import * as path from 'node:path';
 import { scanArtifacts, type Artifact } from '../features/artifacts/artifactsScanner';
+import { isOutsideScanRoot, projectRelativePath } from '../features/artifacts/projectScan';
 import { invalidateProjectLayout, setLayoutExclusions } from '../shared/projectLayout';
+import { detectWorkspaceProjects, scanRootsOf } from '../shared/workspaceProjects';
 
 /** Рабочие области с исходным кодом в обоих форматах. */
 const FIXTURES = path.resolve(__dirname, '../../src/test/fixtures/projectLayout');
 const DESIGNER_WORKSPACE = path.join(FIXTURES, 'designer');
 const EDT_WORKSPACE = path.join(FIXTURES, 'edt-workspace');
 
+/** Проект с подпроектом, собранными файлами и зависимостями. */
+const PROJECT = path.resolve(__dirname, '../../src/test/fixtures/workspaceScan/проект');
+const SUB_PROJECT = path.join(PROJECT, 'подпроект');
+
 const names = (artifacts: Artifact[]) => artifacts.map((artifact) => `${artifact.kind}:${artifact.name}`).sort();
+const paths = (artifacts: Artifact[]) => artifacts.map((artifact) => artifact.relativePath).sort();
 const tail = (file: string | undefined, segments: number) => (file ?? '').split(path.sep).slice(-segments).join('/');
 
-suite('артефакты: скан рабочей области', () => {
+suite('артефакты: скан проектов', () => {
 	setup(() => {
 		setLayoutExclusions(() => []);
 		invalidateProjectLayout();
@@ -19,8 +26,9 @@ suite('артефакты: скан рабочей области', () => {
 
 	test('выгрузка конфигуратора: исходный код из раскладки, собранные файлы поиском', async function () {
 		this.timeout(60_000);
-		const result = await scanArtifacts(undefined, [DESIGNER_WORKSPACE]);
+		const [result] = await scanArtifacts(undefined, [{ root: DESIGNER_WORKSPACE, excludeDirs: [] }]);
 
+		assert.strictEqual(result.root, DESIGNER_WORKSPACE);
 		assert.deepStrictEqual(names(result.configurations), ['binary:1Cv8.cf', 'source:Конфигурация', 'source:Подмодуль'].sort());
 		assert.deepStrictEqual(names(result.extensions), ['source:Расширение', 'source:Вложенное', 'source:Тесты'].sort());
 		assert.deepStrictEqual(names(result.processors), ['source:ПечатьСчёта', 'source:Тесты_Арифметика'].sort());
@@ -36,7 +44,7 @@ suite('артефакты: скан рабочей области', () => {
 
 	test('проекты EDT: имена из метаданных, внешние объекты каталогами внутри проекта', async function () {
 		this.timeout(60_000);
-		const result = await scanArtifacts(undefined, [EDT_WORKSPACE]);
+		const [result] = await scanArtifacts(undefined, [{ root: EDT_WORKSPACE, excludeDirs: [] }]);
 
 		assert.deepStrictEqual(names(result.configurations), ['source:БиблиотекаСтандартныхПодсистемДемо', 'source:УчётДемо'].sort());
 		assert.deepStrictEqual(names(result.extensions), ['source:_ДемоРасширение', 'source:РасширениеУчёта', 'source:Тесты'].sort());
@@ -47,5 +55,60 @@ suite('артефакты: скан рабочей области', () => {
 		const processor = result.processors.find((artifact) => artifact.name === 'ТестоваяВнешняяОбработка');
 		assert.strictEqual(tail(processor?.uri.fsPath, 4), 'dp/src/ExternalDataProcessors/ТестоваяВнешняяОбработка');
 		assert.strictEqual(tail(processor?.sourceEntryUri?.fsPath, 1), 'ТестоваяВнешняяОбработка.mdo');
+	});
+
+	test('подпроект: его артефакты только у него, пути от корня своего проекта', async function () {
+		this.timeout(60_000);
+		const [project, subProject] = await scanArtifacts(undefined, [
+			{ root: PROJECT, excludeDirs: [SUB_PROJECT] },
+			{ root: SUB_PROJECT, excludeDirs: [] },
+		]);
+
+		assert.strictEqual(project.root, PROJECT);
+		assert.deepStrictEqual(names(project.configurations), ['binary:Основная.cf', 'source:Основная']);
+		assert.deepStrictEqual(paths(project.configurations), ['release/Основная.cf', 'src/cf']);
+
+		assert.strictEqual(subProject.root, SUB_PROJECT);
+		assert.deepStrictEqual(names(subProject.configurations), ['binary:Подпроект.cf', 'source:Подпроект']);
+		assert.deepStrictEqual(paths(subProject.configurations), ['release/Подпроект.cf', 'src/cf']);
+	});
+
+	test('расширения подпроектов показываются один раз, у подпроекта; репозиторий расширения у проекта', async function () {
+		this.timeout(60_000);
+		const retail = path.resolve(__dirname, '../../src/test/fixtures/workspaceProjects/розница');
+		const snapshot = await detectWorkspaceProjects([{ name: 'розница', root: retail }]);
+		const results = await scanArtifacts(undefined, scanRootsOf(snapshot, [{ name: 'розница', root: retail }]));
+
+		assert.deepStrictEqual(
+			results.map((result) => [path.basename(result.root), names(result.extensions)]),
+			[
+				['розница', ['source:Адаптер', 'source:Доработки']],
+				['менеджер-пакетов', ['source:МенеджерПакетов', 'source:ТестыМенеджераПакетов']],
+				['метрики', ['source:КлиентМетрик']],
+				['экспорт', ['source:ЭкспортМетрик']],
+			]
+		);
+	});
+});
+
+suite('артефакты: каталоги проекта', () => {
+	const root = path.resolve('/work/build/проект');
+
+	test('исключённые сегменты сравниваются только ниже корня проекта', () => {
+		const file = path.join(root, 'release', 'Основная.cf');
+		assert.strictEqual(isOutsideScanRoot({ root, excludeDirs: [] }, file, ['build']), false);
+		assert.strictEqual(isOutsideScanRoot({ root, excludeDirs: [] }, path.join(root, 'build', 'x.cf'), ['build']), true);
+	});
+
+	test('подпроект и путь вне корня проекту не принадлежат', () => {
+		const sub = path.join(root, 'подпроект');
+		assert.strictEqual(isOutsideScanRoot({ root, excludeDirs: [sub] }, path.join(sub, 'x.cf'), []), true);
+		assert.strictEqual(isOutsideScanRoot({ root, excludeDirs: [sub] }, path.join(root, 'подпроект-2', 'x.cf'), []), false);
+		assert.strictEqual(isOutsideScanRoot({ root, excludeDirs: [] }, path.resolve('/work/другой/x.cf'), []), true);
+	});
+
+	test('путь от корня проекта через косую черту', () => {
+		assert.strictEqual(projectRelativePath(root, root), '.');
+		assert.strictEqual(projectRelativePath(root, path.join(root, 'src', 'cf')), 'src/cf');
 	});
 });

@@ -7,6 +7,7 @@ import {
 import { METADATA_SEARCH_VIEW_ID, MetadataSearchViewProvider } from './metadataSearchView';
 import { METADATA_FILTERS_VIEW_ID, MetadataFilterViewProvider, type FilterSelection } from './metadataFilterView';
 import { computeSubsystemFilter } from './metadataSubsystemFilter';
+import { bindProjectDescription } from '../projects/projectViewDescription';
 
 /** Отмеченные подсистемы применяются сразу: пустой набор снимает отбор. */
 function applyFilterSelection(metadataTreeProvider: MetadataTreeDataProvider, selection: FilterSelection): void {
@@ -42,7 +43,7 @@ export function registerMetadataView(
 		treeDataProvider: metadataTreeProvider,
 		showCollapseAll: true,
 	});
-	context.subscriptions.push(metadataTreeView);
+	context.subscriptions.push(metadataTreeView, bindProjectDescription(metadataTreeView));
 	// Раскрытие верхнего уровня переживает обновление дерева: оно перестраивается целиком.
 	context.subscriptions.push(
 		metadataTreeView.onDidExpandElement((e) => {

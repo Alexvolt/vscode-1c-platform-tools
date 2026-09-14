@@ -9,6 +9,7 @@ import {
 	externalEntry,
 	externalKindOfHead,
 	invalidateProjectLayout,
+	invalidateProjectLayoutsContaining,
 	isTestPath,
 	markerIn,
 	resolveProjectLayout,
@@ -226,6 +227,16 @@ suite('раскладка проекта', () => {
 		const second = await resolveProjectLayout(EDT_WORKSPACE);
 		assert.notStrictEqual(first, second);
 		assert.deepStrictEqual(second, first);
+	});
+
+	test('сброс по пути забывает только корни, внутри которых путь лежит', async () => {
+		const edt = await resolveProjectLayout(EDT_WORKSPACE);
+		const designer = await resolveProjectLayout(DESIGNER_WORKSPACE);
+
+		invalidateProjectLayoutsContaining(path.join(EDT_WORKSPACE, 'ssl31', 'src', 'Configuration', 'Configuration.mdo'));
+
+		assert.notStrictEqual(await resolveProjectLayout(EDT_WORKSPACE), edt);
+		assert.strictEqual(await resolveProjectLayout(DESIGNER_WORKSPACE), designer);
 	});
 
 	test('без исходного кода раскладка пустая', async () => {

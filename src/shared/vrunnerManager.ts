@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { exec } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
@@ -24,8 +23,6 @@ import { runCancellableCommand, CancellableProcessResult } from './cancellablePr
 import { DEFAULT_PATHS, DEFAULT_VRUNNER, DEFAULT_ENV } from './pathDefaults';
 import { getOvmBinaryPath, getOvmBinDir, getOvmRootDir, getOpmBinaryCandidates, getOpmScriptPath, withBinDirFirst } from './ovmPaths';
 import {
-	ACTIVE_ENV_PROFILE_KEY,
-	ACTIVE_ENV_OVERRIDES_KEY,
 	BASE_ENV_FILE,
 	LOCAL_OVERRIDES_FILE,
 	SettingsSchema,
@@ -58,6 +55,10 @@ import { parseSettingsJson, readSettingsJson, readSettingsJsonSync } from './set
 import { translateArgsToV3 } from './vrunnerCommandMap';
 import { createVRunnerTask, type TaskOutputChain } from '../features/tasks/vrunnerTask';
 import { decodeProcessOutput } from './processOutput';
+import { ACTIVE_ENV_OVERRIDES_STATE, ACTIVE_ENV_PROFILE_STATE, projectMemento } from './projectState';
+import { currentRoot, projectRootKey, runWithProject } from './workspaceProjects';
+import { projectConfiguration } from './projectConfiguration';
+import { projectTerminal } from '../features/tasks/terminalProjects';
 
 const log = logger.scope('vrunner');
 
@@ -117,24 +118,17 @@ type SettingsDocument = any;
  */
 export class VRunnerManager {
 	private static instance: VRunnerManager;
-	private readonly workspaceRoot: string | undefined;
 	private extensionPath: string | undefined;
 	private memento: vscode.Memento | undefined;
-	/**
-	 * Кэш определённой версии vrunner.
-	 * undefined — ещё не определяли; null — определить не удалось.
-	 */
-	/** Контекст корня проекта для текущей цепочки вызовов (MCP/IPC с projectPath). */
-	private static readonly projectRootStorage = new AsyncLocalStorage<string>();
 
-	/** Кэш версии vrunner по корню проекта (workspace и projectPath различаются). */
+	/** Кэш версии vrunner по корню проекта: undefined - ещё не определяли, null - определить не удалось. */
 	private readonly vrunnerVersionCacheByRoot = new Map<string, VRunnerVersion | null>();
 
-	/** Идущая сейчас проверка oscript: гасит параллельные запуски. */
-	private oscriptCheckInFlight: Promise<boolean> | undefined = undefined;
+	/** Идущие сейчас проверки oscript по значению components.path.oscript: гасят параллельные запуски. */
+	private readonly oscriptChecksInFlight = new Map<string, Promise<boolean>>();
 
-	/** Идущая сейчас проверка opm. */
-	private opmCheckInFlight: Promise<boolean> | undefined = undefined;
+	/** Идущие сейчас проверки opm по значению components.path.oscript. */
+	private readonly opmChecksInFlight = new Map<string, Promise<boolean>>();
 
 	/** Идущий сейчас детект версии по корню: гасит параллельные запуски vrunner. */
 	private readonly vrunnerVersionInFlight = new Map<string, Promise<VRunnerVersion | undefined>>();
@@ -151,17 +145,17 @@ export class VRunnerManager {
 	/** Замечания последнего планирования (применённые/отброшенные временные параметры). */
 	private planNotices: string[] = [];
 	/**
-	 * Разрешённый путь к oscript: имя для PATH, абсолютный путь установки OVM или
-	 * undefined, пока проверка не выполнялась. Обновляется в checkOscriptAvailable
-	 * и используется синхронными getOnescriptPath/исполнением.
+	 * Разрешённые пути к oscript по значению components.path.oscript: имя для PATH или
+	 * абсолютный путь установки. Заполняются в checkOscriptAvailable и используются
+	 * синхронными getOnescriptPath/исполнением.
 	 */
-	private resolvedOscriptPath: string | undefined = undefined;
+	private readonly resolvedOscriptPaths = new Map<string, string>();
 	/**
-	 * Разрешённый способ запуска opm: путь к запускаемому файлу и ведущие
-	 * аргументы. Для обёртки из PATH/bin аргументы пусты; если обёртки нет,
-	 * opm запускается через oscript со скриптом opm.os из установки OneScript.
+	 * Разрешённые способы запуска opm по значению components.path.oscript: путь к
+	 * запускаемому файлу и ведущие аргументы. Для обёртки из PATH/bin аргументы пусты;
+	 * если обёртки нет, opm запускается через oscript со скриптом opm.os из установки OneScript.
 	 */
-	private resolvedOpm: { path: string; leadingArgs: string[] } | undefined = undefined;
+	private readonly resolvedOpms = new Map<string, { path: string; leadingArgs: string[] }>();
 
 	/** Событие смены активного env-профиля (id в workspaceState) */
 	private readonly _onDidChangeActiveEnvProfile = new vscode.EventEmitter<void>();
@@ -174,10 +168,6 @@ export class VRunnerManager {
 	public readonly onDidChangeVRunnerVersion = this._onDidChangeVRunnerVersion.event;
 
 	private constructor(context?: vscode.ExtensionContext) {
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		if (workspaceFolders && workspaceFolders.length > 0) {
-			this.workspaceRoot = workspaceFolders[0].uri.fsPath;
-		}
 		if (context) {
 			this.extensionPath = context.extensionPath;
 			this.memento = context.workspaceState;
@@ -227,31 +217,40 @@ export class VRunnerManager {
 	 *          или 'vrunner' для поиска в PATH
 	 */
 	/**
-	 * Выполняет fn в контексте корня проекта: бинарь vrunner, версия, схема
-	 * настроек и файлы профилей резолвятся от root, а не от workspace.
-	 * Используется IPC-сервером для вызовов с projectPath.
+	 * Выполняет fn с корнем проекта: бинарь vrunner, версия, схема настроек и
+	 * файлы профилей резолвятся от root.
 	 *
 	 * @param root - Абсолютный путь к корню проекта 1С
 	 * @param fn - Действие в контексте корня
 	 * @returns Результат fn
 	 */
 	public runWithProjectRoot<T>(root: string, fn: () => Promise<T>): Promise<T> {
-		return VRunnerManager.projectRootStorage.run(root, fn);
+		return runWithProject(root, fn);
 	}
 
 	/**
-	 * Корень активного контекста: projectPath текущего агентного вызова
-	 * или корень workspace.
+	 * Корень текущего проекта с учётом корня вызова.
 	 *
-	 * @returns Абсолютный путь либо undefined без workspace
+	 * @returns Абсолютный путь либо undefined без проекта
 	 */
 	private getEffectiveRoot(): string | undefined {
-		return VRunnerManager.projectRootStorage.getStore() ?? this.workspaceRoot;
+		return currentRoot();
+	}
+
+	/** Значение components.path.oscript в проекте вызова. */
+	private configuredOscriptPath(): string {
+		return projectConfiguration(this.getEffectiveRoot()).get<string>('components.path.oscript', '').trim();
+	}
+
+	/** Путь oscript, разрешённый для настройки проекта вызова. */
+	private get resolvedOscriptPath(): string | undefined {
+		return this.resolvedOscriptPaths.get(this.configuredOscriptPath());
 	}
 
 	/** Ключ кэша версии для активного корня. */
 	private versionCacheKey(): string {
-		return this.getEffectiveRoot() ?? '';
+		const root = this.getEffectiveRoot();
+		return root === undefined ? '' : projectRootKey(root);
 	}
 
 	public getVRunnerPath(): string {
@@ -281,8 +280,7 @@ export class VRunnerManager {
 	 * @returns Путь к файлу настроек инициализации (относительно workspace)
 	 */
 	public getVRunnerInitSettingsPath(): string {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		return config.get<string>('vrunner.path.initSettings', DEFAULT_VRUNNER.initSettingsPath);
+		return projectConfiguration(this.getEffectiveRoot()).get<string>('vrunner.path.initSettings', DEFAULT_VRUNNER.initSettingsPath);
 	}
 
 	/**
@@ -331,7 +329,7 @@ export class VRunnerManager {
 	 * @returns Имя команды для PATH или абсолютный путь к opm
 	 */
 	private getOpmInvocation(): { path: string; leadingArgs: string[] } {
-		return this.resolvedOpm ?? { path: 'opm', leadingArgs: [] };
+		return this.resolvedOpms.get(this.configuredOscriptPath()) ?? { path: 'opm', leadingArgs: [] };
 	}
 
 	/**
@@ -343,8 +341,7 @@ export class VRunnerManager {
 	 * @returns Путь к allure (для поиска в PATH или абсолютный путь)
 	 */
 	public getAllurePath(): string {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		return config.get<string>('components.path.allure', '').trim() || 'allure';
+		return projectConfiguration(this.getEffectiveRoot()).get<string>('components.path.allure', '').trim() || 'allure';
 	}
 
 
@@ -357,8 +354,7 @@ export class VRunnerManager {
 	 * @returns Путь к результатам сборки (относительно workspace)
 	 */
 	public getOutPath(): string {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		return config.get<string>('path.out', DEFAULT_PATHS.out);
+		return projectConfiguration(this.getEffectiveRoot()).get<string>('path.out', DEFAULT_PATHS.out);
 	}
 
 	/**
@@ -370,8 +366,7 @@ export class VRunnerManager {
 	 * @returns Путь к каталогу шаблонов (относительно workspace)
 	 */
 	public getDistPath(): string {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		return config.get<string>('path.dist', DEFAULT_PATHS.dist);
+		return projectConfiguration(this.getEffectiveRoot()).get<string>('path.dist', DEFAULT_PATHS.dist);
 	}
 
 
@@ -395,21 +390,25 @@ export class VRunnerManager {
 	public async checkOscriptAvailable(): Promise<boolean> {
 		// Найденное держим до конца сессии: проверка зовётся перед каждой командой.
 		// Ненайденное перепроверяем: инструмент могли поставить рядом, мимо расширения.
-		if (this.resolvedOscriptPath !== undefined) {
+		const configured = this.configuredOscriptPath();
+		if (this.resolvedOscriptPaths.has(configured)) {
 			return true;
 		}
-		if (this.oscriptCheckInFlight === undefined) {
-			this.oscriptCheckInFlight = (async () => {
-				this.resolvedOscriptPath = await this.resolveBinaryPath('oscript', '-version');
-				setTerminalOscriptBinDir(this.oscriptBinDir());
-				return this.resolvedOscriptPath !== undefined;
-			})();
+		let check = this.oscriptChecksInFlight.get(configured);
+		if (check === undefined) {
+			check = (async () => {
+				const resolved = await this.resolveBinaryPath('oscript', '-version', configured);
+				if (resolved !== undefined) {
+					this.resolvedOscriptPaths.set(configured, resolved);
+				}
+				setTerminalOscriptBinDir(this.oscriptBinDir(resolved));
+				return resolved !== undefined;
+			})().finally(() => {
+				this.oscriptChecksInFlight.delete(configured);
+			});
+			this.oscriptChecksInFlight.set(configured, check);
 		}
-		try {
-			return await this.oscriptCheckInFlight;
-		} finally {
-			this.oscriptCheckInFlight = undefined;
-		}
+		return check;
 	}
 
 	/**
@@ -419,8 +418,8 @@ export class VRunnerManager {
 	 * установка, найденная при активации.
 	 */
 	public async refreshOneScriptResolution(): Promise<void> {
-		this.resolvedOscriptPath = undefined;
-		this.resolvedOpm = undefined;
+		this.resolvedOscriptPaths.clear();
+		this.resolvedOpms.clear();
 		await this.checkOscriptAvailable();
 		await this.checkOpmAvailable();
 		await this.getVRunnerVersion(true);
@@ -438,20 +437,24 @@ export class VRunnerManager {
 	 * @returns Промис, который разрешается true, если opm доступен, иначе false
 	 */
 	public async checkOpmAvailable(): Promise<boolean> {
-		if (this.resolvedOpm !== undefined) {
+		const configured = this.configuredOscriptPath();
+		if (this.resolvedOpms.has(configured)) {
 			return true;
 		}
-		if (this.opmCheckInFlight === undefined) {
-			this.opmCheckInFlight = (async () => {
-				this.resolvedOpm = await this.resolveOpmInvocation();
-				return this.resolvedOpm !== undefined;
-			})();
+		let check = this.opmChecksInFlight.get(configured);
+		if (check === undefined) {
+			check = (async () => {
+				const resolved = await this.resolveOpmInvocation();
+				if (resolved !== undefined) {
+					this.resolvedOpms.set(configured, resolved);
+				}
+				return resolved !== undefined;
+			})().finally(() => {
+				this.opmChecksInFlight.delete(configured);
+			});
+			this.opmChecksInFlight.set(configured, check);
 		}
-		try {
-			return await this.opmCheckInFlight;
-		} finally {
-			this.opmCheckInFlight = undefined;
-		}
+		return check;
 	}
 
 	/**
@@ -507,13 +510,10 @@ export class VRunnerManager {
 	 *
 	 * @param name - Имя бинаря (oscript/opm)
 	 * @param versionArg - Аргумент проверки версии (-version / --version)
+	 * @param configured - Значение components.path.oscript проекта
 	 * @returns Имя для PATH, абсолютный путь OVM или undefined
 	 */
-	private async resolveBinaryPath(name: string, versionArg: string): Promise<string | undefined> {
-		const configured = vscode.workspace
-			.getConfiguration('1c-platform-tools')
-			.get<string>('components.path.oscript', '')
-			.trim();
+	private async resolveBinaryPath(name: string, versionArg: string, configured: string): Promise<string | undefined> {
 		if (name === 'oscript' && configured !== '') {
 			if (await this.runCommandForCheck(configured, [versionArg])) {
 				log.info(`oscript: указан настройкой components.path.oscript: ${configured}`);
@@ -664,8 +664,9 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Следит за установкой vanessa-runner в workspace и при её изменении
-	 * (переустановка через opm, смена версии) заново определяет версию.
+	 * Следит за установкой vanessa-runner во всех папках рабочей области и при её
+	 * изменении (переустановка через opm, смена версии) заново определяет версию
+	 * того корня, где установка изменилась.
 	 *
 	 * Без этого кэш версии живёт всю сессию, и после `opm install` панель
 	 * и команды продолжают работать со старой схемой.
@@ -673,27 +674,45 @@ export class VRunnerManager {
 	 * @returns Disposable наблюдателя
 	 */
 	public watchVRunnerInstallation(): vscode.Disposable {
-		const root = this.getEffectiveRoot();
-		if (!root) {
-			return new vscode.Disposable(() => undefined);
-		}
-		const watcher = vscode.workspace.createFileSystemWatcher(
-			new vscode.RelativePattern(root, 'oscript_modules/vanessa-runner/opm-metadata.xml')
-		);
-		let timer: NodeJS.Timeout | undefined;
-		const redetect = (): void => {
+		const watcher = vscode.workspace.createFileSystemWatcher('**/oscript_modules/vanessa-runner/opm-metadata.xml');
+		const timers = new Map<string, NodeJS.Timeout>();
+		const redetect = (uri: vscode.Uri): void => {
+			const root = path.resolve(uri.fsPath, '..', '..', '..');
+			const key = projectRootKey(root);
 			// установка идёт пакетно — детектим после паузы, одним вызовом
-			if (timer) {
-				clearTimeout(timer);
-			}
-			timer = setTimeout(() => {
-				void this.getVRunnerVersion(true);
-			}, 1500);
+			clearTimeout(timers.get(key));
+			timers.set(
+				key,
+				setTimeout(() => {
+					timers.delete(key);
+					void this.refreshVRunnerVersion(root);
+				}, 1500)
+			);
 		};
-		watcher.onDidCreate(redetect);
-		watcher.onDidChange(redetect);
-		watcher.onDidDelete(redetect);
-		return watcher;
+		return vscode.Disposable.from(
+			watcher,
+			watcher.onDidCreate(redetect),
+			watcher.onDidChange(redetect),
+			watcher.onDidDelete(redetect),
+			new vscode.Disposable(() => {
+				for (const timer of timers.values()) {
+					clearTimeout(timer);
+				}
+				timers.clear();
+			})
+		);
+	}
+
+	/**
+	 * Заново определяет версию vrunner корня, если она для него уже определялась.
+	 *
+	 * @param root - Корень, в `oscript_modules` которого изменилась установка
+	 */
+	public async refreshVRunnerVersion(root: string): Promise<void> {
+		if (!this.vrunnerVersionCacheByRoot.has(projectRootKey(root))) {
+			return;
+		}
+		await runWithProject(root, () => this.getVRunnerVersion(true));
 	}
 
 	/**
@@ -1267,10 +1286,10 @@ export class VRunnerManager {
 	/**
 	 * Каталог bin выбранной установки OneScript, если она найдена по абсолютному пути.
 	 *
+	 * @param resolved - Путь oscript
 	 * @returns Путь к каталогу bin или undefined, когда используется PATH
 	 */
-	private oscriptBinDir(): string | undefined {
-		const resolved = this.resolvedOscriptPath;
+	private oscriptBinDir(resolved = this.resolvedOscriptPath): string | undefined {
 		return resolved !== undefined && path.isAbsolute(resolved) ? path.dirname(resolved) : undefined;
 	}
 
@@ -1664,19 +1683,10 @@ export class VRunnerManager {
 			command = buildCommand(vrunnerPath, processedArgs, shellType);
 		}
 
-		/* eslint-disable no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем */
-		const terminalName = options?.name || '1C: Platform Tools';
-		const terminal =
-			vscode.window.terminals.find((t) => t.name === terminalName) ??
-			vscode.window.createTerminal({
-				name: terminalName,
-				cwd: cwd,
-				env: options?.env ? { ...process.env, ...options.env } : undefined,
-			});
-
+		const terminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, env: options?.env, root: this.getEffectiveRoot() });
+		// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 		terminal.sendText(command);
 		terminal.show();
-		/* eslint-enable no-restricted-syntax */
 	}
 
 	/**
@@ -1744,18 +1754,10 @@ export class VRunnerManager {
 				vscode.window.showErrorMessage(errMsg);
 				return;
 			}
-			/* eslint-disable no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем */
-			const dockerTerminalName = options?.name || '1C: Platform Tools';
-			const dockerTerminal =
-				vscode.window.terminals.find((t) => t.name === dockerTerminalName) ??
-				vscode.window.createTerminal({
-					name: dockerTerminalName,
-					cwd: cwd,
-					env: options?.env ? { ...process.env, ...options.env } : undefined,
-				});
+			const dockerTerminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, env: options?.env, root: this.getEffectiveRoot() });
+			// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 			dockerTerminal.sendText(command);
 			dockerTerminal.show();
-			/* eslint-enable no-restricted-syntax */
 			return;
 		}
 
@@ -1766,18 +1768,10 @@ export class VRunnerManager {
 		});
 		const fullCommand = joinCommands(commands, shellType);
 
-		/* eslint-disable no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем */
-		const seqTerminalName = options?.name || '1C: Platform Tools';
-		const seqTerminal =
-			vscode.window.terminals.find((t) => t.name === seqTerminalName) ??
-			vscode.window.createTerminal({
-				name: seqTerminalName,
-				cwd: cwd,
-				env: options?.env ? { ...process.env, ...options.env } : undefined,
-			});
+		const seqTerminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, env: options?.env, root: this.getEffectiveRoot() });
+		// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 		seqTerminal.sendText(fullCommand);
 		seqTerminal.show();
-		/* eslint-enable no-restricted-syntax */
 	}
 
 	/**
@@ -1992,14 +1986,10 @@ export class VRunnerManager {
 		const processedArgs = this.processCommandArgs([...leadingArgs, ...args], cwd, shellType);
 		const command = buildCommand(opmPath, processedArgs, shellType);
 
-		/* eslint-disable no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем */
-		const opmTerminalName = options?.name || '1C: Platform Tools';
-		const opmTerminal =
-			vscode.window.terminals.find((t) => t.name === opmTerminalName) ??
-			vscode.window.createTerminal({ name: opmTerminalName, cwd: cwd });
+		const opmTerminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, root: this.getEffectiveRoot() });
+		// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 		opmTerminal.sendText(command);
 		opmTerminal.show();
-		/* eslint-enable no-restricted-syntax */
 	}
 
 	/**
@@ -2149,12 +2139,11 @@ export class VRunnerManager {
 	 * @returns Идентификатор профиля (никогда не пустой)
 	 */
 	public getActiveEnvProfileId(): string {
-		const fromState = this.memento?.get<string>(ACTIVE_ENV_PROFILE_KEY);
+		const fromState = projectMemento().get<string>(ACTIVE_ENV_PROFILE_STATE);
 		if (typeof fromState === 'string' && fromState) {
 			return fromState;
 		}
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		const configured = config.get<string>('env.defaultProfile', DEFAULT_ENV.defaultProfile);
+		const configured = projectConfiguration(this.getEffectiveRoot()).get<string>('env.defaultProfile', DEFAULT_ENV.defaultProfile);
 		if (configured) {
 			return configured;
 		}
@@ -2162,13 +2151,13 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Сохраняет id активного env-профиля в workspaceState (локально, не коммитится)
+	 * Сохраняет id активного env-профиля в состоянии текущего проекта (локально, не коммитится)
 	 *
 	 * @param profileId - Идентификатор профиля (пустая строка — базовый env.json)
 	 * @returns Промис завершения записи
 	 */
 	public async setActiveEnvProfileId(profileId: string): Promise<void> {
-		await this.memento?.update(ACTIVE_ENV_PROFILE_KEY, profileId);
+		await projectMemento().update(ACTIVE_ENV_PROFILE_STATE, profileId);
 		this._onDidChangeActiveEnvProfile.fire();
 	}
 
@@ -2198,22 +2187,22 @@ export class VRunnerManager {
 	/**
 	 * Возвращает временные параметры активного профиля.
 	 *
-	 * @returns Временные параметры из workspaceState или undefined
+	 * @returns Временные параметры из состояния текущего проекта или undefined
 	 */
 	public getActiveEnvOverrides(): EnvOverrides | undefined {
-		const raw = this.memento?.get<EnvOverrides>(ACTIVE_ENV_OVERRIDES_KEY);
+		const raw = projectMemento().get<EnvOverrides>(ACTIVE_ENV_OVERRIDES_STATE);
 		return raw && hasOverrides(raw) ? raw : undefined;
 	}
 
 	/**
-	 * Сохраняет временные параметры активного профиля (локально, не коммитится)
+	 * Сохраняет временные параметры активного профиля в состоянии текущего проекта (локально, не коммитится)
 	 *
 	 * @param overrides - Временные параметры или undefined для сброса
 	 * @returns Промис завершения записи
 	 */
 	public async setActiveEnvOverrides(overrides: EnvOverrides | undefined): Promise<void> {
 		const value = overrides && hasOverrides(overrides) ? overrides : undefined;
-		await this.memento?.update(ACTIVE_ENV_OVERRIDES_KEY, value);
+		await projectMemento().update(ACTIVE_ENV_OVERRIDES_STATE, value);
 	}
 
 	/**
@@ -2515,11 +2504,21 @@ export class VRunnerManager {
 	 * @returns Значение опции или undefined
 	 */
 	private async readActiveProfileSetting(option: string): Promise<string | undefined> {
+		return this.readSettingsFileOption(this.getActiveEnvFile(), option);
+	}
+
+	/**
+	 * Читает значение опции из файла настроек по схеме установленного vrunner.
+	 *
+	 * @param settingsFile - Файл настроек: абсолютный путь или путь от корня проекта
+	 * @param option - Имя опции без префикса (например 'ibconnection')
+	 * @returns Значение опции или undefined
+	 */
+	private async readSettingsFileOption(settingsFile: string, option: string): Promise<string | undefined> {
 		const root = this.getEffectiveRoot();
 		if (!root) {
 			return undefined;
 		}
-		const settingsFile = this.getActiveEnvFile();
 		const absolutePath = path.isAbsolute(settingsFile)
 			? settingsFile
 			: path.join(root, settingsFile);
@@ -2550,6 +2549,21 @@ export class VRunnerManager {
 			return override;
 		}
 		return (await this.readActiveProfileSetting('ibconnection')) ?? '/F./build/ib';
+	}
+
+	/**
+	 * Строка подключения к ИБ, с которой выполнится команда. С явным файлом
+	 * настроек вызова значение берётся из этого файла без перекрытий активного
+	 * профиля, как в плане команды; без файла это {@link getActiveIbConnectionValue}.
+	 *
+	 * @param settingsFile - Файл настроек вызова
+	 * @returns Строка подключения (например '/F./build/ib')
+	 */
+	public async getIbConnectionValue(settingsFile?: string): Promise<string> {
+		if (!settingsFile) {
+			return this.getActiveIbConnectionValue();
+		}
+		return (await this.readSettingsFileOption(settingsFile, 'ibconnection')) ?? '/F./build/ib';
 	}
 
 	/**

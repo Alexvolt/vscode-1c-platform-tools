@@ -6,6 +6,7 @@ import {
 } from './projectArtifactsView';
 import { notifyQuiet } from '../../shared/notify';
 import { onDidChangeProjectLayout } from '../../shared/projectLayoutWatch';
+import { onDidChangeCurrentProject, onDidChangeProjects } from '../../shared/workspaceProjects';
 
 const log = logger.scope('artifacts');
 
@@ -54,6 +55,12 @@ export function registerArtifactsFeature(
 		];
 	});
 	const layoutSubscription = onDidChangeProjectLayout(scheduleArtifactsRefresh);
+	const projectsSubscription = onDidChangeProjects(scheduleArtifactsRefresh);
+	const currentProjectSubscription = onDidChangeCurrentProject(() => {
+		if (isProjectRef.current) {
+			artifactsProvider.onCurrentProjectChanged();
+		}
+	});
 
 	const artifactsRefreshCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.artifacts.refresh',
@@ -104,6 +111,8 @@ export function registerArtifactsFeature(
 		disposables: [
 			...artifactWatchers,
 			layoutSubscription,
+			projectsSubscription,
+			currentProjectSubscription,
 			debounceDispose,
 			artifactsRefreshCommand,
 			artifactsViewAsListCommand,

@@ -1,11 +1,20 @@
 /**
  * Панель «1С: Список дел» в нижней части окна.
- * TreeDataProvider с группировкой по файлу, фильтрами по тегу и области.
+ * TreeDataProvider с группировкой по проекту и файлу, фильтрами по тегу и области.
  * @module todoPanelView
  */
 
 import * as vscode from 'vscode';
-import { scanWorkspaceForTodos, type TodoEntry } from './todoScanner';
+import { projectScanRoots, type ProjectScanRoot } from '../../shared/workspaceProjects';
+import {
+	CURRENT_PROJECT_DESCRIPTION,
+	isSelectedRoot,
+	projectLabel,
+	projectRelativePath,
+	sameScanRoots,
+	selectedFirst,
+} from '../artifacts/projectScan';
+import { scanWorkspaceForTodos, type TodoEntry, type TodoScanResult } from './todoScanner';
 
 const STATE_KEYS = {
 	groupByFile: '1c-platform-tools.todo.groupByHierarchy',
@@ -56,10 +65,11 @@ function pluralPoints(count: number): string {
 }
 
 /**
- * Узел дерева списка дел: корень, группа по файлу или элемент (одна запись).
+ * Узел дерева списка дел: корень, группа по проекту, группа по файлу или элемент (одна запись).
  */
 export type TodoNode =
 	| { kind: 'root' }
+	| { kind: 'project'; root: string; entries: TodoEntry[] }
 	| { kind: 'file'; path: string; entries: TodoEntry[] }
 	| { kind: 'entry'; entry: TodoEntry; tableMode?: boolean };
 
@@ -78,13 +88,25 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		this._onDidChangeTreeData.event;
 
 	private _entries: TodoEntry[] = [];
+	/** Корни проектов последнего скана. */
+	private _roots: string[] = [];
 	private _didInitialLoad = false;
 	private _isScanning = false;
 	private _lastFilteredCount = 0;
 	private _treeView: vscode.TreeView<TodoNode> | undefined;
 	private _refreshPromise: Promise<void> | null = null;
+	private _rescanRequested = false;
 
-	constructor(private readonly _context: vscode.ExtensionContext) {}
+	/**
+	 * @param _context - Контекст расширения: отборы и группировка в globalState
+	 * @param _scan - Скан проектов окна
+	 * @param _scanRoots - Каталоги проектов окна сейчас
+	 */
+	constructor(
+		private readonly _context: vscode.ExtensionContext,
+		private readonly _scan: () => Promise<TodoScanResult> = () => scanWorkspaceForTodos(),
+		private readonly _scanRoots: () => ProjectScanRoot[] = projectScanRoots
+	) {}
 
 	setTreeView(treeView: vscode.TreeView<TodoNode>): void {
 		this._treeView = treeView;
@@ -123,20 +145,37 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		return (tags?.length ?? 0) > 0 || (scope !== undefined && scope !== 'all');
 	}
 
+	/** Список проектов изменился: пересканировать, если панель уже загружалась. */
+	projectsChanged(): void {
+		if (this._didInitialLoad) {
+			void this.refresh();
+		}
+	}
+
 	/**
-	 * Пересканировать workspace и обновить дерево.
-	 * Повторные вызовы во время сканирования ожидают завершения текущего.
+	 * Выбранный проект сменился: тот же набор проектов перерисовывается в новом
+	 * порядке, другой сканируется заново.
 	 */
-	async refresh(): Promise<void> {
-		if (this._refreshPromise) {
-			return this._refreshPromise;
+	currentProjectChanged(): void {
+		if (!this._didInitialLoad) {
+			return;
 		}
-		this._refreshPromise = this._doRefresh();
-		try {
-			await this._refreshPromise;
-		} finally {
-			this._refreshPromise = null;
+		if (sameScanRoots(this._roots, this._scanRoots())) {
+			this._fireChange();
+			return;
 		}
+		void this.refresh();
+	}
+
+	/**
+	 * Пересканировать проекты и обновить дерево.
+	 * Вызов во время сканирования не запускает второе, а повторяет скан после текущего.
+	 * Найденное показывается, если за время скана не сменился список проектов.
+	 */
+	refresh(): Promise<void> {
+		this._rescanRequested = true;
+		this._refreshPromise ??= this._doRefresh();
+		return this._refreshPromise;
 	}
 
 	private async _doRefresh(): Promise<void> {
@@ -145,19 +184,26 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 			this._fireChange();
 		}
 		try {
-			this._entries = await scanWorkspaceForTodos();
-			this._didInitialLoad = true;
-			this._lastFilteredCount = this._filterEntries().length;
-			this._updateViewTitle();
-			// Значок обновляется и когда панель скрыта: getChildren тогда не зовут
-			this._setViewState(
-				this._lastFilteredCount > 0
-					? undefined
-					: this._hasActiveFilters() ? MESSAGE_EMPTY_FILTERED : MESSAGE_EMPTY,
-				this._lastFilteredCount
-			);
+			while (this._rescanRequested) {
+				this._rescanRequested = false;
+				const result = await this._scan();
+				if (this._rescanRequested && !sameScanRoots(result.roots, this._scanRoots())) {
+					continue;
+				}
+				this._entries = result.entries;
+				this._roots = result.roots;
+				this._didInitialLoad = true;
+				this._lastFilteredCount = this._filterEntries().length;
+				this._updateViewTitle();
+				// Значок обновляется и когда панель скрыта: getChildren тогда не зовут
+				this._setViewState(
+					this._lastFilteredCount > 0 ? undefined : this._emptyMessage(),
+					this._lastFilteredCount
+				);
+			}
 		} finally {
 			this._isScanning = false;
+			this._refreshPromise = null;
 		}
 		this._fireChange();
 	}
@@ -166,20 +212,24 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		if (!node || node.kind === 'root') {
 			return this._getRootChildren();
 		}
+		if (node.kind === 'project') {
+			return this._buildNodesFromEntries(node.entries);
+		}
 		if (node.kind === 'file') {
 			return node.entries.map((e) => ({ kind: 'entry' as const, entry: e, tableMode: false }));
 		}
 		return [];
 	}
 
+	private _emptyMessage(): string {
+		if (this._roots.length === 0) {
+			return MESSAGE_NO_WORKSPACE;
+		}
+		return this._hasActiveFilters() ? MESSAGE_EMPTY_FILTERED : MESSAGE_EMPTY;
+	}
+
 	private _getRootChildren(): TodoNode[] {
 		this._updateViewTitle();
-
-		const hasWorkspace = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
-		if (!hasWorkspace) {
-			this._setViewState(MESSAGE_NO_WORKSPACE, 0);
-			return [];
-		}
 
 		if (!this._didInitialLoad) {
 			this._didInitialLoad = true;
@@ -196,13 +246,28 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		const filtered = this._filterEntries();
 		if (this._entries.length === 0 || filtered.length === 0) {
 			this._lastFilteredCount = 0;
-			this._setViewState(this._hasActiveFilters() ? MESSAGE_EMPTY_FILTERED : MESSAGE_EMPTY, 0);
+			this._setViewState(this._emptyMessage(), 0);
 			return [];
 		}
 
 		this._lastFilteredCount = filtered.length;
 		this._setViewState(undefined, filtered.length);
-		return this._buildNodesFromEntries(filtered);
+		return this._roots.length > 1
+			? this._buildProjectNodes(filtered)
+			: this._buildNodesFromEntries(filtered);
+	}
+
+	/** Группы проектов с делами, выбранный проект первым. */
+	private _buildProjectNodes(entries: TodoEntry[]): TodoNode[] {
+		const byRoot = new Map<string, TodoEntry[]>();
+		for (const entry of entries) {
+			const list = byRoot.get(entry.root) ?? [];
+			list.push(entry);
+			byRoot.set(entry.root, list);
+		}
+		return selectedFirst(this._roots, (root) => root)
+			.filter((root) => byRoot.has(root))
+			.map((root) => ({ kind: 'project' as const, root, entries: byRoot.get(root) ?? [] }));
 	}
 
 	private _buildNodesFromEntries(entries: TodoEntry[]): TodoNode[] {
@@ -212,7 +277,7 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		}
 		const byPath = new Map<string, TodoEntry[]>();
 		for (const e of entries) {
-			const p = this._relPath(e.uri);
+			const p = this._relPath(e);
 			if (!byPath.has(p)) {byPath.set(p, []);}
 			byPath.get(p)!.push(e);
 		}
@@ -242,10 +307,8 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		this._onDidChangeTreeData.fire(undefined);
 	}
 
-	private _relPath(uri: vscode.Uri): string {
-		return vscode.workspace.workspaceFolders?.length
-			? vscode.workspace.asRelativePath(uri)
-			: uri.fsPath;
+	private _relPath(entry: TodoEntry): string {
+		return projectRelativePath(entry.root, entry.uri.fsPath);
 	}
 
 	private _fileLabel(filePath: string): { fileName: string; dirPath: string } {
@@ -259,6 +322,15 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 
 	getTreeItem(node: TodoNode): vscode.TreeItem {
 		if (node.kind === 'root') {return new vscode.TreeItem('', vscode.TreeItemCollapsibleState.None);}
+		if (node.kind === 'project') {
+			const count = node.entries.length;
+			const item = new vscode.TreeItem(projectLabel(node.root), vscode.TreeItemCollapsibleState.Expanded);
+			item.contextValue = 'todoProject';
+			item.description = isSelectedRoot(node.root) ? CURRENT_PROJECT_DESCRIPTION : undefined;
+			item.iconPath = new vscode.ThemeIcon('repo');
+			item.tooltip = `${node.root}: ${count} ${pluralPoints(count)}`;
+			return item;
+		}
 		if (node.kind === 'file') {
 			const count = node.entries.length;
 			const { fileName, dirPath } = this._fileLabel(node.path);
@@ -267,11 +339,11 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 			item.contextValue = 'todoFile';
 			item.description = String(count);
 			item.iconPath = new vscode.ThemeIcon('symbol-file');
-			item.tooltip = `${node.path} — ${count} ${pluralPoints(count)}`;
+			item.tooltip = `${node.path}: ${count} ${pluralPoints(count)}`;
 			return item;
 		}
 		const e = node.entry;
-		const pathStr = this._relPath(e.uri);
+		const pathStr = this._relPath(e);
 		const lineContent = (e.lineContent ?? e.message ?? '').trimStart();
 		const msgCol = lineContent.length > MAX_LINE_PREVIEW_LEN
 			? `${lineContent.slice(0, MAX_LINE_PREVIEW_LEN)}…`
@@ -282,7 +354,7 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		item.contextValue = 'todoEntry';
 		item.description = isTable ? `${pathStr}  ${locationStr}` : locationStr;
 		item.iconPath = getIconForTag(e.tag);
-		item.tooltip = `${pathStr} — строка ${e.line}`;
+		item.tooltip = `${pathStr}, строка ${e.line}`;
 		item.command = {
 			command: '1c-platform-tools.todo.openLocation',
 			title: 'Перейти',

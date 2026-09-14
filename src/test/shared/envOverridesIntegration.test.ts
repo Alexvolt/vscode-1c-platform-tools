@@ -160,3 +160,33 @@ suite('перекрытия профиля запуска (интеграция)
 		});
 	});
 });
+
+suite('строка подключения команды с явным файлом настроек', () => {
+	const vrunner = VRunnerManager.getInstance();
+	let root: string;
+
+	setup(() => {
+		root = fs.mkdtempSync(path.join(os.tmpdir(), 'ibconnection-settings-'));
+	});
+
+	teardown(() => {
+		fs.rmSync(root, { recursive: true, force: true });
+	});
+
+	test('файл настроек вызова даёт свою базу, перекрытия активного профиля к нему не применяются', async () => {
+		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/ib' } });
+		writeJson(root, 'env.dev.json', { default: { '--ibconnection': '/F./build/ib-dev' } });
+
+		await vrunner.runWithProjectRoot(root, async () => {
+			await vrunner.setActiveEnvOverrides({ ibConnection: '/F./build/временная' });
+			try {
+				assert.strictEqual(await vrunner.getIbConnectionValue(), '/F./build/временная');
+				assert.strictEqual(await vrunner.getIbConnectionValue('env.dev.json'), '/F./build/ib-dev');
+				assert.strictEqual(await vrunner.getIbConnectionValue('env.json'), '/F./build/ib');
+				assert.strictEqual(await vrunner.getIbConnectionValue('env.нет.json'), '/F./build/ib');
+			} finally {
+				await vrunner.setActiveEnvOverrides(undefined);
+			}
+		});
+	});
+});

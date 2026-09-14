@@ -13,6 +13,7 @@ import { CONVENTIONAL_PATHS, projectPaths } from '../../../shared/projectPaths';
 import type { VRunnerIntent } from '../../../shared/vrunnerCli/intents';
 import { planEdtExternalBuild, runEdtBuildExports, type EdtBuildBridge } from '../../edt/edtBridgeService';
 import { resolveOnescriptTestsPath } from '../onescriptTestsPath';
+import { projectConfiguration } from '../../../shared/projectConfiguration';
 import {
 	extractJUnitPathFromReportsXunit,
 	reportsXunitFromEnv,
@@ -68,7 +69,7 @@ export class XUnitAdapter implements TestFrameworkAdapter {
 	private testsBase: string = CONVENTIONAL_PATHS.testsEpf;
 
 	public async isEnabled(): Promise<boolean> {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(this.vrunner.getWorkspaceRoot());
 		if (!config.get<boolean>('test.frameworks.xunit', true)) {
 			return false;
 		}
@@ -114,7 +115,7 @@ export class XUnitAdapter implements TestFrameworkAdapter {
 			return { segments, label: epfInfo.processorName };
 		}
 
-		return { segments: directorySegments(fileUri.fsPath, resolveOnescriptTestsPath(), workspaceRoot) };
+		return { segments: directorySegments(fileUri.fsPath, resolveOnescriptTestsPath(workspaceRoot), workspaceRoot) };
 	}
 
 	public async buildRunPlan(unit: RunUnit, reportDir: string): Promise<AdapterRunPlan> {

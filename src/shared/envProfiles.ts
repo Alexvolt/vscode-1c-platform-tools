@@ -51,12 +51,6 @@ export const DEFAULT_PROFILE_LABEL = 'По умолчанию';
 /** Подпись состояния «базовый файл настроек ещё не создан» */
 export const NO_SETTINGS_LABEL = 'Нет файла настроек';
 
-/** Ключ хранения id активного профиля в workspaceState */
-export const ACTIVE_ENV_PROFILE_KEY = '1c-platform-tools.activeEnvProfile';
-
-/** Ключ хранения временных параметров активного профиля в workspaceState */
-export const ACTIVE_ENV_OVERRIDES_KEY = '1c-platform-tools.activeEnvOverrides';
-
 /**
  * Env-профиль запуска
  */

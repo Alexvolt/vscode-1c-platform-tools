@@ -12,8 +12,10 @@
  * подсвечиваются по событиям выполнения.
  */
 
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
+import { runWithProject } from '../../shared/workspaceProjects';
 import { readCommandCatalog, CommandCatalogEntry } from '../../shared/commandCatalog';
 import { serializePipelines } from '../../shared/pipelines/pipelineFile';
 import { normalizePipelines, Pipeline } from '../../shared/pipelines/pipelineTypes';
@@ -121,9 +123,12 @@ export class PipelineEditorProvider implements vscode.CustomTextEditorProvider {
 				return;
 			}
 			if (message.type === 'run') {
-				await vscode.commands.executeCommand('1c-platform-tools.pipelines.run', {
-					pipeline: message.pipelineId,
-				});
+				// Цепочка идёт в проекте своего файла `<корень>/.1cpt/pipelines.json`
+				await runWithProject(path.dirname(path.dirname(document.uri.fsPath)), () =>
+					vscode.commands.executeCommand('1c-platform-tools.pipelines.run', {
+						pipeline: message.pipelineId,
+					})
+				);
 				return;
 			}
 			if (message.type === 'error') {

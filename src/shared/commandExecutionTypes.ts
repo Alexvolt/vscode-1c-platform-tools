@@ -11,6 +11,8 @@ export interface CommandExecutionOptions {
 	wait?: boolean;
 	/** Путь к корню проекта (передаётся из MCP вместо или вместе с контекстом workspace). */
 	projectPath?: string;
+	/** Каталог, в котором команда инициализации создаёт packagedef. */
+	root?: string;
 	/** Путь к env.json относительно projectPath. */
 	settingsFile?: string;
 	/** Явная строка подключения к ИБ. */
@@ -97,6 +99,8 @@ export interface StructuredCommandResult {
 	tests?: TestRunStats;
 	/** Ошибки синтаксического контроля по jUnit-отчёту (только syntax-check). */
 	errors?: SyntaxCheckError[];
+	/** Данные команды для агента (например, список проектов). */
+	data?: unknown;
 }
 
 /**

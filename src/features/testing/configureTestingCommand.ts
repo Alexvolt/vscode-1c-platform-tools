@@ -8,6 +8,8 @@ import { logger } from '../../shared/logger';
 import { DEFAULT_TESTING } from '../../shared/pathDefaults';
 import { resolveOnescriptTestsPath } from './onescriptTestsPath';
 import type { StructuredCommandResult } from '../../shared/commandExecutionTypes';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import { workspaceFolderOf } from '../../shared/workspaceProjects';
 
 const log = logger.scope('testing');
 
@@ -67,11 +69,15 @@ export function registerConfigureTestingCommand(vrunner: VRunnerManager): vscode
 			typeof arg === 'object' && arg !== null ? (arg as ConfigureTestingOptions) : undefined;
 		const wait = opts?.wait === true;
 
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const workspaceRoot = vrunner.getWorkspaceRoot();
+		const config = projectConfiguration(workspaceRoot);
+		const target =
+			workspaceRoot && (vscode.workspace.workspaceFolders?.length ?? 0) > 1 && workspaceFolderOf(workspaceRoot)
+				? vscode.ConfigurationTarget.WorkspaceFolder
+				: vscode.ConfigurationTarget.Workspace;
 		const featuresPath = config.get<string>('test.path.features', DEFAULT_TESTING.featuresPath);
-		const onescriptPath = resolveOnescriptTestsPath();
-		const layoutRoot = vrunner.getWorkspaceRoot();
-		const paths = layoutRoot ? await projectPaths(layoutRoot) : undefined;
+		const onescriptPath = resolveOnescriptTestsPath(workspaceRoot);
+		const paths = workspaceRoot ? await projectPaths(workspaceRoot) : undefined;
 		const testsEpf = paths?.testProcessorsContainer ?? CONVENTIONAL_PATHS.testsEpf;
 		const testsCfe = paths?.testExtensionsContainer ?? CONVENTIONAL_PATHS.testsCfe;
 
@@ -157,19 +163,14 @@ export function registerConfigureTestingCommand(vrunner: VRunnerManager): vscode
 		}
 
 		for (const framework of frameworks) {
-			await config.update(
-				`test.frameworks.${framework.key}`,
-				selectedKeys.has(framework.key),
-				vscode.ConfigurationTarget.Workspace
-			);
+			await config.update(`test.frameworks.${framework.key}`, selectedKeys.has(framework.key), target);
 		}
 		if (!config.get<boolean>('test.panelEnabled', true)) {
-			await config.update('test.panelEnabled', true, vscode.ConfigurationTarget.Workspace);
+			await config.update('test.panelEnabled', true, target);
 		}
 
 		// Недостающие каталоги выбранных фреймворков: в неинтерактивном режиме
 		// создаются сразу, в визарде — после подтверждения
-		const workspaceRoot = vrunner.getWorkspaceRoot();
 		const createdDirs: string[] = [];
 		if (workspaceRoot) {
 			const missing = frameworks

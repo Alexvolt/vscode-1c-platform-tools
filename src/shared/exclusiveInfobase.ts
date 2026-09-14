@@ -3,39 +3,79 @@
  *
  * Пока базу держит автономный сервер, конфигуратор её не откроет: загрузка,
  * выгрузка и обновление конфигурации БД падают. Держатель базы регистрируется
- * тем, кто её занял, а команды на время работы просят её освободить.
+ * тем, кто её занял, а команды на время работы просят освободить ту базу, с
+ * которой работают сами.
  *
  * @module exclusiveInfobase
  */
 
+import * as path from 'node:path';
 import type { VRunnerIntent } from './vrunnerCli/intents';
 
 /** Тот, кто держит файловую базу открытой. */
 export interface InfobaseHolder {
 	/** Название для сообщений: «Автономный сервер остановлен на время загрузки». */
 	readonly label: string;
-	/** Держит ли базу прямо сейчас. */
-	isHolding(): boolean;
+	/** Абсолютный путь базы, которую держатель занимает сейчас; undefined, когда не держит. */
+	heldInfobase(): string | undefined;
 	/** Отпускает базу; false - отпустить не удалось. */
 	release(): Promise<boolean>;
 	/** Занимает базу снова после команды. */
 	restore(): Promise<void>;
 }
 
-let holder: InfobaseHolder | undefined;
+const holders = new Set<InfobaseHolder>();
 
 /**
- * Регистрирует держателя базы. Повторный вызов заменяет прежнего.
+ * Регистрирует держателя базы.
  *
- * @param next - Держатель или undefined, чтобы забыть прежнего
+ * @param holder - Держатель
+ * @returns Отмена регистрации
  */
-export function registerInfobaseHolder(next: InfobaseHolder | undefined): void {
-	holder = next;
+export function registerInfobaseHolder(holder: InfobaseHolder): { dispose(): void } {
+	holders.add(holder);
+	return {
+		dispose: () => {
+			holders.delete(holder);
+		},
+	};
 }
 
-/** Держатель базы, если он зарегистрирован. */
-export function infobaseHolder(): InfobaseHolder | undefined {
-	return holder;
+/**
+ * Ключ базы: абсолютный путь, на Windows без учёта регистра.
+ *
+ * @param infobase - Каталог файловой базы
+ */
+export function infobaseKey(infobase: string): string {
+	const resolved = path.resolve(infobase);
+	return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * Держатель, который занимает эту базу сейчас.
+ *
+ * @param infobase - Абсолютный путь каталога файловой базы
+ */
+export function infobaseHolder(infobase: string): InfobaseHolder | undefined {
+	const key = infobaseKey(infobase);
+	for (const holder of holders) {
+		const held = holder.heldInfobase();
+		if (held !== undefined && infobaseKey(held) === key) {
+			return holder;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Строка журнала перед командой, которой нужна база: с чем она работает.
+ *
+ * @param project - Имя проекта
+ * @param profile - Файл настроек профиля запуска
+ * @param connection - Строка подключения к базе
+ */
+export function exclusiveInfobaseLogLine(project: string, profile: string, connection: string): string {
+	return `Проект: ${project}, профиль: ${profile}, база: ${connection}`;
 }
 
 /**

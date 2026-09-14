@@ -4,8 +4,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../shared/logger';
+import { currentRoot, workspaceFolderOf } from '../shared/workspaceProjects';
 
 const log = logger.scope('skills');
+
+/** Папка рабочей области текущего проекта: каталоги навыков агента лежат в ней. */
+function skillsWorkspaceRoot(): string | undefined {
+	const root = currentRoot();
+	return root === undefined ? undefined : workspaceFolderOf(root)?.uri.fsPath ?? root;
+}
 
 const CC_1C_SKILLS_ZIP_URL =
 	'https://github.com/Nikolay-Shirokov/cc-1c-skills/archive/refs/heads/main.zip';
@@ -206,7 +213,7 @@ export class SkillsCommands {
 	 * Скачивает архив репозитория, распаковывает и копирует содержимое .claude/skills в выбранную папку.
 	 */
 	async addDevSkills(context: vscode.ExtensionContext, destination?: string): Promise<void> {
-		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const workspaceRoot = skillsWorkspaceRoot();
 		// строковый аргумент — неинтерактивный вызов (агент, web-сессия agent-клиента)
 		const targetDir = destination
 			? resolveDestination(destination, workspaceRoot)
@@ -274,7 +281,7 @@ export class SkillsCommands {
 	 */
 	async add1cptSkills(context: vscode.ExtensionContext, destination?: string): Promise<void> {
 		const extensionPath = context.extensionPath;
-		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const workspaceRoot = skillsWorkspaceRoot();
 		// строковый аргумент — неинтерактивный вызов (агент, web-сессия agent-клиента)
 		const targetBaseDir = destination
 			? resolveDestination(destination, workspaceRoot)

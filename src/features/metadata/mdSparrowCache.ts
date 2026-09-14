@@ -14,7 +14,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
-import { externalDirectory, resolveProjectLayout } from '../../shared/projectLayout';
+import { directoryKey, externalDirectory, resolveProjectLayout } from '../../shared/projectLayout';
 import { sourceDirectory } from '../../shared/objectPaths';
 import type { MdSparrowRuntime } from './mdSparrowBootstrap';
 
@@ -252,11 +252,21 @@ export function forgetCachedReads(): void {
  *
  * @param context - Контекст расширения
  * @param name - Имя ответа, например `project-metadata-tree`
- * @param workspaceRoot - Корень: у рабочей области из нескольких папок свой файл на каждую
+ * @param workspaceRoot - Корень проекта: у каждого проекта свой файл
+ * @param configurationDir - Каталог конфигурации проекта: у каждой конфигурации проекта свой файл
  */
-export function cacheFilePath(context: vscode.ExtensionContext, name: string, workspaceRoot: string): string {
+export function cacheFilePath(
+	context: vscode.ExtensionContext,
+	name: string,
+	workspaceRoot: string,
+	configurationDir?: string
+): string {
 	const storage = context.storageUri ?? context.globalStorageUri;
-	const key = createHash('sha1').update(path.resolve(workspaceRoot)).digest('hex').slice(0, 8);
+	const hash = createHash('sha1').update(directoryKey(workspaceRoot));
+	if (configurationDir !== undefined) {
+		hash.update(`\n${directoryKey(path.resolve(workspaceRoot, configurationDir))}`);
+	}
+	const key = hash.digest('hex').slice(0, 8);
 	return path.join(storage.fsPath, 'md-sparrow-cache', `${name}-${key}.json`);
 }
 

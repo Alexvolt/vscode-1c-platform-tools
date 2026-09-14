@@ -9,6 +9,7 @@ import { VRunnerManager } from '../../shared/vrunnerManager';
 import { resolvePlatformVersion } from '../../shared/platformBinary';
 import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
 import { BUILD_SUBDIRS } from '../../shared/pathDefaults';
+import { currentRoot, deepestProject, projectOf, runWithProject } from '../../shared/workspaceProjects';
 
 const platformBasePath =
 	process.platform === 'win32' ? '${env:PROGRAMFILES}/1cv8' : '/opt/1C/v8.3/x86_64';
@@ -34,6 +35,79 @@ function hasConfigurationSources(directory: string): boolean {
 	return directory !== '' && (fs.existsSync(path.join(directory, 'Configuration.xml')) || isEdtProject(directory));
 }
 
+/** Откуда берётся проект отладки. */
+export interface DebugProjectLookup {
+	/** Текущий проект. */
+	current: string | undefined;
+	/** Самый глубокий проект, содержащий путь. */
+	projectOf: (target: string) => string | undefined;
+}
+
+/**
+ * Проект, профиль которого читает отладка.
+ *
+ * Без папки - текущий проект. С папкой: проект каталога `rootProject`; текущий
+ * проект, если он в этой папке; проект папки; иначе текущий.
+ *
+ * @param folderRoot - Корень папки рабочей области конфигурации отладки
+ * @param rootProject - Абсолютный каталог `rootProject` конфигурации, если известен
+ * @param lookup - Текущий проект и поиск проекта по пути
+ */
+export function debugProjectRoot(
+	folderRoot: string | undefined,
+	rootProject: string | undefined,
+	lookup: DebugProjectLookup
+): string | undefined {
+	if (folderRoot === undefined) {
+		return lookup.current;
+	}
+	const byRootProject = rootProject === undefined ? undefined : lookup.projectOf(rootProject);
+	if (byRootProject !== undefined) {
+		return byRootProject;
+	}
+	if (lookup.current !== undefined && deepestProject([{ root: folderRoot }], lookup.current) !== undefined) {
+		return lookup.current;
+	}
+	return lookup.projectOf(folderRoot) ?? lookup.current;
+}
+
+/**
+ * Абсолютный каталог `rootProject` до подстановки переменных VS Code.
+ *
+ * @param config - Конфигурация отладки
+ * @param folderRoot - Корень папки рабочей области
+ * @returns Каталог или undefined, когда в значении остались другие переменные
+ */
+export function debugRootProjectDir(config: vscode.DebugConfiguration, folderRoot: string | undefined): string | undefined {
+	if (typeof config.rootProject !== 'string' || config.rootProject.trim() === '') {
+		return undefined;
+	}
+	const value = folderRoot === undefined
+		? config.rootProject
+		: config.rootProject.replaceAll('${workspaceFolder}', folderRoot);
+	if (value.includes('${')) {
+		return undefined;
+	}
+	if (path.isAbsolute(value)) {
+		return path.resolve(value);
+	}
+	return folderRoot === undefined ? undefined : path.resolve(folderRoot, value);
+}
+
+/**
+ * Проект конфигурации отладки.
+ *
+ * @param folder - Папка рабочей области конфигурации
+ * @param config - Конфигурация отладки
+ */
+export function debugConfigurationRoot(
+	folder: vscode.WorkspaceFolder | undefined,
+	config: vscode.DebugConfiguration
+): string | undefined {
+	const folderRoot = folder?.uri.fsPath;
+	return debugProjectRoot(folderRoot, debugRootProjectDir(config, folderRoot), { current: currentRoot(), projectOf });
+}
+
 export class OnecDebugConfigurationProvoider implements vscode.DebugConfigurationProvider {
 	constructor(private readonly vrunner: VRunnerManager) {}
 
@@ -41,17 +115,43 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 		folder: vscode.WorkspaceFolder | undefined,
 		_token?: vscode.CancellationToken
 	): Promise<vscode.DebugConfiguration[]> {
-		const workspaceRoot = folder?.uri.fsPath;
-		const paths = workspaceRoot ? await projectPaths(workspaceRoot) : undefined;
-		const asTemplate = (relative: string) => templatePath(relative === '.' ? '' : relative);
+		const folderRoot = folder?.uri.fsPath;
+		const root = debugProjectRoot(folderRoot, undefined, { current: currentRoot(), projectOf });
+		return runWithProject(root, () => this.buildConfigurations(folderRoot, root));
+	}
+
+	/**
+	 * Шаблон конфигурации отладки проекта: пути проекта записываются от папки рабочей области.
+	 *
+	 * @param folderRoot - Корень папки рабочей области
+	 * @param root - Корень проекта
+	 */
+	private async buildConfigurations(
+		folderRoot: string | undefined,
+		root: string | undefined
+	): Promise<vscode.DebugConfiguration[]> {
+		const paths = root ? await projectPaths(root) : undefined;
+		const asTemplate = (relative: string): string => {
+			if (root === undefined) {
+				return templatePath(relative === '.' ? '' : relative);
+			}
+			const absolute = path.resolve(root, relative);
+			if (folderRoot === undefined) {
+				return absolute.replace(/\\/g, '/');
+			}
+			const fromFolder = path.relative(folderRoot, absolute);
+			return fromFolder.startsWith('..') || path.isAbsolute(fromFolder)
+				? absolute.replace(/\\/g, '/')
+				: templatePath(fromFolder);
+		};
 
 		const configurationDir = paths?.configuration?.dir;
-		if (workspaceRoot && configurationDir === undefined) {
+		if (root && configurationDir === undefined) {
 			void vscode.window.showWarningMessage(
 				'Исходный код конфигурации в рабочей области не найден: укажите в конфигурации запуска каталог rootProject.'
 			);
 		}
-		const rootProject = asTemplate(configurationDir ?? '');
+		const rootProject = asTemplate(configurationDir ?? '.');
 
 		// Расширения решения и тестовые: тесты YAxUnit живут отдельно от поставки,
 		// но отлаживать их нужно так же
@@ -80,9 +180,9 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 		const outPath = this.vrunner.getOutPath().replace(/\\/g, '/').replace(/^\.?\//, '');
 		// Тестовые обработки собираются в свой каталог: без него их точки останова не привязать
 		(baseConfig as Record<string, unknown>).externalFilesBuilds = [
-			`\${workspaceFolder}/${outPath}/${BUILD_SUBDIRS.epf}`,
-			`\${workspaceFolder}/${outPath}/${BUILD_SUBDIRS.erf}`,
-			`\${workspaceFolder}/${outPath}/${BUILD_SUBDIRS.testsEpf}`,
+			asTemplate(`${outPath}/${BUILD_SUBDIRS.epf}`),
+			asTemplate(`${outPath}/${BUILD_SUBDIRS.erf}`),
+			asTemplate(`${outPath}/${BUILD_SUBDIRS.testsEpf}`),
 		];
 
 		return [baseConfig];
@@ -97,7 +197,7 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 			return config;
 		}
 
-		const workspaceRoot = folder?.uri.fsPath;
+		const workspaceRoot = debugConfigurationRoot(folder, config);
 		if (!workspaceRoot) {
 			void vscode.window.showErrorMessage(
 				'Укажите строку подключения к ИБ (формат /F или /S) в файле настроек активного профиля запуска. Открытая папка не определена.'
@@ -105,6 +205,20 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 			return undefined;
 		}
 
+		return runWithProject(workspaceRoot, () => this.resolveInProject(workspaceRoot, config));
+	}
+
+	/**
+	 * Дополняет конфигурацию отладки строкой подключения, учётными данными и
+	 * версией платформы из активного профиля проекта.
+	 *
+	 * @param workspaceRoot - Корень проекта
+	 * @param config - Конфигурация отладки
+	 */
+	private async resolveInProject(
+		workspaceRoot: string,
+		config: vscode.DebugConfiguration
+	): Promise<vscode.DebugConfiguration | undefined> {
 		// Строка подключения и учётные данные берутся из активного профиля запуска
 		// (env.json/env.<id>.json для vrunner 2 или autumn-properties.* для vrunner 3),
 		// а не напрямую из env.json — иначе смена профиля не влияла бы на отладку.

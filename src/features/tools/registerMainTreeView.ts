@@ -6,6 +6,7 @@ import {
 	TREE_GROUP_EXPANDED_STATE_KEY,
 } from './treeViewProvider';
 import { HelpAndSupportProvider } from '../projects/helpAndSupportProvider';
+import { bindProjectDescription } from '../projects/projectViewDescription';
 import { LaunchProfileViewProvider } from '../launch/launchProfileViewProvider';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 
@@ -62,6 +63,7 @@ export function registerMainTreeView(
 
 	context.subscriptions.push(
 		treeView,
+		bindProjectDescription(treeView),
 		launchProfileProvider,
 		profileTreeView,
 		helpTreeView,

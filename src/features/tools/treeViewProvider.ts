@@ -20,7 +20,9 @@ import type { SetVersionCommands } from '../../commands/setVersionCommands';
 import { getFavorites, type FavoriteEntry } from './favorites';
 import { getHiddenToolGroups } from './toolsGroupVisibility';
 import { TREE_GROUPS, groupCommandsFor, treeCommandLabel, type TreeSourceFormat } from './treeStructure';
-import { configurationScope, onDidChangeActiveConfiguration } from '../../shared/activeConfiguration';
+import { configurationScope } from '../../shared/activeConfiguration';
+import { onDidChangeProjectLayout } from '../../shared/projectLayoutWatch';
+import { currentRoot, onDidChangeCurrentProject } from '../../shared/workspaceProjects';
 
 /** Ключ в globalState для сохранения состояния раскрытия групп дерева (кроме «Избранное») */
 export const TREE_GROUP_EXPANDED_STATE_KEY = '1c-platform-tools.treeGroupExpanded';
@@ -177,9 +179,10 @@ export class PlatformTreeDataProvider implements vscode.TreeDataProvider<Platfor
 	private readonly setVersionCommands?: SetVersionCommands;
 	private readonly extensionUri: vscode.Uri | undefined;
 	private readonly extensionContext: vscode.ExtensionContext | undefined;
-	/** Формат активной конфигурации: от него зависят подписи и состав команд. */
+	/** Формат конфигурации проекта: от него зависят подписи и состав команд. */
 	private sourceFormat: TreeSourceFormat | undefined;
 	private readonly formatSubscription: vscode.Disposable;
+	private readonly layoutSubscription: vscode.Disposable;
 
 	constructor(
 		extensionUri?: vscode.Uri,
@@ -191,7 +194,8 @@ export class PlatformTreeDataProvider implements vscode.TreeDataProvider<Platfor
 		this.setVersionCommands = setVersionCommands;
 		this.extensionUri = extensionUri;
 		this.extensionContext = extensionContext;
-		this.formatSubscription = onDidChangeActiveConfiguration(() => void this.refreshSourceFormat());
+		this.formatSubscription = onDidChangeCurrentProject(() => void this.refreshSourceFormat(true));
+		this.layoutSubscription = onDidChangeProjectLayout(() => void this.refreshSourceFormat());
 		void this.refreshSourceFormat();
 	}
 
@@ -204,22 +208,26 @@ export class PlatformTreeDataProvider implements vscode.TreeDataProvider<Platfor
 
 	dispose(): void {
 		this.formatSubscription.dispose();
+		this.layoutSubscription.dispose();
 	}
 
-	/** Формат активной конфигурации; дерево перестраивается, когда он меняется. */
-	private async refreshSourceFormat(): Promise<void> {
+	/**
+	 * Формат конфигурации проекта; дерево перестраивается, когда он меняется.
+	 *
+	 * @param rebuild - Перестроить дерево и без смены формата: сменился проект
+	 */
+	private async refreshSourceFormat(rebuild = false): Promise<void> {
 		const vrunner = VRunnerManager.getInstance();
 		const workspaceRoot = vrunner.getWorkspaceRoot();
 		let format: TreeSourceFormat | undefined;
 		if (workspaceRoot) {
 			try {
-				const scope = await configurationScope(workspaceRoot);
-				format = scope.configuration?.format;
+				format = (await configurationScope(workspaceRoot)).configuration?.format;
 			} catch {
 				format = undefined;
 			}
 		}
-		if (format !== this.sourceFormat) {
+		if (rebuild || format !== this.sourceFormat) {
 			this.sourceFormat = format;
 			this.refresh();
 		}
@@ -425,7 +433,7 @@ export class PlatformTreeDataProvider implements vscode.TreeDataProvider<Platfor
 	 * @returns Массив элементов дерева
 	 */
 	private async buildServiceFilesChildren(): Promise<PlatformTreeItem[]> {
-		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const workspaceRoot = currentRoot();
 		const items: PlatformTreeItem[] = [
 			this.createTreeItem(
 				'Базовый набор',
@@ -616,7 +624,10 @@ export class PlatformTreeDataProvider implements vscode.TreeDataProvider<Platfor
 
 		const favorites = this.extensionContext ? getFavorites(this.extensionContext) : [];
 		const favoritesRoot = this.createFavoritesRootItem(favorites);
-		return favoritesRoot ? [favoritesRoot, ...allSections] : allSections;
+		return [
+			...(favoritesRoot ? [favoritesRoot] : []),
+			...allSections,
+		];
 	}
 
 	/**

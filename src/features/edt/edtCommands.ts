@@ -188,7 +188,7 @@ export async function createEdtProject(context: vscode.ExtensionContext): Promis
 	const emptyDump = path.join(os.tmpdir(), `edt-empty-${Date.now()}`);
 	try {
 		await fs.mkdir(emptyDump, { recursive: true });
-		const runtime = await ensureMdSparrowRuntime(context);
+		const runtime = await ensureMdSparrowRuntime(context, workspaceRoot);
 		const created = await runMdSparrowParamsMutation(
 			runtime,
 			// Версию формата задаёт выгрузка-заготовка: 1С:EDT берёт из неё версию платформы

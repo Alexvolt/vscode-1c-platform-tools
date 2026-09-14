@@ -20,6 +20,8 @@ import {
 import { resolveMetadataOpen, type ProjectMetadataTreeDto } from '../../features/metadata/metadataTreeService';
 import { metadataLeafReadsObjectProperties } from '../../features/properties/metadataPaletteSource';
 import { createMockExtensionContext } from '../fixtures/mocks/vscodeMocks';
+import { configurationScope } from '../../shared/activeConfiguration';
+import { invalidateProjectLayout } from '../../shared/projectLayout';
 
 suite('metadataTreeView subsystem filter', () => {
 	function createProviderWithTree(): {
@@ -729,5 +731,32 @@ suite('metadataTreeView: расширение неподдерживаемого
 		const supported = new MetadataSourceTreeItem('New', 'НовыйФормат', 'extension', undefined, undefined);
 		assert.strictEqual(supported.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
 		assert.strictEqual(supported.contextValue, 'metadataSourceConfigLike');
+	});
+});
+
+suite('metadataTreeView: раскладка проекта', () => {
+	const LAYOUTS = path.resolve(__dirname, '..', '..', '..', 'src', 'test', 'fixtures', 'projectLayout');
+
+	function providerAt(workspaceRoot: string): MetadataTreeDataProvider {
+		const provider = new MetadataTreeDataProvider(createMockExtensionContext());
+		(provider as unknown as { _workspaceRoot: string })._workspaceRoot = workspaceRoot;
+		return provider;
+	}
+
+	setup(() => {
+		invalidateProjectLayout();
+	});
+
+	test('раскладка с той же конфигурацией проекта дерево не перерисовывает', async () => {
+		const workspace = path.join(LAYOUTS, 'edt-workspace');
+		const provider = providerAt(workspace);
+		(provider as unknown as { _contentConfigurationDir?: string })._contentConfigurationDir =
+			(await configurationScope(workspace)).configuration?.dir;
+		let fired = 0;
+		provider.onDidChangeTreeData(() => fired++);
+
+		await provider.syncWithProjectLayout();
+
+		assert.strictEqual(fired, 0);
 	});
 });

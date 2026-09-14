@@ -144,6 +144,11 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 		if (this._ownerId !== ownerId) {
 			return;
 		}
+		this.reset();
+	}
+
+	/** Убирает свойства, чьи бы они ни были: так панель гаснет при смене проекта. */
+	reset(): void {
 		this._ownerId = undefined;
 		this._state = undefined;
 		this._onApply = undefined;

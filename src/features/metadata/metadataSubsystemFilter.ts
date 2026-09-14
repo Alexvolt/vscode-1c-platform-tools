@@ -47,7 +47,7 @@ export async function loadSubsystemTrees(
 	treeProvider: MetadataTreeDataProvider
 ): Promise<SubsystemNode[]> {
 	const cached = treeProvider.getCachedTree();
-	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	const workspaceRoot = treeProvider.projectRoot;
 	if (!cached || !workspaceRoot) {
 		return [];
 	}

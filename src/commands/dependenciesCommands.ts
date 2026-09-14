@@ -11,7 +11,14 @@ import {
 	getUpdateOpmCommandName
 } from '../features/tools/commandNames';
 import { logger } from '../shared/logger';
-import { notifyProjectCreated } from '../shared/projectContext';
+import {
+	PROJECT_FILE_TEMPLATE,
+	ProjectFileExistsError,
+	writeProjectFile,
+} from '../shared/workspaceProjects';
+import { initializeProjectCommand } from '../features/projects/workspaceProjectCommands';
+import { workspaceProjectsSource } from '../features/projects/workspaceProjectsSource';
+import type { StructuredCommandResult } from '../shared/commandExecutionTypes';
 import { PROJECT_STRUCTURE } from '../shared/projectStructure';
 import { getOvmBinaryPath } from '../shared/ovmPaths';
 import { notifyQuiet } from '../shared/notify';
@@ -224,21 +231,6 @@ export class DependenciesCommands extends BaseCommand {
 	/** Контекст нужен для кэша компонентов: OVM берём оттуда. */
 	constructor(private readonly context: vscode.ExtensionContext) {
 		super();
-	}
-
-	/**
-	 * Предлагает перезапустить окно после инициализации проекта, чтобы гарантированно
-	 * обновились контейнеры и команды, зависящие от контекста проекта.
-	 */
-	private async offerReloadAfterProjectInitialization(): Promise<void> {
-		const action = await vscode.window.showInformationMessage(
-			'Проект инициализирован. Перезапустить окно сейчас?',
-			'Перезапустить окно',
-			'Позже'
-		);
-		if (action === 'Перезапустить окно') {
-			await vscode.commands.executeCommand('workbench.action.reloadWindow');
-		}
 	}
 
 	/**
@@ -482,88 +474,17 @@ export class DependenciesCommands extends BaseCommand {
 	}
 
 	/**
-	 * Инициализирует файл packagedef с шаблоном
-	 * 
-	 * Создает файл packagedef в корне проекта с базовым содержимым из шаблона.
-	 * Если файл уже существует, запрашивает подтверждение на перезапись.
-	 * После создания открывает файл в редакторе VS Code.
-	 * 
-	 * @returns Промис, который разрешается после создания файла
-	 * @throws {Error} Если не удалось прочитать шаблон или создать файл
+	 * Создаёт packagedef из шаблона и делает проект текущим.
+	 *
+	 * Агенту возвращает результат для каталога из `root`, `projectPath` или корня вызова.
+	 * Пользователю при нескольких вариантах предлагает каталог: папки рабочей области и
+	 * не проекты; существующий файл перезаписывается только после подтверждения.
+	 *
+	 * @param arg - Первый аргумент команды
+	 * @param opts - Опции вызова
 	 */
-	async initializePackagedef(): Promise<void> {
-		const workspaceRoot = this.ensureWorkspace();
-		if (!workspaceRoot) {
-			return;
-		}
-
-		const packagedefPath = path.join(workspaceRoot, 'packagedef');
-		
-		// Проверяем, существует ли уже файл
-		try {
-			await fs.access(packagedefPath);
-			const action = await vscode.window.showWarningMessage(
-				'Файл packagedef уже существует. Перезаписать?',
-				'Да',
-				'Нет'
-			);
-			
-			if (action !== 'Да') {
-				return;
-			}
-		} catch {
-			// Файл не существует, продолжаем
-		}
-
-		// Получаем путь к шаблону
-		const extensionPath = this.vrunner.getExtensionPath();
-		if (!extensionPath) {
-			const msg = 'Не удалось определить путь к расширению';
-			log.error(
-				`${msg}. Возможные причины: расширение не передало ExtensionContext в VRunnerManager при активации; workspaceRoot=${workspaceRoot ?? 'не определён'}. Проверьте панель Output (1C: Platform Tools) для диагностики.`
-			);
-			logger.show();
-			vscode.window.showErrorMessage(msg);
-			return;
-		}
-
-		const templatePath = path.join(extensionPath, 'resources', 'templates', 'packagedef.template');
-		log.debug(`Инициализация packagedef: workspaceRoot=${workspaceRoot}, extensionPath=${extensionPath}, templatePath=${templatePath}`);
-
-		// Читаем шаблон из файла
-		let packagedefContent: string;
-		try {
-			packagedefContent = await fs.readFile(templatePath, 'utf-8');
-		} catch (error) {
-			const errMsg = (error as Error).message;
-			log.error(`Не удалось прочитать шаблон packagedef: ${errMsg}. Путь: ${templatePath}`);
-			logger.show();
-			vscode.window.showErrorMessage(
-				`Не удалось прочитать шаблон packagedef: ${errMsg}`
-			);
-			return;
-		}
-
-		try {
-			await fs.writeFile(packagedefPath, packagedefContent, 'utf-8');
-			log.info(`Файл packagedef успешно создан: ${packagedefPath}`);
-			notifyQuiet('Файл packagedef успешно создан');
-
-			// Полная активация расширения: панель «1С: Инструменты» и дерево появятся без перезагрузки окна
-			notifyProjectCreated();
-
-			// Открываем файл в редакторе
-			const uri = vscode.Uri.file(packagedefPath);
-			const doc = await vscode.workspace.openTextDocument(uri);
-			await vscode.window.showTextDocument(doc);
-
-			await this.offerReloadAfterProjectInitialization();
-		} catch (error) {
-			const errMsg = (error as Error).message;
-			log.error(`Не удалось создать файл packagedef: ${errMsg}. Путь: ${packagedefPath}`);
-			logger.show();
-			vscode.window.showErrorMessage(`Не удалось создать файл packagedef: ${errMsg}`);
-		}
+	initializePackagedef(arg?: unknown, opts?: unknown): Promise<StructuredCommandResult | undefined> {
+		return initializeProjectCommand(workspaceProjectsSource(), arg, opts);
 	}
 
 	/** Вариант создания проекта в приветственном экране */
@@ -674,37 +595,26 @@ export class DependenciesCommands extends BaseCommand {
 			return;
 		}
 
-		const templatePath = path.join(extensionPath, 'resources', 'templates', 'packagedef.template');
+		const templatePath = path.join(extensionPath, PROJECT_FILE_TEMPLATE);
 		const packagedefPath = path.join(targetDir, 'packagedef');
 
 		try {
-			await fs.access(packagedefPath);
-			const action = await vscode.window.showWarningMessage(
-				'В выбранной папке уже есть файл packagedef. Перезаписать и открыть папку?',
-				'Да',
-				'Нет'
-			);
-			if (action !== 'Да') {
-				return;
+			try {
+				await writeProjectFile(targetDir, templatePath);
+			} catch (error) {
+				if (!(error instanceof ProjectFileExistsError)) {
+					throw error;
+				}
+				const action = await vscode.window.showWarningMessage(
+					'В выбранной папке уже есть файл packagedef. Перезаписать и открыть папку?',
+					'Да',
+					'Нет'
+				);
+				if (action !== 'Да') {
+					return;
+				}
+				await writeProjectFile(targetDir, templatePath, true);
 			}
-		} catch {
-			// Файл не существует — создаём каталог при необходимости
-			await fs.mkdir(targetDir, { recursive: true });
-		}
-
-		let packagedefContent: string;
-		try {
-			packagedefContent = await fs.readFile(templatePath, 'utf-8');
-		} catch (error) {
-			const errMsg = (error as Error).message;
-			log.error(`Не удалось прочитать шаблон packagedef: ${errMsg}. Путь: ${templatePath}`);
-			logger.show();
-			vscode.window.showErrorMessage(`Не удалось прочитать шаблон packagedef: ${errMsg}`);
-			return;
-		}
-
-		try {
-			await fs.writeFile(packagedefPath, packagedefContent, 'utf-8');
 			log.info(`Файл packagedef создан: ${packagedefPath}`);
 
 			if (withStructure) {
@@ -786,7 +696,6 @@ export class DependenciesCommands extends BaseCommand {
 			notifyQuiet(
 				`Структура проекта создана: ${createdDirs} каталогов, ${createdReadmes} файлов README`
 			);
-			notifyProjectCreated();
 		} catch (error) {
 			const errMsg = (error as Error).message;
 			log.error(`Не удалось создать структуру проекта: ${errMsg}. Workspace: ${workspaceRoot}`);

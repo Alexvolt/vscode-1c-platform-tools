@@ -5,7 +5,6 @@ import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { YaxunitAdapter, extractModuleName } from '../../features/testing/adapters/yaxunitAdapter';
-import { initActiveConfiguration, setActiveConfiguration } from '../../shared/activeConfiguration';
 
 import { invalidateProjectLayout } from '../../shared/projectLayout';
 
@@ -21,20 +20,6 @@ function vrunnerAt(workspaceRoot: string): VRunnerManager {
 		readActiveSettings: async () => ({ settings: {}, schema: 'v2' }),
 		planIntent: async () => [['run', 'enterprise']],
 	} as unknown as VRunnerManager;
-}
-
-/** Хранилище выбора конфигурации в памяти. */
-function memoryContext(): unknown {
-	const values = new Map<string, unknown>();
-	return {
-		workspaceState: {
-			get: (key: string) => values.get(key),
-			update: async (key: string, value: unknown) => {
-				values.set(key, value);
-			},
-			keys: () => [...values.keys()],
-		},
-	};
 }
 
 /** Положение модуля в дереве по пути внутри рабочей области. */
@@ -177,13 +162,11 @@ suite('yaxunitAdapter', () => {
 });
 
 suite('yaxunitAdapter: раскладка EDT', () => {
-	setup(async () => {
+	setup(() => {
 		invalidateProjectLayout();
-		initActiveConfiguration(memoryContext() as never);
-		await setActiveConfiguration(undefined);
 	});
 
-	test('модули ищутся в проекте конфигурации, в её расширениях и в тестовых проектах', async () => {
+	test('модули ищутся в проекте конфигурации, в расширениях проекта и в тестовых проектах', async () => {
 		const adapter = new YaxunitAdapter(vrunnerAt(EDT_WORKSPACE));
 
 		const globs = await adapter.getIncludeGlobs();
@@ -191,6 +174,7 @@ suite('yaxunitAdapter: раскладка EDT', () => {
 		assert.deepStrictEqual(globs, [
 			'ssl31/src/CommonModules/*/Module.bsl',
 			'ssl31._ДемоРасширение/src/CommonModules/*/Module.bsl',
+			'учёт.РасширениеУчёта/src/CommonModules/*/Module.bsl',
 			'tests/cfe/yaxunit-test/src/CommonModules/*/Module.bsl',
 		]);
 	});
