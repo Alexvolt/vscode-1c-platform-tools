@@ -45,6 +45,8 @@ export interface VRunnerTaskParams {
 	onCancel?: () => void;
 	/** Дописать вывод к прошлой задаче в терминале, а не очистить его: шаги одной команды читаются подряд. */
 	appendOutput?: boolean;
+	/** Получает вывод процесса по мере появления. */
+	onOutput?: (chunk: string) => void;
 }
 
 /**
@@ -83,7 +85,8 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 		private readonly cwd: string,
 		private readonly env?: NodeJS.ProcessEnv,
 		private readonly exitCallback?: (exitCode: number) => void,
-		private readonly onCancel?: () => void
+		private readonly onCancel?: () => void,
+		private readonly onOutput?: (chunk: string) => void
 	) {}
 
 	public open(): void {
@@ -99,7 +102,10 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 			token: this.cts.token,
 			onCancel: this.onCancel,
 			// Псевдотерминалу нужны переводы строки в формате \r\n.
-			onOutput: (chunk) => this.writeEmitter.fire(chunk.replace(/\r?\n/g, '\r\n')),
+			onOutput: (chunk) => {
+				this.onOutput?.(chunk);
+				this.writeEmitter.fire(chunk.replace(/\r?\n/g, '\r\n'));
+			},
 		}).then((result) => {
 			if (result.cancelled) {
 				this.writeEmitter.fire('\r\n[33mЗадача остановлена[0m\r\n');
@@ -127,7 +133,15 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
  * @returns Псевдотерминал для {@link vscode.CustomExecution}
  */
 export function createVRunnerTaskTerminal(params: VRunnerTaskParams): vscode.Pseudoterminal {
-	return new VRunnerPseudoterminal(params.name, params.command, params.cwd, params.env, params.exitCallback, params.onCancel);
+	return new VRunnerPseudoterminal(
+		params.name,
+		params.command,
+		params.cwd,
+		params.env,
+		params.exitCallback,
+		params.onCancel,
+		params.onOutput
+	);
 }
 
 /**
