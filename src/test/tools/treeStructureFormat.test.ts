@@ -11,9 +11,12 @@ const commands = (sectionType: string, format: 'designer' | 'edt' | undefined) =
 	groupCommandsFor(group(sectionType), format).map((entry) => entry.command);
 
 suite('дерево команд под формат исходников', () => {
-	test('группа EDT стоит первой', () => {
-		assert.strictEqual(TREE_GROUPS[0].sectionType, 'edt');
-		assert.strictEqual(TREE_GROUPS[1].sectionType, 'infobase');
+	test('группа EDT стоит между внешними файлами и поддержкой', () => {
+		const order = TREE_GROUPS.map((item) => item.sectionType);
+		const edt = order.indexOf('edt');
+		assert.strictEqual(order[0], 'infobase');
+		assert.strictEqual(order[edt - 1], 'externalFile');
+		assert.strictEqual(order[edt + 1], 'support');
 	});
 
 	test('у проекта EDT нет команд по файлам выгрузки', () => {
