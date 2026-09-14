@@ -280,19 +280,6 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 				return [cmd(['validate', 'edt'], [...options, ...common(intent)], [])];
 			}
 
-			// ---- Конвертация исходников ----
-			case 'cf.convert': {
-				const options = intent.src !== undefined ? ['--src', intent.src] : [];
-				return [cmd(['cf', 'convert'], [...options, ...common(intent)], [intent.out])];
-			}
-			case 'cfe.convert': {
-				const options = [
-					...(intent.src !== undefined ? ['--src', intent.src] : []),
-					...(intent.extensionName !== undefined ? ['--extension-name', intent.extensionName] : []),
-				];
-				return [cmd(['cfe', 'convert'], [...options, ...common(intent)], [intent.out])];
-			}
-
 			// ---- Сеансы информационной базы ----
 			// В 3.0 команда вошла в группу cluster; время начала и окончания
 			// блокировки не поддерживается: блокировка применяется сразу

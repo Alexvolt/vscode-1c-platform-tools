@@ -1,53 +1,109 @@
 /**
- * Конвертация исходников между форматами силами 1С:EDT.
+ * Конвертация исходного кода между форматами силами 1С:EDT.
  *
- * vanessa-runner 3 умеет это сам, но до `3.0.0-rc8` такой команды у него нет.
- * Внутри раннер всё равно вызывает `1cedtcli`, поэтому при старом раннере
- * расширение обращается к EDT напрямую и результат получается тот же.
+ * Проект EDT выгружается в формат конфигуратора командой `export`, выгрузка
+ * конфигуратора становится проектом командой `import`. Проекту расширения нужен
+ * базовый проект: при выгрузке он подключается к рабочей области первым, при
+ * импорте передаётся явно, иначе EDT примет расширение за конфигурацию.
  *
  * @module edtConvert
  */
 
+import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { VRunnerManager } from '../../shared/vrunnerManager';
-import type { SourceRoot } from '../../shared/projectLayout';
-import { edtWorkspaceDir, runEdtCommand } from './edtRunner';
+import type { SourceFormat } from '../../shared/projectLayout';
+import { TaskOutputChain } from '../tasks/vrunnerTask';
+import { detachProject, edtProjectName, edtWorkspaceDir, ensureProjectRegistered, runEdtCommand } from './edtRunner';
+
+/** Каталог в каталоге сборки, куда по умолчанию конвертируется конфигурация из выгрузки конфигуратора. */
+export const CONVERTED_CONFIGURATION_DIR = 'cf-edt';
+
+/** Что и куда конвертируется; каталоги абсолютные. */
+export interface EdtConversion {
+	/** Проект EDT или выгрузка конфигуратора. */
+	sourceDir: string;
+	/** Формат исходного кода: результат будет в другом. */
+	format: SourceFormat;
+	/** Каталог результата. */
+	outputPath: string;
+	/** Базовый проект EDT, когда конвертируется расширение. */
+	baseProjectDir?: string;
+}
 
 /**
- * Конвертирует исходники в противоположный формат.
+ * Базовый проект EDT для расширения из выгрузки конфигуратора.
  *
- * Формат источника известен из раскладки: проект EDT выгружается в XML командой
- * `export`, выгрузка конфигуратора собирается в проект командой `import`.
+ * Первым берётся проект, в который конвертировалась конфигурация, затем
+ * единственная конфигурация EDT рабочей области.
+ *
+ * @param convertedConfiguration - Каталог конвертированной конфигурации по умолчанию
+ * @param edtConfigurations - Проекты конфигураций EDT рабочей области
+ * @param exists - Проверка файла
+ * @returns Каталог базового проекта либо undefined
+ */
+export function designerExtensionBase(
+	convertedConfiguration: string,
+	edtConfigurations: readonly string[],
+	exists: (file: string) => boolean = fs.existsSync
+): string | undefined {
+	if (exists(path.join(convertedConfiguration, '.project'))) {
+		return convertedConfiguration;
+	}
+	return edtConfigurations.length === 1 ? edtConfigurations[0] : undefined;
+}
+
+/**
+ * Конвертирует исходный код в другой формат.
  *
  * @param workspaceRoot - Корень рабочей области
- * @param source - Конфигурация, исходники которой конвертируются
- * @param outputPath - Каталог результата
+ * @param conversion - Что и куда конвертируется
  * @returns Код возврата 1cedtcli
  */
-export async function convertSourcesWithEdt(
-	workspaceRoot: string,
-	source: SourceRoot,
-	outputPath: string
-): Promise<number> {
-	const vrunner = VRunnerManager.getInstance();
-	const workspaceDir = edtWorkspaceDir(workspaceRoot, vrunner.getOutPath());
-	const projectName = path.basename(source.dir);
+export async function convertSourcesWithEdt(workspaceRoot: string, conversion: EdtConversion): Promise<number> {
+	const workspaceDir = edtWorkspaceDir(workspaceRoot, VRunnerManager.getInstance().getOutPath());
+	const output = new TaskOutputChain();
 
-	if (source.format === 'edt') {
+	if (conversion.baseProjectDir !== undefined) {
+		const code = await ensureProjectRegistered(conversion.baseProjectDir, workspaceDir, workspaceRoot, output);
+		if (code !== 0) {
+			return code;
+		}
+	}
+
+	if (conversion.format === 'edt') {
+		const code = await ensureProjectRegistered(conversion.sourceDir, workspaceDir, workspaceRoot, output);
+		if (code !== 0) {
+			return code;
+		}
+		await fsp.rm(conversion.outputPath, { recursive: true, force: true });
+		const name = edtProjectName(conversion.sourceDir);
 		return runEdtCommand({
 			command: 'export',
-			args: ['--project', source.dir, '--configuration-files', outputPath],
-			title: `EDT: выгрузка ${projectName} в формат конфигуратора`,
+			args: ['--project-name', name, '--configuration-files', conversion.outputPath],
+			title: `EDT: выгрузка ${name} в формат конфигуратора`,
 			workspaceDir,
 			cwd: workspaceRoot,
+			output,
 		});
 	}
 
+	// Проект прошлой конвертации ещё подключён к рабочей области: в подключённый проект импорт не идёт
+	const detached = await detachProject(conversion.outputPath, workspaceDir, workspaceRoot, output);
+	if (detached !== 0) {
+		return detached;
+	}
+	await fsp.rm(conversion.outputPath, { recursive: true, force: true });
+	const baseArgs = conversion.baseProjectDir === undefined
+		? []
+		: ['--base-project-name', edtProjectName(conversion.baseProjectDir)];
 	return runEdtCommand({
 		command: 'import',
-		args: ['--configuration-files', source.dir, '--project-name', path.basename(outputPath)],
-		title: `EDT: импорт ${projectName} в проект`,
-		workspaceDir: outputPath,
+		args: ['--configuration-files', conversion.sourceDir, '--project', conversion.outputPath, ...baseArgs],
+		title: `EDT: импорт ${path.basename(conversion.sourceDir)} в проект`,
+		workspaceDir,
 		cwd: workspaceRoot,
+		output,
 	});
 }

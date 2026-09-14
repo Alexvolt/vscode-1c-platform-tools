@@ -9,16 +9,12 @@ import {
 	edtExternalProjectsOf,
 	edtProjectOfExternal,
 	edtStagingTarget,
-	edtToolingRefusal,
 	planEdtBridge,
 	sourceFormatOfDirectory,
 	withBaseProject,
 } from '../../features/edt/edtSourceBridge';
 import { edtProjectName } from '../../features/edt/edtRunner';
 import { invalidateProjectLayout, resolveProjectLayout, setLayoutExclusions } from '../../shared/projectLayout';
-import { parseVRunnerVersion, type VRunnerVersion } from '../../shared/vrunnerVersion';
-
-const version = (raw: string): VRunnerVersion => parseVRunnerVersion(raw) as VRunnerVersion;
 
 /** Рабочие области с исходным кодом в обоих форматах. */
 const FIXTURES = path.resolve(__dirname, '../../../src/test/fixtures/projectLayout');
@@ -207,17 +203,6 @@ suite('мост между проектом EDT и раннером', () => {
 		);
 		assert.strictEqual(planEdtBridge({ kind: 'infobase.updateDb' }, edtSource, layout), undefined);
 		assert.strictEqual(planEdtBridge({ kind: 'test.xunit' }, edtSource, layout), undefined);
-	});
-
-	test('конвертацию раннером останавливает только старый раннер', () => {
-		const convert = { kind: 'cf.convert' as const, src: 'ssl31', out: 'src/cf' };
-		assert.ok(edtToolingRefusal(convert, edtSource, version('2.6.1'))?.includes('3.0.0-rc8'));
-		assert.strictEqual(edtToolingRefusal(convert, edtSource, version('3.0.0-rc8')), undefined);
-		assert.strictEqual(edtToolingRefusal(convert, edtSource, undefined), undefined);
-		assert.strictEqual(
-			edtToolingRefusal({ kind: 'cf.loadFromSrc', src: 'ssl31', updateDb: false }, edtSource, version('2.6.1')),
-			undefined
-		);
 	});
 
 	test('формат каталога обработок виден по файлам описаний', () => {

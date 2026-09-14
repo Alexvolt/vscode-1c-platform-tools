@@ -20,7 +20,6 @@ import {
 	type SourceFormat,
 } from '../../shared/projectLayout';
 import type { VRunnerIntent } from '../../shared/vrunnerCli/intents';
-import { isAtLeast, VRUNNER_FEATURES, type VRunnerVersion } from '../../shared/vrunnerVersion';
 
 /** Насколько глубоко искать файлы описаний: внешняя обработка EDT лежит в src/ExternalDataProcessors/<Имя>. */
 const FORMAT_PROBE_DEPTH = 4;
@@ -50,9 +49,6 @@ const WRITE_SOURCE_INTENTS: ReadonlySet<VRunnerIntent['kind']> = new Set([
 	'cf.decompileFile',
 	'cfe.decompileCfeFile',
 ]);
-
-/** Конвертация форматов остаётся за раннером: у неё свой код внутри него. */
-const RUNNER_CONVERT_INTENTS: ReadonlySet<VRunnerIntent['kind']> = new Set(['cf.convert', 'cfe.convert']);
 
 /** Каталоги внешних объектов в проекте EDT. */
 const EXTERNAL_DIRECTORIES = ['ExternalDataProcessors', 'ExternalReports'] as const;
@@ -451,28 +447,4 @@ export function planEdtBridge(
 		};
 	}
 	return undefined;
-}
-
-/**
- * Почему конвертацию раннером нельзя запустить на исходниках EDT.
- *
- * Остальные команды проект EDT не останавливает: их исходники переводит сама EDT.
- *
- * @param intent - Что собирались запустить
- * @param source - Формат исходников, с которыми работает команда
- * @param version - Версия vanessa-runner; undefined, когда её не удалось определить
- * @returns Объяснение либо undefined, если препятствий нет
- */
-export function edtToolingRefusal(
-	intent: VRunnerIntent,
-	source: { format?: SourceFormat; dir?: string } | undefined,
-	version: VRunnerVersion | undefined
-): string | undefined {
-	if (source?.format !== 'edt' || !RUNNER_CONVERT_INTENTS.has(intent.kind)) {
-		return undefined;
-	}
-	if (version === undefined || isAtLeast(version, VRUNNER_FEATURES.edtSources)) {
-		return undefined;
-	}
-	return 'Конвертацию исходников 1С:EDT умеет vanessa-runner 3.0.0-rc8 и новее. Обновите раннер или воспользуйтесь командами группы «1С:EDT».';
 }

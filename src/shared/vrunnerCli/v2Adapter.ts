@@ -266,14 +266,6 @@ export class V2CliAdapter implements VRunnerCliAdapter {
 				return [[...args, ...common(intent)]];
 			}
 
-			case 'cf.convert':
-			case 'cfe.convert':
-				// Конвертация исходников между форматами появилась в 3.0.0-rc8
-				throw new Error(
-					'vanessa-runner 2.x не умеет конвертировать исходники между форматами EDT ' +
-					'и конфигуратора: команда появилась в 3.x.'
-				);
-
 			// ---- Регламентные задания ----
 			case 'jobs.lock':
 				return [['scheduledjobs', 'lock', ...common(intent)]];

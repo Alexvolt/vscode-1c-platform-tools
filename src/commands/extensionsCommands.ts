@@ -5,7 +5,6 @@ import { BaseCommand, INFOBASE_BUSY } from './baseCommand';
 import type { VRunnerExecutionResult } from '../shared/vrunnerManager';
 import {
 	getLoadExtensionFromSrcCommandName,
-	getConvertExtensionSourcesCommandName,
 	getLoadExtensionFromCfeCommandName,
 	getLoadExtensionFromFilesByListCommandName,
 	getDumpExtensionToSrcCommandName,
@@ -31,6 +30,8 @@ import {
 } from '../features/extensions/extensionSelection';
 import { resolveExtensionNameFromSrc } from '../features/extensions/extensionNames';
 import { pickExtensions } from '../features/extensions/extensionPicker';
+import { projectConfiguration } from '../shared/projectConfiguration';
+import { projectMemento } from '../shared/projectState';
 import { parseInfobaseExtensionsList } from '../features/extensions/infobaseExtensionsList';
 import {
 	isUsableExtensionFolderName,
@@ -49,6 +50,9 @@ import type { CommandExecutionOptions, StructuredCommandResult } from '../shared
 import type { VRunnerIntent } from '../shared/vrunnerCli';
 import { BUILD_SUBDIRS } from '../shared/pathDefaults';
 import { VRUNNER_FEATURES, isAtLeast } from '../shared/vrunnerVersion';
+import { resolveProjectLayout } from '../shared/projectLayout';
+import { CONVERTED_CONFIGURATION_DIR, convertSourcesWithEdt, designerExtensionBase } from '../features/edt/edtConvert';
+import { EDT_NOT_FOUND_MESSAGE, readEdtSettings, resolveEdt } from '../features/edt/edtRunner';
 
 /** Цель выгрузки, у которой каталог уже известен. */
 type PlacedDumpTarget = ExtensionDumpTarget & { dir: string };
@@ -178,7 +182,7 @@ export class ExtensionsCommands extends BaseCommand {
 		opts?: CommandExecutionOptions,
 		scope: ExtensionScope = 'solution'
 	): Promise<T[] | undefined> {
-		return pickExtensions(extensions, this.vrunner.getWorkspaceMemento(), opts, scope);
+		return pickExtensions(extensions, projectMemento(), opts, scope);
 	}
 
 	/**
@@ -379,7 +383,7 @@ export class ExtensionsCommands extends BaseCommand {
 		opts: CommandExecutionOptions | undefined
 	): Promise<string[] | StructuredCommandResult | undefined> {
 		const configured = normalizeConfiguredExtensions(
-			vscode.workspace.getConfiguration('1c-platform-tools').get('cfe.selected')
+			projectConfiguration(workspaceRoot).get('cfe.selected')
 		);
 		if (configured.length > 0) {
 			return configured;
@@ -631,50 +635,91 @@ export class ExtensionsCommands extends BaseCommand {
 	}
 
 	/**
-	 * Конвертирует исходники расширения между форматами EDT и конфигуратора.
+	 * Конвертирует исходный код расширения между форматами EDT и конфигуратора.
 	 *
-	 * Расширение выбирается среди тех, что относятся к активной конфигурации;
-	 * формат источника определяет сам vanessa-runner.
+	 * Конвертирует сама 1С:EDT. Расширение выбирается среди расширений активной
+	 * конфигурации; проекту расширения нужен базовый проект: у проекта EDT он
+	 * берётся из раскладки, выгрузке конфигуратора служит проект, в который
+	 * конвертировалась конфигурация.
 	 *
 	 * @param opts - Опции выполнения
 	 */
 	async convertExtensionSources(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
-		const version = await this.vrunner.getVRunnerVersion();
-		if (version !== undefined && !isAtLeast(version, VRUNNER_FEATURES.edtSources)) {
+		const workspaceRoot = this.ensureWorkspace();
+		if (!workspaceRoot) {
+			return;
+		}
+		if (!resolveEdt(readEdtSettings(workspaceRoot))) {
+			return this.reportUnavailable(EDT_NOT_FOUND_MESSAGE, opts);
+		}
+
+		const extensions = (await this.activeExtensions()).map((extension) => ({
+			...extension,
+			folder: path.basename(extension.dir),
+		}));
+		if (extensions.length === 0) {
+			return this.reportUnavailable('В рабочей области нет исходного кода расширений.', opts);
+		}
+
+		const wanted = opts?.extensions?.[0];
+		let selected = wanted !== undefined
+			? findExtension(extensions, wanted)
+			: extensions.length === 1 ? extensions[0] : undefined;
+		if (!selected && wanted === undefined && opts?.wait !== true) {
+			selected = (await vscode.window.showQuickPick(
+				extensions.map((extension) => ({ label: extension.name, description: extension.dir, extension })),
+				{ title: 'Расширение для конвертации', placeHolder: 'Исходный код какого расширения конвертировать' }
+			))?.extension;
+			if (!selected) {
+				return;
+			}
+		}
+		if (!selected) {
 			return this.reportUnavailable(
-				'Конвертация исходников между форматами появилась в vanessa-runner 3.0.0-rc8.',
+				wanted === undefined
+					? 'Расширений несколько: укажите нужное параметром extensions.'
+					: `Расширения «${wanted}» нет среди расширений активной конфигурации.`,
 				opts
 			);
 		}
 
-		const extensions = await this.activeExtensions();
-		if (extensions.length === 0) {
-			return this.reportUnavailable('В рабочей области нет исходников расширений.', opts);
-		}
-
-		const selected = extensions.length === 1
-			? extensions[0]
-			: (await vscode.window.showQuickPick(
-				extensions.map((extension) => ({ label: extension.name, description: extension.dir, extension })),
-				{ title: 'Расширение для конвертации', placeHolder: 'Исходники какого расширения конвертировать' }
-			))?.extension;
-		if (!selected) {
-			return;
+		const absolute = (dir: string) => path.resolve(workspaceRoot, dir);
+		let baseProjectDir: string | undefined;
+		if (selected.format === 'edt') {
+			const base = (await this.edtBaseProjectResolver(workspaceRoot))(selected.dir);
+			baseProjectDir = base === undefined ? undefined : absolute(base);
+		} else {
+			const layout = await resolveProjectLayout(workspaceRoot);
+			const edtConfigurations = [...(layout.configuration ? [layout.configuration] : []), ...layout.others]
+				.filter((root) => root.format === 'edt')
+				.map((root) => root.dir);
+			baseProjectDir = designerExtensionBase(
+				absolute(path.join(this.vrunner.getOutPath(), CONVERTED_CONFIGURATION_DIR)),
+				edtConfigurations
+			);
+			if (baseProjectDir === undefined) {
+				return this.reportUnavailable(
+					'Проекту расширения в формате EDT нужен базовый проект: сначала конвертируйте исходный код конфигурации.',
+					opts
+				);
+			}
 		}
 
 		const defaultOut = path.join(this.vrunner.getOutPath(), 'cfe-converted', selected.name);
 		const outputPath = opts?.wait === true
 			? defaultOut
-			: await this.pickOutputPath(defaultOut, 'Каталог для конвертированных исходников');
+			: await this.pickOutputPath(defaultOut, 'Каталог для конвертированного исходного кода');
 		if (!outputPath) {
 			return;
 		}
 
-		const commandName = getConvertExtensionSourcesCommandName();
-		return this.runIntent(
-			{ kind: 'cfe.convert', src: selected.dir, out: outputPath, extensionName: selected.name },
-			opts, commandName.title, outputPath, commandName.id
-		);
+		const exitCode = await convertSourcesWithEdt(workspaceRoot, {
+			sourceDir: absolute(selected.dir),
+			format: selected.format,
+			outputPath: absolute(outputPath),
+			baseProjectDir,
+		});
+		return this.edtCommandResult(exitCode, outputPath, opts);
 	}
 
 	/**

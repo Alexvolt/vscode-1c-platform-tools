@@ -6,13 +6,20 @@ import type { VRunnerIntent } from '../shared/vrunnerCli';
 import { enclosingEdtProject, resolveProjectLayout, rootOfDirectory, type SourceFormat } from '../shared/projectLayout';
 import { logger } from '../shared/logger';
 import { runWithHooks, runHooksAroundTerminalTask } from '../shared/commandHooks';
-import { anyNeedsExclusiveInfobase, infobaseHolder, keepsInfobaseAfterRun } from '../shared/exclusiveInfobase';
+import {
+	anyNeedsExclusiveInfobase,
+	exclusiveInfobaseLogLine,
+	infobaseHolder,
+	keepsInfobaseAfterRun,
+} from '../shared/exclusiveInfobase';
+import { resolveFileIbAbsolutePath } from '../shared/ibConnectionPath';
+import { currentRoot, runWithProject } from '../shared/workspaceProjects';
+import { projectLabel, projectRelativePath } from './projectScope';
 import { configurationScope } from '../shared/activeConfiguration';
 import { CONVENTIONAL_PATHS, projectPaths, type ProjectPaths } from '../shared/projectPaths';
 import {
 	edtBaseProjectOf,
 	edtExternalProjectsOf,
-	edtToolingRefusal,
 	intentSourcePath,
 	planEdtBridge,
 	sourceFormatOfDirectory,
@@ -394,6 +401,9 @@ export abstract class BaseCommand {
 	 * Освобождает информационную базу на время команды, если её держит
 	 * автономный сервер, а намерению нужен монопольный доступ.
 	 *
+	 * Держатель ищется по абсолютному пути базы команды: сервер другого проекта
+	 * с другой базой не останавливается.
+	 *
 	 * Базу возвращает {@link InfobaseHolder.restore}: он попадает в план как
 	 * `onComplete` и срабатывает после фактического завершения работы. Когда
 	 * команда уходит в интерактивный терминал, о её завершении расширение не
@@ -410,8 +420,23 @@ export abstract class BaseCommand {
 		intents: readonly VRunnerIntent[],
 		opts: CommandExecutionOptions | undefined
 	): Promise<{ restore?: () => Promise<void> } | 'blocked'> {
-		const holder = infobaseHolder();
-		if (!holder || !anyNeedsExclusiveInfobase(intents) || !holder.isHolding()) {
+		if (!anyNeedsExclusiveInfobase(intents)) {
+			return {};
+		}
+		const root = currentRoot();
+		const connection = opts?.ibConnection?.trim() || (await this.vrunner.getIbConnectionValue(opts?.settingsFile));
+		log.info(
+			exclusiveInfobaseLogLine(
+				root === undefined ? '-' : projectLabel(root),
+				opts?.settingsFile ?? this.vrunner.getActiveEnvFile(),
+				connection
+			)
+		);
+		const infobase = root !== undefined && connection.startsWith('/F')
+			? resolveFileIbAbsolutePath(connection, root)
+			: undefined;
+		const holder = infobase === undefined ? undefined : infobaseHolder(infobase);
+		if (!holder) {
 			return {};
 		}
 
@@ -474,11 +499,6 @@ export abstract class BaseCommand {
 		const imports: EdtImportStep[] = [];
 		for (const intent of intents) {
 			const source = await this.activeSource(intent);
-			const refusal = edtToolingRefusal(intent, source, await this.vrunner.getVRunnerVersion());
-			if (refusal) {
-				const reported = await this.reportUnavailable(refusal, opts);
-				return reported ?? 'blocked';
-			}
 			const plan =
 				workspaceRoot === undefined
 					? undefined
@@ -517,6 +537,27 @@ export abstract class BaseCommand {
 			intents: rewritten,
 			after: owned.length > 0 ? () => runEdtImports(owned, context) : undefined,
 			output,
+		};
+	}
+
+	/**
+	 * Ответ команды, которую выполняет 1С:EDT: вызывающему с ожиданием код
+	 * возврата и результат, ход и причина ошибки видны в терминале задачи.
+	 */
+	protected edtCommandResult(
+		exitCode: number,
+		artifact: string,
+		opts: CommandExecutionOptions | undefined
+	): StructuredCommandResult | void {
+		if (opts?.wait !== true) {
+			return;
+		}
+		return {
+			success: exitCode === 0,
+			exitCode,
+			stdout: '',
+			stderr: exitCode === 0 ? '' : `Команда 1С:EDT завершилась с кодом ${exitCode}.`,
+			artifact,
 		};
 	}
 
@@ -728,9 +769,7 @@ export abstract class BaseCommand {
 			defaultUri: vscode.Uri.file(workspaceRoot),
 			title,
 		});
-		return uris?.length
-			? vscode.workspace.asRelativePath(uris[0], false).replaceAll('\\', '/')
-			: undefined;
+		return uris?.length ? projectRelativePath(workspaceRoot, uris[0].fsPath) : undefined;
 	}
 
 
@@ -858,21 +897,23 @@ export abstract class BaseCommand {
 			return;
 		}
 
-		const workspaceRoot = this.vrunner.getWorkspaceRoot() ?? cwd;
+		const root = currentRoot();
+		const workspaceRoot = root ?? cwd;
+		const inRoot = <T>(fn: () => T): T => runWithProject(root, fn);
 		const appendOverrides = planned ? false : undefined;
 
 		if (opts?.wait === true) {
-			const execute = async (): Promise<StructuredCommandResult> => {
+			const execute = (): Promise<StructuredCommandResult> => inRoot(async () => {
 				const result = await this.vrunner.executeVRunner(args, { cwd });
 				return this.vrunnerResultToStructured(result, artifact) as StructuredCommandResult;
-			};
+			});
 			try {
 				if (!commandId) {
 					return await execute();
 				}
 				return await runWithHooks({ commandId, cwd, args, workspaceRoot, run: execute });
 			} finally {
-				await onComplete?.();
+				await inRoot(async () => onComplete?.());
 			}
 		}
 
@@ -881,15 +922,15 @@ export abstract class BaseCommand {
 			void runHooksAroundTerminalTask({
 				commandId, cwd, args, workspaceRoot,
 				trackCompletion: onComplete !== undefined,
-				runTracked: () => this.vrunner.executeVRunnerTaskAndWait(args, runOptions),
-				runUntracked: () => this.vrunner.executeVRunnerInTerminal(args, runOptions),
+				runTracked: () => inRoot(() => this.vrunner.executeVRunnerTaskAndWait(args, runOptions)),
+				runUntracked: () => inRoot(() => this.vrunner.executeVRunnerInTerminal(args, runOptions)),
 			})
 				.catch((err) => log.error(`Ошибка хуков команды: ${(err as Error).message}`))
-				.finally(() => void onComplete?.());
+				.finally(() => void inRoot(() => onComplete?.()));
 		} else if (onComplete) {
 			void this.vrunner.executeVRunnerTaskAndWait(args, runOptions)
 				.catch((err) => log.error(`Ошибка запуска команды: ${(err as Error).message}`))
-				.finally(() => void onComplete());
+				.finally(() => void inRoot(() => onComplete()));
 		} else {
 			this.vrunner.executeVRunnerInTerminal(args, runOptions);
 		}
@@ -925,12 +966,14 @@ export abstract class BaseCommand {
 			return;
 		}
 
-		const workspaceRoot = this.vrunner.getWorkspaceRoot() ?? cwd;
+		const root = currentRoot();
+		const workspaceRoot = root ?? cwd;
+		const inRoot = <T>(fn: () => T): T => runWithProject(root, fn);
 		const flatArgs = argsList.flat();
 		const appendOverrides = planned ? false : undefined;
 
 		if (opts?.wait === true) {
-			const execute = async (): Promise<StructuredCommandResult> => {
+			const execute = (): Promise<StructuredCommandResult> => inRoot(async () => {
 				let stdout = '';
 				let stderr = '';
 				let exitCode = 0;
@@ -946,14 +989,14 @@ export abstract class BaseCommand {
 					}
 				}
 				return { success, exitCode, stdout, stderr };
-			};
+			});
 			try {
 				if (!commandId) {
 					return await execute();
 				}
 				return await runWithHooks({ commandId, cwd, args: flatArgs, workspaceRoot, run: execute });
 			} finally {
-				await onComplete?.();
+				await inRoot(async () => onComplete?.());
 			}
 		}
 
@@ -965,15 +1008,15 @@ export abstract class BaseCommand {
 			void runHooksAroundTerminalTask({
 				commandId, cwd, args: flatArgs, workspaceRoot,
 				trackCompletion: onComplete !== undefined,
-				runTracked: () => this.vrunner.executeVRunnerTaskSequenceAndWait(argsList, runOptions),
-				runUntracked: () => this.vrunner.executeVRunnerCommandsInSequence(argsList, runOptions),
+				runTracked: () => inRoot(() => this.vrunner.executeVRunnerTaskSequenceAndWait(argsList, runOptions)),
+				runUntracked: () => inRoot(() => this.vrunner.executeVRunnerCommandsInSequence(argsList, runOptions)),
 			})
 				.catch((err) => log.error(`Ошибка хуков команды: ${(err as Error).message}`))
-				.finally(() => void onComplete?.());
+				.finally(() => void inRoot(() => onComplete?.()));
 		} else if (onComplete) {
 			void this.vrunner.executeVRunnerTaskSequenceAndWait(argsList, runOptions)
 				.catch((err) => log.error(`Ошибка запуска команды: ${(err as Error).message}`))
-				.finally(() => void onComplete());
+				.finally(() => void inRoot(() => onComplete()));
 		} else {
 			await this.vrunner.executeVRunnerCommandsInSequence(argsList, runOptions);
 		}
