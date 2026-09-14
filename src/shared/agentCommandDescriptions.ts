@@ -30,6 +30,7 @@ const TASKS = '1С: Задачи';
 const SESSIONS = '1С: Сеансы';
 const PIPELINES = '1С: Пайплайны';
 const SERVER = '1С: Автономный сервер';
+const PROJECT = '1С: Проект';
 
 /** Описания команд, чей заголовок вне интерфейса непонятен. */
 export const AGENT_COMMAND_DESCRIPTIONS: Record<string, AgentCommandDescription> = {
@@ -258,7 +259,7 @@ export const AGENT_COMMAND_DESCRIPTIONS: Record<string, AgentCommandDescription>
 
 	// Зависимости и задачи
 	'1c-platform-tools.dependencies.initializePackagedef': {
-		title: 'Создать описание пакета packagedef в корне проекта',
+		title: 'Создать описание пакета packagedef в каталоге projectPath и сделать проект текущим. projectPath обязателен: папка рабочей области или каталог из candidates списка проектов, в том числе внутри проекта; существующий packagedef не перезаписывается',
 		category: DEPENDENCIES,
 	},
 	'1c-platform-tools.dependencies.initializeProjectStructure': {
@@ -336,6 +337,20 @@ export const AGENT_COMMAND_DESCRIPTIONS: Record<string, AgentCommandDescription>
 	'1c-platform-tools.env.clearOverrides': {
 		title: 'Сбросить временные параметры запуска активного профиля',
 		category: ENVIRONMENT,
+	},
+
+	// Проекты окна: команды без projectPath выполняются в текущем проекте
+	'1c-platform-tools.project.list': {
+		title: 'Показать проекты 1С в окне VS Code (каталоги с packagedef и подпроекты): корень, имя, формат и имя конфигурации, какой проект текущий; отдельно папки и конфигурации без packagedef. Команды без projectPath выполняются в текущем проекте',
+		category: PROJECT,
+	},
+	'1c-platform-tools.project.select': {
+		title: 'Сделать проект текущим: параметр root - корень проекта из списка проектов, неизвестный корень даёт ошибку со списком. Выбор меняется и у пользователя, следующие команды без projectPath выполняются в этом проекте; projectPath у других команд текущий проект не меняет',
+		category: PROJECT,
+	},
+	'1c-platform-tools.project.initialize': {
+		title: 'Сделать каталог проектом 1С: создать packagedef в каталоге projectPath и сделать проект текущим. projectPath обязателен: папка рабочей области или каталог из candidates списка проектов, в том числе внутри проекта; существующий packagedef не перезаписывается',
+		category: PROJECT,
 	},
 };
 

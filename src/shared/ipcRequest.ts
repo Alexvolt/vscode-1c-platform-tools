@@ -1,63 +1,92 @@
 /**
- * Разбор запросов IPC: проверка проекта и флагов выполнения.
+ * Разбор запросов IPC: корень проекта вызова и флаги выполнения.
  *
- * Здесь решается, выполнится ли вызов агента и в каком проекте. Модуль
- * намеренно не зависит от vscode: правила сверки путей проверяются тестами,
- * а не догадками о поведении на чужой файловой системе.
+ * Здесь решается, выполнится ли вызов агента и в каком проекте. Правила сверки
+ * путей не читают состояние окна: папки, проекты и текущий корень передаются
+ * явно и проверяются тестами.
  */
 import * as path from 'node:path';
 import type { CommandExecutionOptions } from './commandExecutionTypes';
+import { deepestProject, normalizeProjectRoot } from './workspaceProjects';
+
+/** Состояние окна, от которого зависит корень вызова. */
+export interface RequestRootContext {
+	/** Корень текущего проекта. */
+	currentRoot: string | undefined;
+	/** Корни папок рабочей области. */
+	folders: readonly string[];
+	/** Корни проектов окна после полного обнаружения. */
+	projects: readonly string[];
+}
+
+/** Корень вызова либо причина отказа. */
+export type RequestRoot =
+	| { root: string }
+	| { error: 'WORKSPACE_MISMATCH'; projectPath: string }
+	| { error: 'PROJECT_NOT_FOUND' }
+	| { error: 'PROJECT_PATH_REQUIRED' };
 
 /**
- * Проверяет, что путь проекта совпадает с одной из папок рабочей области или
- * лежит внутри неё.
- *
- * Относительный путь считается от первой папки рабочей области. На Windows
- * регистр не учитывается. Пустой список папок означает, что проверять нечего.
- *
- * @param expectedProjectPath - Путь проекта из запроса
- * @param workspaceRoots - Пути папок, открытых в VS Code
- * @returns true, если путь принадлежит рабочей области
+ * Каталог из projectPath: относительный путь считается от текущего проекта,
+ * путь вне папок рабочей области отклоняется.
  */
-export function isProjectPathInWorkspace(
-	expectedProjectPath: string,
-	workspaceRoots: readonly string[]
-): boolean {
-	if (workspaceRoots.length === 0) {
-		return true;
+function requestTarget(
+	projectPath: string,
+	context: RequestRootContext
+): { target: string } | { error: 'WORKSPACE_MISMATCH'; projectPath: string } | { error: 'PROJECT_NOT_FOUND' } {
+	const { currentRoot } = context;
+	if (!path.isAbsolute(projectPath) && currentRoot === undefined) {
+		return { error: 'PROJECT_NOT_FOUND' };
 	}
-	const sep = path.sep;
-	const norm = (value: string): string => (sep === '\\' ? value.toLowerCase() : value);
-	const sameOrUnder = (a: string, b: string): boolean => {
-		const aNorm = norm(a);
-		const bNorm = norm(b);
-		return (
-			aNorm === bNorm ||
-			aNorm.startsWith(norm(b + sep)) ||
-			bNorm.startsWith(norm(a + sep))
-		);
-	};
-	const firstRoot = path.resolve(workspaceRoots[0]);
-	const expectedNorm = path.isAbsolute(expectedProjectPath)
-		? path.resolve(expectedProjectPath)
-		: path.resolve(firstRoot, expectedProjectPath);
-	return workspaceRoots.some((root) => sameOrUnder(expectedNorm, path.resolve(root)));
+	const target = normalizeProjectRoot(
+		path.isAbsolute(projectPath) ? projectPath : path.join(currentRoot as string, projectPath)
+	);
+	if (!deepestProject(context.folders.map((root) => ({ root })), target)) {
+		return { error: 'WORKSPACE_MISMATCH', projectPath: target };
+	}
+	return { target };
 }
 
 /**
- * Абсолютный корень проекта из запроса: относительный путь считается от первой
- * папки рабочей области, а не от каталога процесса редактора.
+ * Корень проекта, в котором выполняется команда агента.
  *
- * @returns Абсолютный путь либо undefined, если относительный путь не к чему привязать
+ * Без projectPath это текущий проект. Относительный путь считается от текущего
+ * проекта. Путь внутри папки рабочей области даёт самый глубокий проект, в
+ * котором он лежит, а вне проектов сам путь. Путь вне папок отклоняется.
+ *
+ * @param projectPath - Путь из запроса, уже без пробелов по краям
+ * @param context - Папки, проекты и текущий корень окна
+ * @returns Корень в написании известного проекта либо отказ
  */
-export function resolveProjectPath(
-	projectPath: string,
-	workspaceRoots: readonly string[]
-): string | undefined {
-	if (path.isAbsolute(projectPath)) {
-		return path.resolve(projectPath);
+export function resolveRequestRoot(projectPath: string | undefined, context: RequestRootContext): RequestRoot {
+	const { currentRoot } = context;
+	if (projectPath === undefined) {
+		return currentRoot === undefined ? { error: 'PROJECT_NOT_FOUND' } : { root: currentRoot };
 	}
-	return workspaceRoots.length > 0 ? path.resolve(workspaceRoots[0], projectPath) : undefined;
+	const resolved = requestTarget(projectPath, context);
+	if ('error' in resolved) {
+		return resolved;
+	}
+	const { target } = resolved;
+	return { root: deepestProject(context.projects.map((root) => ({ root })), target)?.root ?? target };
+}
+
+/**
+ * Каталог, с которым работает команда инициализации проекта.
+ *
+ * В отличие от {@link resolveRequestRoot} путь не заменяется проектом, в котором
+ * он лежит, и без projectPath текущий проект не подставляется.
+ *
+ * @param projectPath - Путь из запроса, уже без пробелов по краям
+ * @param context - Папки, проекты и текущий корень окна
+ * @returns Каталог либо отказ
+ */
+export function resolveRequestDirectory(projectPath: string | undefined, context: RequestRootContext): RequestRoot {
+	if (projectPath === undefined) {
+		return { error: 'PROJECT_PATH_REQUIRED' };
+	}
+	const resolved = requestTarget(projectPath, context);
+	return 'error' in resolved ? resolved : { root: resolved.target };
 }
 
 /**

@@ -1,14 +1,22 @@
 import * as net from 'node:net';
-import { VRunnerManager } from './vrunnerManager';
 import * as crypto from 'node:crypto';
 import * as vscode from 'vscode';
 import { logger } from './logger';
 import type { VRunnerExecutionResult } from './vrunnerManager';
 import type { CommandExecutionOptions, StructuredCommandResult } from './commandExecutionTypes';
-import { commandSupportsWait, isCommandExposedToMcp } from './mcpCommandPolicy';
+import {
+	commandRunsInProject,
+	commandSupportsWait,
+	commandTargetsDirectory,
+	isCommandExposedToMcp,
+} from './mcpCommandPolicy';
 import { agentCommandDescription } from './agentCommandDescriptions';
 import { readManifestCommands } from './commandCatalog';
-import { extractCommandFlags, isProjectPathInWorkspace, resolveProjectPath } from './ipcRequest';
+import { extractCommandFlags, resolveRequestDirectory, resolveRequestRoot } from './ipcRequest';
+import { hasProjectFile } from './projectLayout';
+import { normalizeProjectRoot, runWithProject } from './workspaceProjects';
+import { initializeChoices } from '../features/projects/projectInitialization';
+import { workspaceProjectsSource, type WorkspaceProjectsSource } from '../features/projects/workspaceProjectsSource';
 
 const log = logger.scope('ipc');
 
@@ -44,13 +52,16 @@ interface IpcServerConfig {
 
 /**
  * Расширенный StructuredCommandResult с метаданными выполнения, которые
- * добавляет ipcServer (длительность, временные метки). Сама команда возвращает
- * базовый StructuredCommandResult; ipcServer добавляет durationMs и временные метки.
+ * добавляет ipcServer (длительность, временные метки, корень проекта).
  */
 interface StructuredCommandResultWithTiming extends StructuredCommandResult {
 	startedAt: string;
 	finishedAt: string;
 	durationMs: number;
+	/** Корень проекта, в котором выполнилась команда. */
+	projectRoot?: string;
+	/** Данные команды, например список проектов. */
+	data?: unknown;
 }
 
 function readConfig(): IpcServerConfig {
@@ -90,6 +101,76 @@ async function handlePing(
 	};
 }
 
+/** Окно, в котором канал выполняет команды. */
+export interface IpcWindow {
+	readonly projects: WorkspaceProjectsSource;
+	executeCommand(commandId: string, ...args: unknown[]): Thenable<unknown>;
+}
+
+function extensionWindow(): IpcWindow {
+	return {
+		projects: workspaceProjectsSource(),
+		executeCommand: (commandId, ...args) => vscode.commands.executeCommand(commandId, ...args),
+	};
+}
+
+/**
+ * Корень проекта для команды агента; у команд инициализации каталог из projectPath.
+ *
+ * @param window - Окно канала
+ * @param commandId - Идентификатор команды
+ * @param projectPath - Путь из запроса
+ * @returns Корень (undefined у команд окна) либо ошибка ответа
+ */
+async function resolveCommandRoot(
+	window: IpcWindow,
+	commandId: string,
+	projectPath: string | undefined
+): Promise<{ root: string | undefined } | { error: NonNullable<IpcResponse['error']> }> {
+	if (!commandRunsInProject(commandId)) {
+		return { root: undefined };
+	}
+	const projects = (await window.projects.listProjects()).map((project) => project.root);
+	const folders = window.projects.folders().map((folder) => normalizeProjectRoot(folder.root));
+	const context = { currentRoot: window.projects.selectedRoot(), folders, projects };
+	const resolved = commandTargetsDirectory(commandId)
+		? resolveRequestDirectory(projectPath, context)
+		: resolveRequestRoot(projectPath, context);
+	if ('root' in resolved) {
+		return resolved;
+	}
+	if (resolved.error === 'PROJECT_PATH_REQUIRED') {
+		const candidates = initializeChoices(window.projects.folders(), await window.projects.listCandidates())
+			.map((choice) => choice.dir)
+			.filter((dir) => !hasProjectFile(dir));
+		const variants = candidates.length > 0 ? ` Варианты:\n${candidates.join('\n')}` : '';
+		return {
+			error: {
+				message: `Передайте в projectPath каталог, в котором создать packagedef.${variants}`,
+				code: 'PROJECT_PATH_REQUIRED',
+				details: { candidates },
+			},
+		};
+	}
+	if (resolved.error === 'WORKSPACE_MISMATCH') {
+		return {
+			error: {
+				message: 'Путь projectPath лежит вне папок рабочей области VS Code',
+				code: 'WORKSPACE_MISMATCH',
+				details: { projectPath: resolved.projectPath, workspaceRoots: folders, projects },
+			},
+		};
+	}
+	return {
+		error: {
+			message:
+				'Текущий проект не определён: передайте projectPath или сделайте проект текущим командой project.select',
+			code: 'PROJECT_NOT_FOUND',
+			details: { folders, projects },
+		},
+	};
+}
+
 /**
  * Выполняет команду синхронно через vscode.commands.executeCommand с флагом wait.
  *
@@ -99,15 +180,17 @@ async function handlePing(
  * сообщение агенту вместо тихого «Выполнено.».
  *
  * @param request — исходный IPC-запрос
+ * @param window — окно канала
  * @param commandId — идентификатор команды
- * @param projectPath — путь к корню проекта
+ * @param root — корень проекта вызова; undefined у команд окна
  * @param flags — флаги выполнения (wait, settingsFile, ibConnection и прочие)
  * @returns IPC-ответ со структурированным commandResult
  */
 async function handleExecuteCommandSync(
 	request: IpcRequest,
+	window: IpcWindow,
 	commandId: string,
-	projectPath: string | undefined,
+	root: string | undefined,
 	flags: CommandExecutionOptions
 ): Promise<IpcResponse> {
 	const base = buildResponseBase(request.id);
@@ -116,11 +199,9 @@ async function handleExecuteCommandSync(
 
 	try {
 		// Команде уходят все присланные опции: канал владеет только ожиданием и корнем проекта
-		const optsForCommand: CommandExecutionOptions = { ...flags, wait: true, projectPath };
-		const manager = VRunnerManager.getInstance();
-		const rawResult = projectPath
-			? await manager.runWithProjectRoot(projectPath, async () => vscode.commands.executeCommand(commandId, optsForCommand))
-			: await vscode.commands.executeCommand(commandId, optsForCommand);
+		const optsForCommand: CommandExecutionOptions = { ...flags, wait: true, projectPath: root };
+		const rawResult = await runWithProject(root, async () => window.executeCommand(commandId, optsForCommand));
+		const projectRoot = root ?? window.projects.selectedRoot();
 
 		const finishedAt = new Date().toISOString();
 		const durationMs = Date.now() - startMs;
@@ -140,16 +221,17 @@ async function handleExecuteCommandSync(
 				startedAt,
 				finishedAt,
 				durationMs,
+				projectRoot,
 			};
 			return {
 				...base,
-				result: { ok: true, commandResult: fallback },
+				result: { ok: true, commandResult: fallback, projectRoot },
 			};
 		}
 
 		// Команда может вернуть StructuredCommandResult (новый формат) или VRunnerExecutionResult.
 		// Оба формата имеют поля success, exitCode, stdout, stderr.
-		const r = rawResult as VRunnerExecutionResult & Partial<StructuredCommandResult>;
+		const r = rawResult as VRunnerExecutionResult & Partial<StructuredCommandResult> & { data?: unknown };
 		const structured: StructuredCommandResultWithTiming = {
 			success: r.success,
 			exitCode: typeof r.exitCode === 'number' ? r.exitCode : r.success ? 0 : 1,
@@ -158,14 +240,16 @@ async function handleExecuteCommandSync(
 			artifact: r.artifact,
 			tests: r.tests,
 			errors: r.errors,
+			data: r.data,
 			startedAt,
 			finishedAt,
 			durationMs,
+			projectRoot,
 		};
 
 		return {
 			...base,
-			result: { ok: true, commandResult: structured },
+			result: { ok: true, commandResult: structured, projectRoot },
 		};
 	} catch (error) {
 		const message =
@@ -186,11 +270,13 @@ async function handleExecuteCommandSync(
  *
  * @param request - Запрос канала
  * @param params - Идентификатор команды и её аргументы
+ * @param window - Окно канала
  * @returns Ответ канала: результат команды либо отказ
  */
 export async function handleExecuteCommand(
 	request: IpcRequest,
-	params: IpcExecuteCommandParams
+	params: IpcExecuteCommandParams,
+	window: IpcWindow = extensionWindow()
 ): Promise<IpcResponse> {
 	const base = buildResponseBase(request.id);
 
@@ -217,6 +303,7 @@ export async function handleExecuteCommand(
 		};
 	}
 
+	const commandId = params.commandId;
 	const args = Array.isArray(params.args) ? params.args : [];
 	const flags = extractCommandFlags(args);
 
@@ -225,70 +312,37 @@ export async function handleExecuteCommand(
 			? params.projectPath.trim()
 			: undefined;
 
-	const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
-	const workspaceRoots = workspaceFolders.map((folder) => folder.uri.fsPath);
-
-	// Относительный корень проекта считается от рабочей области: иначе команды искали бы
-	// исходники от каталога процесса редактора
-	const expectedProjectPath = requestedProjectPath
-		? resolveProjectPath(requestedProjectPath, workspaceRoots)
-		: undefined;
-	if (requestedProjectPath && !expectedProjectPath) {
-		return {
-			...base,
-			error: {
-				message: 'Относительный projectPath не к чему привязать: рабочая область не открыта',
-				code: 'INVALID_PROJECT_PATH',
-				details: { projectPath: requestedProjectPath },
-			},
-		};
+	const resolved = await resolveCommandRoot(window, commandId, requestedProjectPath);
+	if ('error' in resolved) {
+		return { ...base, error: resolved.error };
 	}
-
-	if (
-		expectedProjectPath &&
-		workspaceRoots.length > 0 &&
-		!isProjectPathInWorkspace(expectedProjectPath, workspaceRoots)
-	) {
-		return {
-			...base,
-			error: {
-				message:
-					'Путь projectPath не совпадает с текущей рабочей областью VS Code',
-				code: 'WORKSPACE_MISMATCH',
-				details: {
-					projectPath: expectedProjectPath,
-					workspaceRoots,
-				},
-			},
-		};
-	}
+	const { root } = resolved;
+	const directory = root !== undefined && commandTargetsDirectory(commandId);
+	const commandFlags: CommandExecutionOptions = directory ? { ...flags, projectPath: root, root } : flags;
 
 	// Синхронный режим: wait: true и команда его поддерживает
-	if (flags.wait === true && commandSupportsWait(params.commandId)) {
-		return handleExecuteCommandSync(request, params.commandId, expectedProjectPath, flags);
+	if (flags.wait === true && commandSupportsWait(commandId)) {
+		return handleExecuteCommandSync(request, window, commandId, root, commandFlags);
 	}
 
 	// Стандартный режим: запуск в UI-терминале
 	try {
-		const manager = VRunnerManager.getInstance();
-		const commandId = params.commandId as string;
-		const commandResult = expectedProjectPath
-			? await manager.runWithProjectRoot(expectedProjectPath, async () =>
-				vscode.commands.executeCommand(commandId, ...args))
-			: await vscode.commands.executeCommand(commandId, ...args);
+		const commandArgs = directory ? [commandFlags, ...args.slice(1)] : args;
+		const commandResult = await runWithProject(root, async () => window.executeCommand(commandId, ...commandArgs));
 
 		return {
 			...base,
 			result: {
 				ok: true,
 				commandResult,
+				projectRoot: root ?? window.projects.selectedRoot(),
 			},
 		};
 	} catch (error) {
 		const message =
 			error instanceof Error ? error.message : 'Неизвестная ошибка при выполнении команды';
 		log.error(
-			`ошибка при выполнении команды ${String(params.commandId)}: ${message}`
+			`ошибка при выполнении команды ${commandId}: ${message}`
 		);
 
 		return {

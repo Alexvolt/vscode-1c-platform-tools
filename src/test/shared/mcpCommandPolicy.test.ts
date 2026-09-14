@@ -1,5 +1,52 @@
 import * as assert from 'node:assert';
-import { isCommandExposedToMcp, commandSupportsWait } from '../../shared/mcpCommandPolicy';
+import {
+	isCommandExposedToMcp,
+	commandSupportsWait,
+	commandRunsInProject,
+	commandTargetsDirectory,
+} from '../../shared/mcpCommandPolicy';
+
+suite('mcpCommandPolicy: проекты окна', () => {
+	test('список проектов и выбор текущего доступны агенту и возвращают исход', () => {
+		for (const id of ['1c-platform-tools.project.list', '1c-platform-tools.project.select']) {
+			assert.strictEqual(isCommandExposedToMcp(id), true, id);
+			assert.strictEqual(commandSupportsWait(id), true, id);
+			assert.strictEqual(commandRunsInProject(id), false, id);
+		}
+	});
+
+	test('инициализация проекта доступна агенту, работает с каталогом из projectPath и возвращает исход', () => {
+		for (const id of ['1c-platform-tools.project.initialize', '1c-platform-tools.dependencies.initializePackagedef']) {
+			assert.strictEqual(isCommandExposedToMcp(id), true, id);
+			assert.strictEqual(commandSupportsWait(id), true, id);
+			assert.strictEqual(commandRunsInProject(id), true, id);
+			assert.strictEqual(commandTargetsDirectory(id), true, id);
+		}
+		for (const id of ['1c-platform-tools.cf.load', '1c-platform-tools.project.select']) {
+			assert.strictEqual(commandTargetsDirectory(id), false, id);
+		}
+	});
+
+	test('действия над строкой вида проектов агенту не публикуются', () => {
+		for (const id of [
+			'1c-platform-tools.project.makeCurrent',
+			'1c-platform-tools.project.separateConfiguration',
+			'1c-platform-tools.project.openInNewWindow',
+			'1c-platform-tools.project.revealInExplorer',
+			'1c-platform-tools.project.openTerminal',
+			'1c-platform-tools.project.copyPath',
+			'1c-platform-tools.project.createFromWelcome',
+		]) {
+			assert.strictEqual(isCommandExposedToMcp(id), false, id);
+		}
+	});
+
+	test('рабочие команды выполняются в проекте вызова', () => {
+		for (const id of ['1c-platform-tools.cf.load', '1c-platform-tools.env.status', '1c-platform-tools.pipelines.run']) {
+			assert.strictEqual(commandRunsInProject(id), true, id);
+		}
+	});
+});
 
 suite('mcpCommandPolicy', () => {
 	test('чужие команды VS Code агенту не публикуются', () => {

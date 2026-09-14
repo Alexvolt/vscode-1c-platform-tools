@@ -34,7 +34,7 @@ SHA — коммит последней загрузки: изменения в�
 
 ## MCP (mcp-1c-platform-tools)
 
-Если доступны инструменты MCP, используй их для тех же операций: `cf_load`, `infobase_updateDb` (только обновление БД), `cf_dump`, `cf_loadInc`, `cf_dumpInc`, `cf_loadByList`, `cf_loadFile`, `cf_unload`, `cf_compile`, `cf_decompile` и т.д. **Всегда передавай параметр `projectPath`** — корень проекта 1С (каталог с `packagedef`).
+Если доступны инструменты MCP, используй их для тех же операций: `cf_load`, `infobase_updateDb` (только обновление БД), `cf_dump`, `cf_loadInc`, `cf_dumpInc`, `cf_loadByList`, `cf_loadFile`, `cf_unload`, `cf_compile`, `cf_decompile` и т.д. Без `projectPath` команды выполняются в текущем проекте.
 
 ## Правило
 

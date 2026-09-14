@@ -32,9 +32,9 @@ description: Поддержка конфигурации и поставка. И
 
 ### Параметр projectPath
 
-Обязательный. Корень проекта 1С (каталог с `packagedef`). Если пользователь указал путь — используй его; иначе корень workspace.
+Корень проекта 1С (каталог с `packagedef`). Передавай, только если пользователь назвал проект: без параметра команда выполняется в текущем проекте.
 
 ## Примеры
 
-- Вызови `cf_makeDist` или команду `1c-platform-tools.cf.makeDist` с projectPath корня проекта.
+- Вызови `cf_makeDist` или команду `1c-platform-tools.cf.makeDist`.
 - Для создания комплекта поставки — `support_createDistributivePackage` (MCP) или `1c-platform-tools.support.createDistributivePackage` (команда).

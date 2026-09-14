@@ -21,7 +21,7 @@ description: Зависимости и структура проекта 1С. И
 
 ## MCP (mcp-1c-platform-tools)
 
-Для зависимостей в первую очередь вызывай **deps_install** (packagedef, vrunner) и **deps_installOscript** (opm, vanessa и др.). Есть также инструменты для initializePackagedef, initializeProjectStructure и т.д. **Всегда передавай параметр `projectPath`**. К терминалу с `opm install add` прибегай только если MCP недоступен.
+Для зависимостей в первую очередь вызывай **deps_install** (packagedef, vrunner) и **deps_installOscript** (opm, vanessa и др.). Есть также инструменты для initializeProjectStructure и других команд, без `projectPath` они выполняются в текущем проекте. packagedef создаёт **project_init** с обязательным `projectPath` каталога, который станет проектом. К терминалу с `opm install add` прибегай только если MCP недоступен.
 
 ## Правило
 
