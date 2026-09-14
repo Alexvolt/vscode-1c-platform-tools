@@ -14,8 +14,7 @@
  * пользователем в файле настроек vanessa-runner (vrunner.ibcmd в
  * autumn-properties.json).
  *
- * Источник истины — документация vanessa-runner 3.0 (docs/product/команды),
- * сверено живыми прогонами на rc14.
+ * Источник истины — документация vanessa-runner 3.0 (docs/product/команды).
  */
 
 import {

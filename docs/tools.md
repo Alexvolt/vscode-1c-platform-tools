@@ -84,8 +84,6 @@
 
 Завершение сеансов в 3.x проверяет результат: `rac` завершает сеансы асинхронно, поэтому vanessa-runner перечитывает список и добивает зависшие. Число попыток задаётся параметром `sessionRetry` (по умолчанию три), а `sessionTimeout` заставляет повторять до успеха или до истечения времени. Проверка отсутствия сеансов с `sessionTimeout` ждёт, пока фоновые задания сами доработают.
 
-Списку сеансов и ожиданию нужен vanessa-runner 3.0.0-rc14 или новее.
-
 При вызове агентом можно задать параметры разового запуска, не трогая профиль: `lockMessage`, `accessCode`, `lockStart`, `lockEnd`, `sessionFilter`, `sessionFilterMode`, `keepSessionsUnlocked`, `sessionRetry`, `sessionTimeout` и `sessionConnections`.
 
 ## Выбор расширений для команд
