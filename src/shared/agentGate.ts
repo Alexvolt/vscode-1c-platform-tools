@@ -5,9 +5,9 @@ import type { StructuredCommandResult } from './commandExecutionTypes';
  * открывать окна VS Code — пользователь может быть не за экраном
  * (web-сессия agent-клиента, телефон).
  *
- * MCP/IPC всегда передаёт первым аргументом объект опций с известными
- * ключами; палитра и command-ссылки не передают ничего, а команды деревьев
- * получают TreeItem (объект без этих ключей).
+ * MCP/IPC всегда передаёт первым аргументом простой объект опций с известными
+ * ключами; палитра и command-ссылки не передают ничего, а команды деревьев,
+ * в том числе кнопки заголовка панели, получают элемент дерева.
  */
 
 /** Ключи объекта опций, которые передаёт MCP/IPC. */
@@ -24,13 +24,26 @@ const AGENT_OPTION_KEYS = [
 ] as const;
 
 /**
+ * Простой объект: литерал или результат `JSON.parse`, а не экземпляр класса.
+ *
+ * @param arg - Проверяемое значение
+ */
+export function isPlainObject(arg: unknown): arg is Record<string, unknown> {
+	if (typeof arg !== 'object' || arg === null) {
+		return false;
+	}
+	const proto = Object.getPrototypeOf(arg);
+	return proto === Object.prototype || proto === null;
+}
+
+/**
  * Распознаёт объект опций агентного вызова.
  *
  * @param arg - Первый аргумент команды
- * @returns true для объекта опций MCP/IPC (включая пустой объект)
+ * @returns true для объекта опций MCP/IPC (включая пустой объект); false для элементов деревьев
  */
 export function isAgentOptions(arg: unknown): boolean {
-	if (typeof arg !== 'object' || arg === null || Array.isArray(arg)) {
+	if (!isPlainObject(arg)) {
 		return false;
 	}
 	const keys = Object.keys(arg);

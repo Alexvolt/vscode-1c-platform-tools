@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { isAgentOptions } from '../../shared/agentGate';
+import { isAgentOptions, isPlainObject } from '../../shared/agentGate';
 import { notifyQuiet } from '../../shared/notify';
 import { projectOverride } from '../../shared/workspaceProjects';
 import {
@@ -33,8 +33,8 @@ export function rootArgument(arg: unknown): string | undefined {
 	if (isWorkspaceProjectsNode(arg)) {
 		return nodeRoot(arg);
 	}
-	if (typeof arg === 'object' && arg !== null) {
-		const root = (arg as { root?: unknown }).root;
+	if (isPlainObject(arg)) {
+		const root = arg.root;
 		return typeof root === 'string' && root.trim() !== '' ? root.trim() : undefined;
 	}
 	return undefined;
