@@ -4,6 +4,7 @@ import { PipelineEditorProvider } from '../features/pipelines/pipelineEditorProv
 import { PipelineTaskProvider } from '../features/pipelines/pipelineTaskProvider';
 import { registerFormSaveCommand } from '../features/editors/formPanels';
 import { HooksEditorProvider } from '../features/hooks/hooksEditorProvider';
+import { ArtifactPreviewProvider } from '../features/artifacts/artifactPreviewProvider';
 import { VRunnerManager } from '../shared/vrunnerManager';
 import { registerHelpAndSettingsCommands } from '../features/tools/registerHelpAndSettingsCommands';
 import { registerDebugFeature } from '../features/debug/registerDebugFeature';
@@ -58,6 +59,7 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 	context.subscriptions.push(PipelineTaskProvider.register());
 	context.subscriptions.push(registerFormSaveCommand());
 	context.subscriptions.push(HooksEditorProvider.register());
+	context.subscriptions.push(ArtifactPreviewProvider.register(context));
 	const isProject = await detectAndSetInitialProjectContext();
 	const propertyPaletteProvider = registerPropertiesFlow(context);
 	const { metadataTreeProvider } = registerMetadataFlow(context, isProject, propertyPaletteProvider);

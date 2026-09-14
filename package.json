@@ -544,7 +544,80 @@
         ]
       }
     ],
+    "languages": [
+      {
+        "id": "1c-configuration-file",
+        "aliases": [
+          "Конфигурация 1С"
+        ],
+        "extensions": [
+          ".cf"
+        ],
+        "icon": {
+          "light": "resources/metadata-tree-icons/configuration.svg",
+          "dark": "resources/metadata-tree-icons/dark/configuration.svg"
+        }
+      },
+      {
+        "id": "1c-extension-file",
+        "aliases": [
+          "Расширение конфигурации 1С"
+        ],
+        "extensions": [
+          ".cfe"
+        ],
+        "icon": {
+          "light": "resources/metadata-tree-icons/extension.svg",
+          "dark": "resources/metadata-tree-icons/dark/extension.svg"
+        }
+      },
+      {
+        "id": "1c-external-data-processor-file",
+        "aliases": [
+          "Внешняя обработка 1С"
+        ],
+        "extensions": [
+          ".epf"
+        ],
+        "icon": {
+          "light": "resources/metadata-tree-icons/dataProcessor.svg",
+          "dark": "resources/metadata-tree-icons/dark/dataProcessor.svg"
+        }
+      },
+      {
+        "id": "1c-external-report-file",
+        "aliases": [
+          "Внешний отчёт 1С"
+        ],
+        "extensions": [
+          ".erf"
+        ],
+        "icon": {
+          "light": "resources/metadata-tree-icons/report.svg",
+          "dark": "resources/metadata-tree-icons/dark/report.svg"
+        }
+      }
+    ],
     "customEditors": [
+      {
+        "viewType": "1c-platform-tools.artifactPreview",
+        "displayName": "Файл 1С",
+        "selector": [
+          {
+            "filenamePattern": "*.cf"
+          },
+          {
+            "filenamePattern": "*.cfe"
+          },
+          {
+            "filenamePattern": "*.epf"
+          },
+          {
+            "filenamePattern": "*.erf"
+          }
+        ],
+        "priority": "default"
+      },
       {
         "viewType": "1c-platform-tools.profileEditor",
         "displayName": "Профиль запуска 1С",
