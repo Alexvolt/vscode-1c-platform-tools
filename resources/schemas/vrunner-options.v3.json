@@ -1,7 +1,7 @@
 {
 	"schema": "v3",
-	"source": "vanessa-runner SNAPSHOT (src/cli + docs/product/команды + схема 2.x)",
-	"generatedAt": "2026-08-31",
+	"source": "vanessa-runner 3.0.0 (src/cli + docs/product/команды + схема 2.x)",
+	"generatedAt": "2026-09-14",
 	"sets": {
 		"НаборОпцийEDT": [
 			{
@@ -68,15 +68,9 @@
 		],
 		"НаборОпцийЗапуска": [
 			{
-				"key": "nocacheuse",
-				"type": "boolean",
-				"description": "Не использовать кеш платформы",
-				"default": false
-			},
-			{
 				"key": "ordinaryapp",
 				"type": "boolean",
-				"description": "Режим запуска клиента",
+				"description": "Запускать толстый клиент (/RunModeOrdinaryApplication); по умолчанию - тонкий",
 				"default": ""
 			},
 			{
@@ -159,6 +153,20 @@
 				"default": ""
 			}
 		],
+		"НаборОпцийНеразрешенныхСсылок": [
+			{
+				"key": "IncludeObjectsByUnresolvedRefs",
+				"type": "boolean",
+				"description": "Включить объекты с неразрешёнными ссылками в объединение",
+				"default": false
+			},
+			{
+				"key": "ClearUnresolvedRefs",
+				"type": "boolean",
+				"description": "Очищать ссылки на объекты с неразрешёнными ссылками",
+				"default": false
+			}
+		],
 		"НаборОпцийОбновленияБД": [
 			{
 				"key": "rtype",
@@ -187,6 +195,23 @@
 				"key": "filter-except",
 				"type": "boolean",
 				"description": "Инвертировать отбор: действие применяется ко всем сеансам, КРОМЕ подходящих под --filter-app/--filter-name (аналог --mode EXCEPT из 2.x)"
+			}
+		],
+		"НаборОпцийОтчетаСравнения": [
+			{
+				"key": "report-dir",
+				"type": "string",
+				"description": "Каталог для сохранения отчёта (по умолчанию - текущий каталог)"
+			},
+			{
+				"key": "report-type",
+				"type": "boolean",
+				"description": "Тип отчёта"
+			},
+			{
+				"key": "report-format",
+				"type": "boolean",
+				"description": "Формат файла отчёта"
 			}
 		],
 		"НаборОпцийОтчетов": [
@@ -366,24 +391,10 @@
 					"key": "first-cf",
 					"type": "string",
 					"description": "Путь к первому cf-файлу; если не задан - сравнивается конфигурация базы"
-				},
-				{
-					"key": "report-dir",
-					"type": "string",
-					"description": "Каталог для сохранения отчёта (по умолчанию - текущий каталог)"
-				},
-				{
-					"key": "report-type",
-					"type": "boolean",
-					"description": "Тип отчёта"
-				},
-				{
-					"key": "report-format",
-					"type": "boolean",
-					"description": "Формат файла отчёта"
 				}
 			],
 			"sets": [
+				"НаборОпцийОтчетаСравнения",
 				"НаборОпцийПодключения",
 				"НаборОпцийПлатформы",
 				"НаборОпцийСУБД",
@@ -394,9 +405,10 @@
 			"path": "cf.compile",
 			"options": [
 				{
-					"key": "s",
+					"key": "src",
 					"type": "string",
-					"description": "Каталог исходников конфигурации (по умолчанию - текущий каталог)"
+					"description": "Каталог исходников конфигурации (по умолчанию - текущий каталог)",
+					"default": ""
 				},
 				{
 					"key": "list",
@@ -418,9 +430,10 @@
 			"path": "cf.convert",
 			"options": [
 				{
-					"key": "s",
+					"key": "src",
 					"type": "string",
-					"description": "Каталог исходников для конвертации (по умолчанию - текущий каталог)"
+					"description": "Каталог исходников для конвертации (по умолчанию - текущий каталог)",
+					"default": ""
 				}
 			],
 			"sets": [
@@ -490,9 +503,10 @@
 			"path": "cf.merge",
 			"options": [
 				{
-					"key": "s",
+					"key": "src",
 					"type": "string",
-					"description": "Путь к файлу конфигурации (cf)"
+					"description": "Путь к файлу конфигурации (cf)",
+					"default": ""
 				},
 				{
 					"key": "merge-settings",
@@ -513,18 +527,6 @@
 					"default": false
 				},
 				{
-					"key": "IncludeObjectsByUnresolvedRefs",
-					"type": "boolean",
-					"description": "Включить объекты с неразрешёнными ссылками в объединение",
-					"default": false
-				},
-				{
-					"key": "ClearUnresolvedRefs",
-					"type": "boolean",
-					"description": "Очищать ссылки на объекты с неразрешёнными ссылками",
-					"default": false
-				},
-				{
 					"key": "force",
 					"type": "boolean",
 					"description": "Принудительное объединение при наличии предупреждений",
@@ -532,6 +534,7 @@
 				}
 			],
 			"sets": [
+				"НаборОпцийНеразрешенныхСсылок",
 				"НаборОпцийПодключения",
 				"НаборОпцийПлатформы",
 				"НаборОпцийСУБД",
@@ -546,6 +549,48 @@
 				"НаборОпцийIbcmd",
 				"НаборОпцийПлатформы",
 				"НаборОпцийСУБД",
+				"НаборОпцийНастроек"
+			]
+		},
+		{
+			"path": "cf.vendor-update",
+			"options": [
+				{
+					"key": "src",
+					"type": "string",
+					"description": "Путь к файлу обновления (cfu) или полному дистрибутиву поставщика (cf); в имени файла допустим шаблон $version, из подходящих файлов берётся старшая версия",
+					"default": ""
+				},
+				{
+					"key": "update-settings",
+					"type": "string",
+					"description": "Путь к файлу настроек объединения",
+					"default": ""
+				},
+				{
+					"key": "DumpListOfTwiceChangedProperties",
+					"type": "boolean",
+					"description": "Вывести список дважды изменённых свойств в файл служебных сообщений",
+					"default": false
+				},
+				{
+					"key": "force",
+					"type": "boolean",
+					"description": "Принудительное обновление при наличии предупреждений",
+					"default": false
+				},
+				{
+					"key": "no-update-db",
+					"type": "boolean",
+					"description": "Не обновлять конфигурацию БД после обновления (по умолчанию БД обновляется: UpdateDBCfg)"
+				}
+			],
+			"sets": [
+				"НаборОпцийНеразрешенныхСсылок",
+				"НаборОпцийПодключения",
+				"НаборОпцийПлатформы",
+				"НаборОпцийСУБД",
+				"НаборОпцийОбновленияБД",
 				"НаборОпцийНастроек"
 			]
 		},
@@ -566,24 +611,10 @@
 					"key": "second-cfe",
 					"type": "string",
 					"description": "Путь ко второму файлу cfe для сравнения"
-				},
-				{
-					"key": "report-dir",
-					"type": "string",
-					"description": "Каталог для сохранения отчёта (по умолчанию - текущий каталог)"
-				},
-				{
-					"key": "report-type",
-					"type": "boolean",
-					"description": "Тип отчёта"
-				},
-				{
-					"key": "report-format",
-					"type": "boolean",
-					"description": "Формат файла отчёта"
 				}
 			],
 			"sets": [
+				"НаборОпцийОтчетаСравнения",
 				"НаборОпцийПодключения",
 				"НаборОпцийПлатформы",
 				"НаборОпцийСУБД",
@@ -594,9 +625,10 @@
 			"path": "cfe.compile",
 			"options": [
 				{
-					"key": "s",
+					"key": "src",
 					"type": "string",
-					"description": "Каталог XML-исходников расширения (по умолчанию - текущий каталог)"
+					"description": "Каталог XML-исходников расширения (по умолчанию - текущий каталог)",
+					"default": ""
 				},
 				{
 					"key": "extension-name",
@@ -617,9 +649,10 @@
 			"path": "cfe.convert",
 			"options": [
 				{
-					"key": "s",
+					"key": "src",
 					"type": "string",
-					"description": "Каталог исходников для конвертации (по умолчанию - текущий каталог)"
+					"description": "Каталог исходников для конвертации (по умолчанию - текущий каталог)",
+					"default": ""
 				}
 			],
 			"sets": [
@@ -913,7 +946,7 @@
 			"path": "epf.compile",
 			"options": [
 				{
-					"key": "R",
+					"key": "recursive",
 					"type": "boolean",
 					"description": "Рекурсивный поиск обработок и отчётов"
 				},
@@ -937,9 +970,10 @@
 			"path": "epf.convert",
 			"options": [
 				{
-					"key": "s",
+					"key": "src",
 					"type": "string",
-					"description": "Каталог источника: EDT-проект или XML-дампы (по умолчанию - текущий каталог)"
+					"description": "Каталог источника: EDT-проект или XML-дампы (по умолчанию - текущий каталог)",
+					"default": ""
 				}
 			],
 			"sets": [
@@ -951,7 +985,7 @@
 			"path": "epf.decompile",
 			"options": [
 				{
-					"key": "R",
+					"key": "recursive",
 					"type": "boolean",
 					"description": "Рекурсивный поиск EPF/ERF-файлов (для каталога)"
 				},
@@ -1702,9 +1736,10 @@
 			"path": "validate.edt",
 			"options": [
 				{
-					"key": "s",
+					"key": "src",
 					"type": "string",
-					"description": "Каталог EDT-проекта (по умолчанию - текущий каталог)"
+					"description": "Каталог EDT-проекта (по умолчанию - текущий каталог)",
+					"default": ""
 				},
 				{
 					"key": "min-severity",
