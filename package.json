@@ -4739,7 +4739,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.10.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.69.0",
+    "typescript-eslint": "^8.70.0",
     "vitepress": "^1.6.4",
     "yazl": "^3.3.1"
   }
