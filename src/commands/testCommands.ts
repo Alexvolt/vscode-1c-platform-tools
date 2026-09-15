@@ -21,6 +21,7 @@ import { VRUNNER_FEATURES, isAtLeast } from '../shared/vrunnerVersion';
 import type { CommandExecutionOptions, StructuredCommandResult, SyntaxCheckError } from '../shared/commandExecutionTypes';
 import { DEFAULT_TESTING, BUILD_SUBDIRS } from '../shared/pathDefaults';
 import { CONVENTIONAL_PATHS } from '../shared/projectPaths';
+import { projectConfiguration } from '../shared/projectConfiguration';
 import * as fs from 'node:fs/promises';
 import { settingValue, resolveConfigPath, reportsXunitFromEnv, extractJUnitPathFromReportsXunit, extractAllurePathFromReportsXunit, vanessaReportTarget, vanessaSettingsPathFromEnv, syntaxCheckJUnitPathFromEnv, syntaxCheckAllurePathsFromEnv, yaxunitSectionFromEnv, YaxunitProfileSection } from '../features/testing/projectTestConfig';
 import { locateSyntaxCheckFiles, parseSyntaxCheckFindings, toSyntaxCheckErrors, SyntaxCheckFinding } from '../features/diagnostics/syntaxCheckJUnit';
@@ -100,8 +101,7 @@ export class TestCommands extends BaseCommand {
 		if (profile.configPath) {
 			return { profile, configPath: profile.configPath };
 		}
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		const configured = config.get<string>('test.path.yaxunitConfig', DEFAULT_TESTING.yaxunitConfigPath);
+		const configured = projectConfiguration(workspaceRoot).get<string>('test.path.yaxunitConfig', DEFAULT_TESTING.yaxunitConfigPath);
 		if (schema === 'v2') {
 			return { profile, configPath: configured };
 		}
@@ -754,7 +754,7 @@ export class TestCommands extends BaseCommand {
 		let allurePath: string;
 		try {
 			allurePath = this.context
-				? await ensureAllure(this.context)
+				? await ensureAllure(this.context, workspaceRoot)
 				: this.vrunner.getAllurePath();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

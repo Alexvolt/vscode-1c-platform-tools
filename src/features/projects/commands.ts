@@ -18,12 +18,13 @@ import {
 	pickFavoritesToConfigure,
 	pickTags,
 	showStatusBar,
-	updateStatusBar,
 	canSwitchOnActiveWindow,
 	shouldOpenInNewWindow,
 	InvocationSource,
 } from './index';
 import { notifyQuiet } from '../../shared/notify';
+import { currentRoot, outsideProject, projectByRoot, projectDisplayName } from '../../shared/workspaceProjects';
+import { workspaceProjectsSource } from './workspaceProjectsSource';
 
 /**
  * Регистрирует команды панели «1С: Проекты».
@@ -46,6 +47,7 @@ export function registerProjectsCommands(
 	const projectFilePath = getProjectsFilePath(projectsLocation, context);
 
 	const disposables: vscode.Disposable[] = [];
+	const windowProjects = workspaceProjectsSource();
 
 	// Внутренняя команда открытия (текущее окно). Принимает node или (path, name).
 	disposables.push(
@@ -125,15 +127,10 @@ export function registerProjectsCommands(
 				false,
 				InvocationSource.Palette,
 				stack,
-				context
+				context,
+				windowProjects
 			);
-			await openPickedProject(
-				pick ? { item: pick.item, openInNewWindow: pick.openInNewWindow } : undefined,
-				false,
-				InvocationSource.Palette,
-				stack,
-				context
-			);
+			await openPickedProject(pick, false, InvocationSource.Palette, stack, context, windowProjects);
 		})
 	);
 
@@ -146,15 +143,10 @@ export function registerProjectsCommands(
 				true,
 				InvocationSource.Palette,
 				stack,
-				context
+				context,
+				windowProjects
 			);
-			await openPickedProject(
-				pick ? { item: pick.item, openInNewWindow: pick.openInNewWindow } : undefined,
-				true,
-				InvocationSource.Palette,
-				stack,
-				context
-			);
+			await openPickedProject(pick, true, InvocationSource.Palette, stack, context, windowProjects);
 		})
 	);
 
@@ -168,13 +160,14 @@ export function registerProjectsCommands(
 				rootPath = node.command.arguments[0] as string;
 				suggestedName = (node.label as string) ?? path.basename(rootPath);
 			} else {
-				const folders = vscode.workspace.workspaceFolders;
-				if (!folders?.length) {
+				const root = outsideProject(currentRoot);
+				if (root === undefined) {
 					void vscode.window.showInformationMessage('Откройте папку проекта 1С (с файлом packagedef).');
 					return;
 				}
-				rootPath = folders[0].uri.fsPath;
-				suggestedName = path.basename(rootPath) || rootPath;
+				rootPath = root;
+				const project = projectByRoot(root);
+				suggestedName = project ? projectDisplayName(project) : path.basename(root) || root;
 			}
 
 			const input = vscode.window.createInputBox();
@@ -344,6 +337,7 @@ export function registerProjectsCommands(
 				projectStorage.pop(name);
 				projectStorage.save();
 				providers.refreshStorage();
+				showStatusBar(projectStorage, locator);
 				notifyQuiet('Проект удалён.');
 			}
 		})
@@ -353,7 +347,6 @@ export function registerProjectsCommands(
 	disposables.push(
 		vscode.commands.registerCommand('1c-platform-tools.projects.renameProject', (node: { command?: { arguments?: unknown[] } }) => {
 			const oldName = node?.command?.arguments?.[1] as string;
-			const oldPath = node?.command?.arguments?.[0] as string;
 			if (!oldName) {return;}
 			void vscode.window
 				.showInputBox({
@@ -371,7 +364,7 @@ export function registerProjectsCommands(
 					projectStorage.rename(oldName, newName);
 					projectStorage.save();
 					providers.refreshStorage();
-					updateStatusBar(oldName, oldPath, newName);
+					showStatusBar(projectStorage, locator);
 					void vscode.window.showInformationMessage('Проект переименован.');
 				});
 		})

@@ -26,6 +26,7 @@ suite('расширения раскладки', () => {
 
 		assert.deepStrictEqual(extensionEntries(paths, 'solution'), [
 			{ dir: 'ssl31._ДемоРасширение', folder: 'ssl31._ДемоРасширение', name: '_ДемоРасширение', format: 'edt' },
+			{ dir: 'учёт.РасширениеУчёта', folder: 'учёт.РасширениеУчёта', name: 'РасширениеУчёта', format: 'edt' },
 		]);
 		assert.deepStrictEqual(extensionEntries(paths, 'tests'), [
 			{ dir: 'tests/cfe/yaxunit-test', folder: 'yaxunit-test', name: 'Тесты', format: 'edt' },
@@ -33,7 +34,7 @@ suite('расширения раскладки', () => {
 		// Установка версии предлагает и решение, и тестовые
 		assert.deepStrictEqual(
 			extensionEntries(paths, 'all').map((entry) => entry.folder),
-			['ssl31._ДемоРасширение', 'yaxunit-test']
+			['ssl31._ДемоРасширение', 'учёт.РасширениеУчёта', 'yaxunit-test']
 		);
 		assert.deepStrictEqual(extensionEntries(undefined, 'all'), []);
 	});
@@ -52,7 +53,7 @@ suite('расширения раскладки', () => {
 
 	test('одно расширение под любым из имён: каталог, путь, имя из метаданных', async () => {
 		const entries = extensionEntries(await projectPaths(EDT_WORKSPACE), 'all');
-		const tests = entries[1];
+		const tests = entries[2];
 
 		assert.strictEqual(findExtension(entries, 'yaxunit-test'), tests);
 		assert.strictEqual(findExtension(entries, 'Тесты'), tests);
@@ -61,7 +62,7 @@ suite('расширения раскладки', () => {
 		assert.strictEqual(findExtension(entries, '_ДемоРасширение'), entries[0]);
 		assert.strictEqual(findExtension(entries, 'ssl31._ДемоРасширение'), entries[0]);
 		// В окне выбора ключом служит имя каталога
-		assert.deepStrictEqual(entries.map((entry) => selectionKey(entry, entries)), ['ssl31._ДемоРасширение', 'yaxunit-test']);
+		assert.deepStrictEqual(entries.map((entry) => selectionKey(entry, entries)), ['ssl31._ДемоРасширение', 'учёт.РасширениеУчёта', 'yaxunit-test']);
 	});
 
 	test('файл *.cfe приводится к расширению по имени каталога или из метаданных', async () => {

@@ -9,6 +9,7 @@
  * панель сохранения снизу. Правки живут в форме, файл меняется по кнопке.
  */
 
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
 import { invalidateHooksCache, runHookPhaseDry } from '../../shared/commandHooks';
@@ -25,6 +26,11 @@ import { registerFormPanel } from '../editors/formPanels';
 const log = logger.scope('hooks');
 
 export const HOOKS_EDITOR_VIEW_TYPE = '1c-platform-tools.hooksEditor';
+
+/** Корень проекта файла хуков: `<корень>/.1cpt/hooks.json`. */
+function hooksProjectRoot(uri: vscode.Uri): string {
+	return path.dirname(path.dirname(uri.fsPath));
+}
 
 /** Сообщения из формы в расширение */
 type WebviewMessage =
@@ -109,10 +115,7 @@ export class HooksEditorProvider implements vscode.CustomTextEditorProvider {
 			if (message.type === 'save') {
 				await this.save(document, message.data);
 				// Правка действует со следующей команды, а не после перезагрузки окна
-				const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-				if (folder) {
-					invalidateHooksCache(folder.uri.fsPath);
-				}
+				invalidateHooksCache(hooksProjectRoot(document.uri));
 				void webviewPanel.webview.postMessage({ type: 'saved' });
 				post();
 				// Дерево команд показывает сохранённое: обновляем сразу, не дожидаясь наблюдателя за файлами
@@ -120,13 +123,10 @@ export class HooksEditorProvider implements vscode.CustomTextEditorProvider {
 				return;
 			}
 			if (message.type === 'dryRun') {
-				const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-				if (!folder) {
-					return;
-				}
+				const root = hooksProjectRoot(document.uri);
 				await document.save();
-				invalidateHooksCache(folder.uri.fsPath);
-				const result = await runHookPhaseDry(folder.uri.fsPath, message.commandId, message.phase);
+				invalidateHooksCache(root);
+				const result = await runHookPhaseDry(root, message.commandId, message.phase);
 				void webviewPanel.webview.postMessage({ type: 'dryRunResult', ...result });
 				return;
 			}

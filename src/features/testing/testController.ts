@@ -22,18 +22,29 @@ import { ReportTarget } from './projectTestConfig';
 import { RunQueue } from './runQueue';
 import { routeReportCases, RoutableFile } from './batchRouter';
 import { DEFAULT_TESTING } from '../../shared/pathDefaults';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import {
+	currentRoot,
+	listProjects,
+	projectScanRoots,
+	runWithProject,
+	sameProjectRoot,
+	type ProjectScanRoot
+} from '../../shared/workspaceProjects';
+import { isOutsideScanRoot } from '../artifacts/projectScan';
 
 const log = logger.scope('testing');
 
 /**
  * Сегменты пути, исключаемые при поиске тестовых файлов
  *
- * Берутся из настройки testing.exclude (по аналогии с artifacts.exclude
+ * Берутся из настройки test.exclude проекта (по аналогии с artifacts.exclude
  * и todo.exclude); .git исключается всегда.
+ *
+ * @param root - Корень проекта
  */
-function getExcludeSegments(): string[] {
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
-	const configured = config.get<string[]>('test.exclude');
+function getExcludeSegments(root: string): string[] {
+	const configured = projectConfiguration(root).get<string[]>('test.exclude');
 	const segments = Array.isArray(configured)
 		? configured.filter((segment): segment is string => typeof segment === 'string' && segment.length > 0)
 		: ['oscript_modules', 'build'];
@@ -43,8 +54,50 @@ function getExcludeSegments(): string[] {
 /**
  * Glob-исключение для vscode.workspace.findFiles из сегментов настройки
  */
-function buildExcludeGlob(segments: string[]): string {
+function buildExcludeGlob(segments: readonly string[]): string {
 	return `**/{${segments.join(',')}}/**`;
+}
+
+function sameRoot(left: string | undefined, right: string | undefined): boolean {
+	return left === undefined || right === undefined ? left === right : sameProjectRoot(left, right);
+}
+
+/**
+ * Файлы проекта по маске: поиск от корня проекта, без подпроектов, вложенных
+ * папок рабочей области и исключённых сегментов.
+ *
+ * @param scanRoot - Проект и каталоги, которые ему не принадлежат
+ * @param glob - Маска относительно корня проекта
+ * @param excludeSegments - Исключённые сегменты пути
+ */
+export async function findProjectTestFiles(
+	scanRoot: ProjectScanRoot,
+	glob: string,
+	excludeSegments: readonly string[]
+): Promise<vscode.Uri[]> {
+	const uris = await vscode.workspace.findFiles(
+		new vscode.RelativePattern(vscode.Uri.file(scanRoot.root), glob),
+		buildExcludeGlob(excludeSegments)
+	);
+	return uris.filter((uri) => !isOutsideScanRoot(scanRoot, uri.fsPath, excludeSegments));
+}
+
+/**
+ * Проект с каталогами, которые ему не принадлежат, после полного обнаружения.
+ *
+ * @param root - Корень проекта
+ */
+export async function projectScanRootOf(root: string): Promise<ProjectScanRoot> {
+	await listProjects();
+	return projectScanRoots().find((scanRoot) => sameProjectRoot(scanRoot.root, root)) ?? { root, excludeDirs: [] };
+}
+
+/** Параметры {@link TestingController}. */
+export interface TestingControllerOptions {
+	/** Идентификатор контроллера панели тестирования. */
+	id?: string;
+	/** Каталоги, которые проекту не принадлежат. */
+	scanRootOf?: (root: string) => Promise<ProjectScanRoot>;
 }
 
 /** Максимальный размер хвоста вывода в сообщении об ошибке запуска */
@@ -172,13 +225,21 @@ export class TestingController implements vscode.Disposable {
 	private activeRuns = 0;
 	/** Запрошен ли пересбор во время прогона (выполнится после его завершения) */
 	private rebuildPending = false;
+	/** Проект, для которого строится дерево */
+	private projectRoot: string | undefined;
+	/** Проект, чьи файлы сейчас в дереве */
+	private treeRoot: string | undefined;
+	private readonly scanRootOf: (root: string) => Promise<ProjectScanRoot>;
 
 	constructor(
 		private readonly adapters: TestFrameworkAdapter[],
 		private readonly vrunner: VRunnerManager,
-		private readonly isProjectRef: { current: boolean }
+		private readonly isProjectRef: { current: boolean },
+		options: TestingControllerOptions = {}
 	) {
-		this.controller = vscode.tests.createTestController('1c-platform-tools-tests', '1С: Тесты');
+		this.projectRoot = currentRoot();
+		this.scanRootOf = options.scanRootOf ?? projectScanRootOf;
+		this.controller = vscode.tests.createTestController(options.id ?? '1c-platform-tools-tests', '1С: Тесты');
 		// Ручной Refresh выполняет пересборку и ждёт её (спиннер в панели)
 		this.controller.refreshHandler = () => this.enqueueRebuild();
 		// Ленивое раскрытие: при разворачивании узла-файла парсим его кейсы;
@@ -201,6 +262,24 @@ export class TestingController implements vscode.Disposable {
 		);
 
 		this.disposables.push(this.controller);
+	}
+
+	/** Корень проекта, для которого строится дерево */
+	public get root(): string | undefined {
+		return this.projectRoot;
+	}
+
+	/**
+	 * Переключает дерево на другой проект
+	 *
+	 * @param root - Корень выбранного проекта
+	 */
+	public setProject(root: string | undefined): void {
+		if (sameRoot(root, this.projectRoot)) {
+			return;
+		}
+		this.projectRoot = root;
+		this.scheduleRebuild();
 	}
 
 	/**
@@ -280,18 +359,27 @@ export class TestingController implements vscode.Disposable {
 		// когда дерево обнуляется. Во всех остальных случаях обновляем дифом:
 		// findFiles на большой конфигурации идёт ~1.5 с, и всё это время прежнее
 		// дерево остаётся видимым (раньше items.replace([]) очищал его сразу).
-		if (!this.isProjectRef.current) {
+		const root = this.projectRoot;
+		if (
+			!this.isProjectRef.current ||
+			!root ||
+			!projectConfiguration(root).get<boolean>('test.panelEnabled', true)
+		) {
 			this.clearTree();
 			return;
 		}
 
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
-		if (!workspaceRoot) {
-			this.clearTree();
-			return;
-		}
+		await runWithProject(root, () => this.discover(root));
+	}
 
-		const excludeGlob = buildExcludeGlob(getExcludeSegments());
+	/**
+	 * Обнаружение файлов проекта и диф дерева
+	 *
+	 * @param root - Корень проекта; адаптеры читают его как текущий корень
+	 */
+	private async discover(root: string): Promise<void> {
+		const scanRoot = await this.scanRootOf(root);
+		const excludeSegments = getExcludeSegments(root);
 		const startedAt = Date.now();
 
 		// Каждый (адаптер, glob) — независимый обход workspace. На больших
@@ -313,18 +401,29 @@ export class TestingController implements vscode.Disposable {
 
 		const discovered = await Promise.all(
 			jobs.map(async ({ adapter, glob }) => {
-				const uris = await vscode.workspace.findFiles(glob, excludeGlob);
+				const uris = await findProjectTestFiles(scanRoot, glob, excludeSegments);
 				const classified = await Promise.all(
-					uris.map(async (uri) => ({ uri, location: await this.classifyTestFile(adapter, uri) }))
+					uris.map(async (uri) => ({ uri, location: await this.classifyTestFile(adapter, uri, scanRoot) }))
 				);
 				return { adapter, glob, classified };
 			})
 		);
 
+		if (!sameRoot(root, this.projectRoot)) {
+			return;
+		}
+
 		// Диф-апдейт: новые/изменившиеся узлы upsert'ятся, исчезнувшие удаляются.
 		// addFileNode идемпотентен — для существующей записи обновит лишь label/sort,
 		// но сохранит и сам узел, и уже загруженные дети (resolved=true).
 		this.disposeWatchers();
+
+		// Дерево другого проекта собирается заново
+		if (!sameRoot(root, this.treeRoot)) {
+			this.files.clear();
+			this.controller.items.replace([]);
+			this.treeRoot = root;
+		}
 
 		const nextFileIds = new Set<string>();
 		for (const { adapter, glob, classified } of discovered) {
@@ -336,13 +435,13 @@ export class TestingController implements vscode.Disposable {
 			}
 
 			const watcher = vscode.workspace.createFileSystemWatcher(
-				new vscode.RelativePattern(workspaceRoot, glob)
+				new vscode.RelativePattern(vscode.Uri.file(root), glob)
 			);
 			// Мутации дерева сериализуем через ту же цепочку, что и rebuild,
 			// чтобы события watcher и пересборка не переплетались на this.files
-			watcher.onDidCreate((uri) => this.enqueueMutation(() => this.registerFile(adapter, uri)));
-			watcher.onDidChange((uri) => this.enqueueMutation(() => this.onFileChanged(adapter, uri)));
-			watcher.onDidDelete((uri) => this.enqueueMutation(async () => this.removeFile(adapter, uri)));
+			watcher.onDidCreate((uri) => this.enqueueFileMutation(root, () => this.registerFile(adapter, uri, scanRoot)));
+			watcher.onDidChange((uri) => this.enqueueFileMutation(root, () => this.onFileChanged(adapter, uri, scanRoot)));
+			watcher.onDidDelete((uri) => this.enqueueFileMutation(root, async () => this.removeFile(adapter, uri)));
 			this.watchers.push(watcher);
 		}
 
@@ -364,6 +463,22 @@ export class TestingController implements vscode.Disposable {
 		this.disposeWatchers();
 		this.files.clear();
 		this.controller.items.replace([]);
+		this.treeRoot = undefined;
+	}
+
+	/**
+	 * Мутация по событию watcher проекта: выполняется с корнем этого проекта,
+	 * пока в дереве его файлы
+	 *
+	 * @param root - Корень проекта watcher'а
+	 * @param mutation - Изменение дерева
+	 */
+	private enqueueFileMutation(root: string, mutation: () => Promise<void>): void {
+		this.enqueueMutation(async () => {
+			if (sameRoot(root, this.treeRoot)) {
+				await runWithProject(root, mutation);
+			}
+		});
 	}
 
 	/**
@@ -372,8 +487,8 @@ export class TestingController implements vscode.Disposable {
 	 * Если файл не тестовый (исключён или не прошёл проверку широкого glob) —
 	 * удаляет узел. Полный разбор кейсов всё равно откладывается до resolveFile.
 	 */
-	private async registerFile(adapter: TestFrameworkAdapter, uri: vscode.Uri): Promise<void> {
-		const location = await this.classifyTestFile(adapter, uri);
+	private async registerFile(adapter: TestFrameworkAdapter, uri: vscode.Uri, scanRoot: ProjectScanRoot): Promise<void> {
+		const location = await this.classifyTestFile(adapter, uri, scanRoot);
 		if (!location) {
 			this.removeFile(adapter, uri);
 			return;
@@ -393,9 +508,10 @@ export class TestingController implements vscode.Disposable {
 	 */
 	private async classifyTestFile(
 		adapter: TestFrameworkAdapter,
-		uri: vscode.Uri
+		uri: vscode.Uri,
+		scanRoot: ProjectScanRoot
 	): Promise<FileTreeLocation | undefined> {
-		if (this.isExcluded(uri)) {
+		if (isOutsideScanRoot(scanRoot, uri.fsPath, getExcludeSegments(scanRoot.root))) {
 			return undefined;
 		}
 
@@ -413,8 +529,7 @@ export class TestingController implements vscode.Disposable {
 			}
 		}
 
-		const workspaceRoot = this.vrunner.getWorkspaceRoot() ?? '';
-		return adapter.describeFileLocation(uri, workspaceRoot);
+		return adapter.describeFileLocation(uri, scanRoot.root);
 	}
 
 	/**
@@ -545,13 +660,13 @@ export class TestingController implements vscode.Disposable {
 	 * уже был разобран. Неразобранные узлы остаются ленивыми — перечитаются при
 	 * разворачивании.
 	 */
-	private async onFileChanged(adapter: TestFrameworkAdapter, uri: vscode.Uri): Promise<void> {
+	private async onFileChanged(adapter: TestFrameworkAdapter, uri: vscode.Uri, scanRoot: ProjectScanRoot): Promise<void> {
 		const id = fileItemId(adapter.id, uri.toString());
 		const existing = this.files.get(id);
 		if (existing) {
 			this.controller.invalidateTestResults(existing.item);
 		}
-		await this.registerFile(adapter, uri);
+		await this.registerFile(adapter, uri, scanRoot);
 		const entry = this.files.get(id);
 		if (entry?.resolved) {
 			await this.resolveFile(entry, true);
@@ -632,22 +747,21 @@ export class TestingController implements vscode.Disposable {
 		return root;
 	}
 
-	private isExcluded(uri: vscode.Uri): boolean {
-		const excludeSegments = getExcludeSegments();
-		const pathSegments = uri.fsPath.split(/[\\/]/);
-		return pathSegments.some((segment) => excludeSegments.includes(segment));
-	}
-
 	/**
 	 * Обработчик запуска из Test Explorer
 	 *
 	 * Группирует выбранные элементы по файлам и ставит прогон в очередь
-	 * (прогоны последовательны — одна информационная база).
+	 * (прогоны последовательны — одна информационная база). Прогон идёт в
+	 * проекте, чьи файлы в дереве на момент запуска.
 	 */
 	private async runHandler(
 		request: vscode.TestRunRequest,
 		token: vscode.CancellationToken
 	): Promise<void> {
+		const root = this.treeRoot;
+		if (!root) {
+			return;
+		}
 		// Замораживаем структуру дерева на всё время обработки запроса, включая
 		// ленивый резолв запрошенных файлов: файловые события (как от самого
 		// прогона — сборка обработок, запись отчётов, — так и сторонние) не
@@ -676,13 +790,15 @@ export class TestingController implements vscode.Disposable {
 				}
 			}
 
-			await this.queue.enqueue(async () => {
-				try {
-					await this.runUnits(run, units, token);
-				} finally {
-					run.end();
-				}
-			});
+			await this.queue.enqueue(() =>
+				runWithProject(root, async () => {
+					try {
+						await this.runUnits(run, units, token, root);
+					} finally {
+						run.end();
+					}
+				})
+			);
 		} finally {
 			this.activeRuns -= 1;
 			this.flushPendingRebuild();
@@ -704,7 +820,8 @@ export class TestingController implements vscode.Disposable {
 	private async runUnits(
 		run: vscode.TestRun,
 		units: { entry: FileEntry; caseNames?: string[] }[],
-		token: vscode.CancellationToken
+		token: vscode.CancellationToken,
+		root: string
 	): Promise<void> {
 		const batches = new Map<string, { entry: FileEntry; caseNames?: string[] }[]>();
 		const individual: { entry: FileEntry; caseNames?: string[] }[] = [];
@@ -730,7 +847,7 @@ export class TestingController implements vscode.Disposable {
 				return;
 			}
 			// Один файл проще и не дешевле прогнать обычным путём (без раскладки общего отчёта)
-			if (group.length < 2 || !(await this.runBatch(run, group, token))) {
+			if (group.length < 2 || !(await this.runBatch(run, group, token, root))) {
 				individual.push(...group);
 			}
 		}
@@ -739,7 +856,7 @@ export class TestingController implements vscode.Disposable {
 			if (token.isCancellationRequested) {
 				break;
 			}
-			await this.runUnit(run, unit, token);
+			await this.runUnit(run, unit, token, root);
 		}
 	}
 
@@ -771,7 +888,8 @@ export class TestingController implements vscode.Disposable {
 	private async runBatch(
 		run: vscode.TestRun,
 		units: { entry: FileEntry; caseNames?: string[] }[],
-		token: vscode.CancellationToken
+		token: vscode.CancellationToken,
+		root: string
 	): Promise<boolean> {
 		const adapter = units[0].entry.adapter;
 		const entries = units.map((unit) => unit.entry);
@@ -791,7 +909,7 @@ export class TestingController implements vscode.Disposable {
 
 		let reportDir = '';
 		if (adapter.usesReportDir !== false) {
-			const created = await this.createReportDir(adapter.id);
+			const created = await this.createReportDir(adapter.id, root);
 			if (!created) {
 				this.markAll(run, allLeaves, 'errored', 'Не удалось создать каталог отчёта прогона', allSuites);
 				return true;
@@ -832,7 +950,7 @@ export class TestingController implements vscode.Disposable {
 				run.appendOutput(`\r\n--- ${step.title} ---\r\n`);
 				const stepResult = step.tool === 'action'
 					? await runActionStep(step)
-					: await this.executeStep(step.tool, step.args, plan.env, token, onOutput);
+					: await this.executeStep(step.tool, step.args, plan.env, token, onOutput, root);
 				if (stepResult.cancelled) {
 					await this.cleanupReportDir(reportDir);
 					return true;
@@ -851,7 +969,7 @@ export class TestingController implements vscode.Disposable {
 				}
 			}
 
-			result = await this.executeStep(plan.tool, plan.args, plan.env, token, onOutput);
+			result = await this.executeStep(plan.tool, plan.args, plan.env, token, onOutput, root);
 		} catch (error) {
 			this.markAll(run, allLeaves, 'errored', `Ошибка запуска: ${(error as Error).message}`, allSuites);
 			await this.cleanupReportDir(reportDir);
@@ -1030,7 +1148,8 @@ export class TestingController implements vscode.Disposable {
 	private async runUnit(
 		run: vscode.TestRun,
 		unit: { entry: FileEntry; caseNames?: string[] },
-		token: vscode.CancellationToken
+		token: vscode.CancellationToken,
+		root: string
 	): Promise<void> {
 		const { entry, caseNames } = unit;
 		const adapter = entry.adapter;
@@ -1054,7 +1173,7 @@ export class TestingController implements vscode.Disposable {
 		// пишут в свои постоянные каталоги и задают reportTarget сами)
 		let reportDir = '';
 		if (adapter.usesReportDir !== false) {
-			const created = await this.createReportDir(adapter.id);
+			const created = await this.createReportDir(adapter.id, root);
 			if (!created) {
 				this.markAll(run, leaves, 'errored', 'Не удалось создать каталог отчёта прогона', suite ? [suite] : undefined);
 				return;
@@ -1088,7 +1207,7 @@ export class TestingController implements vscode.Disposable {
 				run.appendOutput(`\r\n--- ${step.title} ---\r\n`, undefined, entry.item);
 				const stepResult = step.tool === 'action'
 					? await runActionStep(step)
-					: await this.executeStep(step.tool, step.args, plan.env, token, onOutput);
+					: await this.executeStep(step.tool, step.args, plan.env, token, onOutput, root);
 				if (stepResult.cancelled) {
 					await this.cleanupReportDir(reportDir);
 					return;
@@ -1107,7 +1226,7 @@ export class TestingController implements vscode.Disposable {
 				}
 			}
 
-			result = await this.executeStep(plan.tool, plan.args, plan.env, token, onOutput);
+			result = await this.executeStep(plan.tool, plan.args, plan.env, token, onOutput, root);
 		} catch (error) {
 			this.markAll(run, leaves, 'errored', `Ошибка запуска: ${(error as Error).message}`, suite ? [suite] : undefined);
 			await this.cleanupReportDir(reportDir);
@@ -1153,14 +1272,17 @@ export class TestingController implements vscode.Disposable {
 		args: string[],
 		env: NodeJS.ProcessEnv | undefined,
 		token: vscode.CancellationToken,
-		onOutput: (chunk: string) => void
+		onOutput: (chunk: string) => void,
+		root: string
 	): Promise<CancellableProcessResult> {
 		if (tool === 'vrunner') {
 			// Планы адаптеров тестирования финальные (параметры профиля уже в них)
-			return this.vrunner.executeVRunnerCancellable(args, { env, token, onOutput, appendOverrides: false });
+			return runWithProject(root, () =>
+				this.vrunner.executeVRunnerCancellable(args, { env, token, onOutput, appendOverrides: false })
+			);
 		}
 		return runCancellableCommand(args[0], {
-			cwd: this.vrunner.getWorkspaceRoot(),
+			cwd: root,
 			env,
 			token,
 			onOutput
@@ -1335,29 +1457,25 @@ export class TestingController implements vscode.Disposable {
 	 * Единый источник пути (testing.reportsPath) для создания подкаталогов
 	 * прогонов и для очистки устаревших отчётов.
 	 *
-	 * @returns Абсолютный путь либо undefined, если workspace не открыт
+	 * @param root - Корень проекта
+	 * @returns Абсолютный путь
 	 */
-	private reportsBaseDir(): string | undefined {
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
-		if (!workspaceRoot) {
-			return undefined;
-		}
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		const reportsBase = config.get<string>('test.path.reports', DEFAULT_TESTING.reportsPath);
-		return path.join(workspaceRoot, reportsBase);
+	private reportsBaseDir(root: string): string {
+		const reportsBase = projectConfiguration(root).get<string>('test.path.reports', DEFAULT_TESTING.reportsPath);
+		return path.join(root, reportsBase);
 	}
 
 	/**
-	 * Удаляет базовый каталог отчётов целиком
+	 * Удаляет базовый каталог отчётов проекта целиком
 	 *
 	 * Вызывается при старте, чтобы убрать каталоги, оставшиеся от прерванных
 	 * прогонов прошлых сессий.
 	 */
 	public async cleanupAllReports(): Promise<void> {
-		const baseDir = this.reportsBaseDir();
-		if (!baseDir) {
+		if (!this.projectRoot) {
 			return;
 		}
+		const baseDir = this.reportsBaseDir(this.projectRoot);
 		try {
 			await fs.rm(baseDir, { recursive: true, force: true });
 		} catch (error) {
@@ -1371,11 +1489,8 @@ export class TestingController implements vscode.Disposable {
 	 * Каталог внутри workspace обязателен для Docker-режима: контейнер видит
 	 * только смонтированную рабочую область.
 	 */
-	private async createReportDir(adapterId: string): Promise<string | undefined> {
-		const baseDir = this.reportsBaseDir();
-		if (!baseDir) {
-			return undefined;
-		}
+	private async createReportDir(adapterId: string, root: string): Promise<string | undefined> {
+		const baseDir = this.reportsBaseDir(root);
 
 		this.runCounter += 1;
 		const dir = path.join(baseDir, `${adapterId}-${Date.now()}-${this.runCounter}`);

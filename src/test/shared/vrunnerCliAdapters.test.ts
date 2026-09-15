@@ -385,25 +385,6 @@ suite('vrunnerCli: адаптеры v2/v3', () => {
 		);
 	});
 
-	// ---- Конвертация исходников ----
-	test('cf.convert: только в 3.x', () => {
-		assert.deepStrictEqual(
-			v3.plan({ kind: 'cf.convert', src: 'ssl31', out: 'build/cf-designer' }),
-			[['cf', 'convert', '--src', 'ssl31', 'build/cf-designer']]
-		);
-		assert.throws(
-			() => v2.plan({ kind: 'cf.convert', src: 'ssl31', out: 'build/cf-designer' }),
-			/3\.x/
-		);
-	});
-
-	test('cfe.convert: имя расширения уходит опцией', () => {
-		assert.deepStrictEqual(
-			v3.plan({ kind: 'cfe.convert', src: 'ssl31._Демо', out: 'build/cfe-designer', extensionName: '_Демо' }),
-			[['cfe', 'convert', '--src', 'ssl31._Демо', '--extension-name', '_Демо', 'build/cfe-designer']]
-		);
-	});
-
 	// ---- Выбор адаптера ----
 	test('selectCliAdapter: 2.6 → v2, 3.0-предрелиз → v3, неизвестно → v2', () => {
 		assert.ok(selectCliAdapter(parseVRunnerVersion('2.6.1')) instanceof V2CliAdapter);

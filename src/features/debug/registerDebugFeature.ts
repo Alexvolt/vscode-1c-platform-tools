@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import * as onecDebugTargets from './debugTargets';
 import {
 	OnecDebugConfigurationProvoider,
+	debugConfigurationRoot,
 	watchTargetTypesChanged,
 } from './debugConfigurations';
 import {
@@ -25,10 +26,13 @@ const log = logger.scope('dap');
 class OnecDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
-	async createDebugAdapterDescriptor(): Promise<vscode.DebugAdapterDescriptor> {
+	async createDebugAdapterDescriptor(session: vscode.DebugSession): Promise<vscode.DebugAdapterDescriptor> {
 		let runtime;
 		try {
-			runtime = await ensureOnecDebugAdapter(this.context);
+			runtime = await ensureOnecDebugAdapter(
+				this.context,
+				debugConfigurationRoot(session.workspaceFolder, session.configuration)
+			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			log.error(`не удалось подготовить адаптер отладки: ${message}`);

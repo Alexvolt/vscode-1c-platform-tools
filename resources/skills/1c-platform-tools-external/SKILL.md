@@ -23,9 +23,9 @@ description: Сборка и разборка внешних обработок 
 
 ### Параметр projectPath
 
-Обязательный. Корень проекта 1С (каталог с `packagedef`). Если пользователь указал путь — используй его; иначе корень workspace.
+Корень проекта 1С (каталог с `packagedef`). Передавай, только если пользователь назвал проект: без параметра команда выполняется в текущем проекте.
 
 ## Примеры
 
-- Собрать обработки: MCP `epf_compileProc` или команда `1c-platform-tools.epf.compileProcessor` с projectPath корня проекта.
+- Собрать обработки: MCP `epf_compileProc` или команда `1c-platform-tools.epf.compileProcessor`.
 - Разобрать отчёты в исходники: `epf_decompileReport` (MCP) или `1c-platform-tools.epf.decompileReport` (команда).

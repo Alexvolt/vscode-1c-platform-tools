@@ -26,6 +26,8 @@ import {
 } from '../features/metadata/mdSparrowBootstrap';
 import { cachedOvmPath, cachedOvmTag, clearOvmCache, downloadOvm } from './ovmComponent';
 import { cachedAllurePath, cachedAllureTag, clearAllureCache, downloadAllure } from './allureComponent';
+import { projectConfiguration } from './projectConfiguration';
+import { currentRoot } from './workspaceProjects';
 
 /** Описание одного загружаемого компонента. */
 export interface ComponentSpec {
@@ -120,10 +122,14 @@ export interface ComponentState {
  * Собирает состояние всех компонентов.
  *
  * @param context - Контекст расширения
+ * @param root - Корень проекта, для которого читаются настройки компонентов
  * @returns Состояния в порядке {@link COMPONENTS}
  */
-export async function readComponentStates(context: vscode.ExtensionContext): Promise<ComponentState[]> {
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
+export async function readComponentStates(
+	context: vscode.ExtensionContext,
+	root: string | undefined = currentRoot()
+): Promise<ComponentState[]> {
+	const config = projectConfiguration(root);
 	return Promise.all(
 		COMPONENTS.map(async (spec) => ({
 			spec,

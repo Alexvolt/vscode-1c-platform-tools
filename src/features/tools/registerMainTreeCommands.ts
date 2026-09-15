@@ -1,5 +1,7 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { isAgentOptions, agentInteractiveError } from '../../shared/agentGate';
+import { inCurrentProject } from '../../commands/projectScope';
 import { logger } from '../../shared/logger';
 import { OscriptTasksCommands } from '../../commands/oscriptTasksCommands';
 import { SetVersionCommands } from '../../commands/setVersionCommands';
@@ -260,18 +262,18 @@ export function registerMainTreeCommands(
 
 	const launchRunCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.tasks.run',
-		async (taskLabel: string) => {
+		inCurrentProject(async (taskLabel: string) => {
 			if (!isProjectRef.current) {
 				showNot1CProjectMessage();
 				return;
 			}
 			await workspaceTasksCommands.runTask(taskLabel);
-		}
+		})
 	);
 
 	const oscriptRunCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.tasks.runOscript',
-		async (taskName?: unknown) => {
+		inCurrentProject(async (taskName?: unknown) => {
 			if (isAgentOptions(taskName)) {
 				return agentInteractiveError('Передайте имя задачи строкой (см. tasks/*.os).');
 			}
@@ -280,12 +282,12 @@ export function registerMainTreeCommands(
 				return;
 			}
 			await oscriptTasksCommands.runOscriptTask(typeof taskName === 'string' ? taskName : undefined);
-		}
+		})
 	);
 
 	const oscriptAddTaskCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.tasks.addOscript',
-		async (arg?: unknown) => {
+		inCurrentProject(async (arg?: unknown) => {
 			if (isAgentOptions(arg)) {
 				return agentInteractiveError('Имя файла задачи запрашивается в окне VS Code; создайте файл в tasks/ напрямую.');
 			}
@@ -295,16 +297,16 @@ export function registerMainTreeCommands(
 			}
 			await oscriptTasksCommands.addOscriptTask();
 			treeDataProvider.refresh();
-		}
+		})
 	);
 
-	const launchEditCommand = vscode.commands.registerCommand('1c-platform-tools.tasks.edit', () => {
+	const launchEditCommand = vscode.commands.registerCommand('1c-platform-tools.tasks.edit', inCurrentProject(() => {
 		if (!isProjectRef.current) {
 			showNot1CProjectMessage();
 			return;
 		}
 		workspaceTasksCommands.editTasks();
-	});
+	}));
 
 	const fileOpenCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.file.open',
@@ -321,24 +323,24 @@ export function registerMainTreeCommands(
 
 	const launchEditConfigurationsCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.launch.editConfigurations',
-		() => {
+		inCurrentProject(() => {
 			if (!isProjectRef.current) {
 				showNot1CProjectMessage();
 				return;
 			}
 			workspaceTasksCommands.editLaunchConfigurations();
-		}
+		})
 	);
 
 	const onWorkspaceTasksSave = vscode.workspace.onDidSaveTextDocument((document) => {
 		if (!isProjectRef.current) {
 			return;
 		}
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-		if (!workspaceFolders || workspaceFolders.length === 0) {
+		const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+		if (!folder) {
 			return;
 		}
-		const relativePath = vscode.workspace.asRelativePath(document.uri);
+		const relativePath = path.relative(folder.uri.fsPath, document.uri.fsPath).split(path.sep).join('/');
 		if (relativePath === '.vscode/tasks.json' || relativePath === '.vscode/launch.json') {
 			treeDataProvider.refresh();
 		}
@@ -346,7 +348,7 @@ export function registerMainTreeCommands(
 
 	const favoritesConfigureCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.tools.configureFavorites',
-		async () => {
+		inCurrentProject(async () => {
 			if (!isProjectRef.current) {
 				showNot1CProjectMessage();
 				return;
@@ -376,7 +378,7 @@ export function registerMainTreeCommands(
 			notifyQuiet(
 				`Избранное обновлено: ${newFavorites.length} команд`
 			);
-		}
+		})
 	);
 
 	const configureGroupVisibility = async (): Promise<void> => {

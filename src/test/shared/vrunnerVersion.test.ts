@@ -101,8 +101,8 @@ suite('vrunnerVersion', () => {
 });
 
 suite('vrunnerVersion: гейт с предрелизом', () => {
-	test('возможность EDT доступна с rc8, но не раньше', () => {
-		const at = (raw: string) => isAtLeast(parseVRunnerVersion(raw) as VRunnerVersion, VRUNNER_FEATURES.edtSources);
+	test('гейт с rc8 пропускает rc8 и новее, но не раньше', () => {
+		const at = (raw: string) => isAtLeast(parseVRunnerVersion(raw) as VRunnerVersion, '3.0.0-rc8');
 
 		assert.strictEqual(at('3.0.0-rc7'), false);
 		assert.strictEqual(at('3.0.0-rc8'), true);

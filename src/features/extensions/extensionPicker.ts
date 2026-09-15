@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { projectConfiguration } from '../../shared/projectConfiguration';
 import {
 	getStoredExtensionSelection,
 	setStoredExtensionSelection,
@@ -28,7 +29,7 @@ interface ExtensionPickItem<T extends ExtensionNames> extends vscode.QuickPickIt
  *    тестовых) — если задана, используется без окна выбора.
  * 3. Режим wait (MCP) — применяется сохранённый выбор (или все).
  * 4. Иначе — quickpick с чекбоксами: изначально отмечены все (либо ранее
- *    сохранённое подмножество). Выбор сохраняется в workspaceState (локально,
+ *    сохранённое подмножество). Выбор сохраняется в состоянии проекта (локально,
  *    не коммитится). Если отмечены все — фильтр сбрасывается, чтобы новые
  *    расширения подхватывались автоматически.
  *
@@ -37,7 +38,7 @@ interface ExtensionPickItem<T extends ExtensionNames> extends vscode.QuickPickIt
  * из метаданных.
  *
  * @param extensions - Все доступные расширения
- * @param memento - workspaceState для хранения выбора
+ * @param memento - Состояние проекта для хранения выбора
  * @param opts - Параметры выполнения (режим wait, явный список расширений)
  * @returns Выбранное подмножество, либо undefined при отмене quickpick
  */
@@ -53,7 +54,7 @@ export async function pickExtensions<T extends ExtensionNames>(
 
 	// У каждой области свой список в настройках: cfe.selected — решение,
 	// test.cfe.selected — тестовые. Заданный список работает без окна выбора.
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
+	const config = projectConfiguration();
 	const configured = normalizeConfiguredExtensions(
 		config.get(scope === 'tests' ? 'test.cfe.selected' : 'cfe.selected')
 	);

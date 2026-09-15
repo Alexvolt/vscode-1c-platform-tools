@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { VRunnerManager } from '../../shared/vrunnerManager';
-import { VRUNNER_TASK_TYPE, VRunnerTaskDefinition } from './vrunnerTask';
+import { runWithProject } from '../../shared/workspaceProjects';
+import { taskProjectRoot, VRUNNER_TASK_TYPE, VRunnerTaskDefinition } from './vrunnerTask';
 
 /**
  * Провайдер задач vrunner для tasks.json.
@@ -9,6 +10,7 @@ import { VRUNNER_TASK_TYPE, VRunnerTaskDefinition } from './vrunnerTask';
  * запускают задачи ad-hoc через {@link VRunnerManager.executeVRunnerTask}.
  * resolveTask позволяет пользователю описать задачу в tasks.json:
  * `{ "type": "1c-vrunner", "command": "vanessa", "args": ["--settings", "env.json"] }`.
+ * Задача выполняется в проекте из `project` или в проекте своей папки.
  */
 class VRunnerTaskProvider implements vscode.TaskProvider {
 	constructor(private readonly vrunner: VRunnerManager) {}
@@ -24,12 +26,14 @@ class VRunnerTaskProvider implements vscode.TaskProvider {
 		}
 
 		const args = [definition.command, ...(definition.args ?? [])];
-		return this.vrunner.createVRunnerTaskFromArgs(args, {
-			name: task.name || definition.command,
-			appendOverrides: false,
-			translateRaw: true,
-			definition,
-		});
+		return runWithProject(taskProjectRoot(task.scope, definition.project), () =>
+			this.vrunner.createVRunnerTaskFromArgs(args, {
+				name: task.name || definition.command,
+				appendOverrides: false,
+				translateRaw: true,
+				definition,
+			})
+		);
 	}
 }
 

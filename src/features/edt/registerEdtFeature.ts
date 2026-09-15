@@ -5,6 +5,7 @@
  */
 
 import * as vscode from 'vscode';
+import { inCurrentProject } from '../../commands/projectScope';
 import {
 	exportFromEdt,
 	formatEdtModules,
@@ -24,12 +25,12 @@ import { disposeEdtDiagnostics } from './edtDiagnostics';
 export function registerEdtFeature(): vscode.Disposable[] {
 	return [
 		new vscode.Disposable(disposeEdtDiagnostics),
-		vscode.commands.registerCommand('1c-platform-tools.edt.import', importToEdt),
-		vscode.commands.registerCommand('1c-platform-tools.edt.export', exportFromEdt),
-		vscode.commands.registerCommand('1c-platform-tools.edt.validate', validateEdtProject),
-		vscode.commands.registerCommand('1c-platform-tools.edt.formatModules', formatEdtModules),
-		vscode.commands.registerCommand('1c-platform-tools.edt.sortProject', sortEdtProject),
-		vscode.commands.registerCommand('1c-platform-tools.edt.projectInfo', showEdtProjectInfo),
-		vscode.commands.registerCommand('1c-platform-tools.run.edt', openInEdt),
+		vscode.commands.registerCommand('1c-platform-tools.edt.import', inCurrentProject(importToEdt)),
+		vscode.commands.registerCommand('1c-platform-tools.edt.export', inCurrentProject(exportFromEdt)),
+		vscode.commands.registerCommand('1c-platform-tools.edt.validate', inCurrentProject(validateEdtProject)),
+		vscode.commands.registerCommand('1c-platform-tools.edt.formatModules', inCurrentProject(formatEdtModules)),
+		vscode.commands.registerCommand('1c-platform-tools.edt.sortProject', inCurrentProject(sortEdtProject)),
+		vscode.commands.registerCommand('1c-platform-tools.edt.projectInfo', inCurrentProject(showEdtProjectInfo)),
+		vscode.commands.registerCommand('1c-platform-tools.run.edt', inCurrentProject(openInEdt)),
 	];
 }

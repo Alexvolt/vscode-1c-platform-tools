@@ -15,6 +15,7 @@ import {
 import { normalizeGlobBase, directorySegments } from './adapterUtils';
 import { hasConfigurationSources } from './xunitAdapter';
 import { DEFAULT_TESTING } from '../../../shared/pathDefaults';
+import { projectConfiguration } from '../../../shared/projectConfiguration';
 
 const log = logger.scope('testing');
 
@@ -39,7 +40,7 @@ export class VanessaAdapter implements TestFrameworkAdapter {
 	constructor(private readonly vrunner: VRunnerManager) {}
 
 	public async isEnabled(): Promise<boolean> {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(this.vrunner.getWorkspaceRoot());
 		if (!config.get<boolean>('test.frameworks.vanessa', true)) {
 			return false;
 		}
@@ -49,7 +50,7 @@ export class VanessaAdapter implements TestFrameworkAdapter {
 	}
 
 	public getIncludeGlobs(): string[] {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(this.vrunner.getWorkspaceRoot());
 		const base = normalizeGlobBase(config.get<string>('test.path.features', DEFAULT_TESTING.featuresPath));
 		return [`${base}/**/*.feature`];
 	}
@@ -59,7 +60,7 @@ export class VanessaAdapter implements TestFrameworkAdapter {
 	}
 
 	public describeFileLocation(fileUri: vscode.Uri, workspaceRoot: string) {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(workspaceRoot);
 		const base = config.get<string>('test.path.features', DEFAULT_TESTING.featuresPath);
 		return { segments: directorySegments(fileUri.fsPath, base, workspaceRoot) };
 	}

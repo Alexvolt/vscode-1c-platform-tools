@@ -1,7 +1,8 @@
 import { onDidChangeProjectLayout } from '../../shared/projectLayoutWatch';
+import { onDidChangeCurrentProject, onDidChangeProjects } from '../../shared/workspaceProjects';
 import * as vscode from 'vscode';
 import { VRunnerManager } from '../../shared/vrunnerManager';
-import { TestingController } from './testController';
+import { TestingController, type TestingControllerOptions } from './testController';
 import { TestFrameworkAdapter } from './frameworkAdapter';
 import { VanessaAdapter } from './adapters/vanessaAdapter';
 import { XUnitAdapter } from './adapters/xunitAdapter';
@@ -10,16 +11,6 @@ import { OneScriptAdapter } from './adapters/onescriptAdapter';
 import { OneBddAdapter } from './adapters/onebddAdapter';
 import { registerConfigureTestingCommand } from './configureTestingCommand';
 
-/**
- * Регистрирует интеграцию тестов 1С с панелью тестирования VS Code
- *
- * Создаёт TestController с адаптерами фреймворков, запускает первичное
- * обнаружение тестов (только для проектов 1С) и подписывается на изменения
- * настроек группы testing.
- *
- * @param params - Параметры регистрации
- * @returns Массив Disposable для context.subscriptions
- */
 /**
  * Результат регистрации фичи тестирования
  */
@@ -30,37 +21,77 @@ export interface TestingFeature {
 	rebuild: () => void;
 }
 
+/**
+ * Дерево тестов в панели тестирования VS Code
+ */
+export interface TestExplorer extends TestingFeature {
+	controller: TestingController;
+}
+
+/**
+ * Регистрирует интеграцию тестов 1С с панелью тестирования VS Code
+ *
+ * @param params - Параметры регистрации
+ * @returns Disposable'ы и пересборка дерева
+ */
 export function registerTestingFeature(params: {
 	isProjectRef: { current: boolean };
 }): TestingFeature {
 	const vrunner = VRunnerManager.getInstance();
-	// Команда «Настроить тесты» доступна всегда (в т.ч. чтобы включить testing.enabled)
 	const configureCommand = registerConfigureTestingCommand(vrunner);
+	const explorer = registerTestExplorer({
+		isProjectRef: params.isProjectRef,
+		adapters: [
+			new VanessaAdapter(vrunner),
+			new XUnitAdapter(vrunner),
+			new YaxunitAdapter(vrunner),
+			new OneScriptAdapter(vrunner),
+			new OneBddAdapter(vrunner)
+		],
+		vrunner
+	});
+	return {
+		disposables: [...explorer.disposables, configureCommand],
+		rebuild: explorer.rebuild
+	};
+}
 
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
-	if (!config.get<boolean>('test.panelEnabled', true)) {
-		return { disposables: [configureCommand], rebuild: () => undefined };
-	}
-	const adapters: TestFrameworkAdapter[] = [
-		new VanessaAdapter(vrunner),
-		new XUnitAdapter(vrunner),
-		new YaxunitAdapter(vrunner),
-		new OneScriptAdapter(vrunner),
-		new OneBddAdapter(vrunner)
-	];
-
-	const controller = new TestingController(adapters, vrunner, params.isProjectRef);
+/**
+ * Создаёт TestController текущего проекта и пересобирает дерево при смене проекта,
+ * его раскладки и настроек группы test
+ *
+ * Контроллер есть всегда: выключенная у проекта панель (test.panelEnabled) даёт пустое
+ * дерево, и оно строится, когда панель включают или выбирают другой проект.
+ *
+ * @param params - Адаптеры фреймворков и параметры контроллера
+ * @returns Контроллер, его подписки и пересборка дерева
+ */
+export function registerTestExplorer(params: {
+	isProjectRef: { current: boolean };
+	adapters: TestFrameworkAdapter[];
+	vrunner: VRunnerManager;
+	controllerOptions?: TestingControllerOptions;
+}): TestExplorer {
+	const controller = new TestingController(
+		params.adapters,
+		params.vrunner,
+		params.isProjectRef,
+		params.controllerOptions
+	);
 
 	// Чистим устаревшие каталоги отчётов прошлых сессий и строим дерево
 	void controller.cleanupAllReports().then(() => controller.scheduleRebuild());
 
 	const onConfigChange = vscode.workspace.onDidChangeConfiguration((event) => {
-		if (event.affectsConfiguration('1c-platform-tools.test')) {
+		const root = controller.root;
+		if (event.affectsConfiguration('1c-platform-tools.test', root ? vscode.Uri.file(root) : undefined)) {
 			controller.scheduleRebuild();
 		}
 	});
 	// Корни поиска тестов берутся из раскладки: новое расширение или обработка меняет состав дерева
 	const onLayoutChange = onDidChangeProjectLayout(() => controller.scheduleRebuild());
+	const onProjectsChange = onDidChangeProjects(() => controller.scheduleRebuild());
+	const onCurrentProjectChange = onDidChangeCurrentProject((change) => controller.setProject(change.current));
 
 	// FileSystemWatcher не шлёт события по файлам при переименовании/удалении
 	// КАТАЛОГА — пересобираем дерево, чтобы не оставались элементы со старыми URI
@@ -68,7 +99,16 @@ export function registerTestingFeature(params: {
 	const onDelete = vscode.workspace.onDidDeleteFiles(() => controller.scheduleRebuild());
 
 	return {
-		disposables: [controller, onConfigChange, onLayoutChange, onRename, onDelete, configureCommand],
+		controller,
+		disposables: [
+			controller,
+			onConfigChange,
+			onLayoutChange,
+			onProjectsChange,
+			onCurrentProjectChange,
+			onRename,
+			onDelete
+		],
 		rebuild: () => controller.scheduleRebuild()
 	};
 }

@@ -5,16 +5,28 @@
  * перезапуск/браузер/логи/конфиг). Видимость — только для проектов 1С.
  */
 
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { registerInfobaseHolder } from '../../shared/exclusiveInfobase';
 import { openLocalUrl } from '../../shared/remoteEnv';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { ServerUrls } from '../../shared/ibsrvPublication';
 import { DEBUG_TYPE } from '../debug/debugConstants';
-import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
-import { uiOnlyHandler } from '../../shared/agentGate';
+import { projectPaths } from '../../shared/projectPaths';
+import { isAgentOptions, uiOnlyHandler } from '../../shared/agentGate';
 import { PlatformServerManager, ServerState, PublicationSelection } from './platformServerManager';
 import { notifyQuiet } from '../../shared/notify';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import {
+	currentRoot,
+	onDidChangeCurrentProject,
+	outsideProject,
+	projectsSnapshot,
+	sameProjectRoot,
+	workspaceFolderOf,
+} from '../../shared/workspaceProjects';
+import { inCurrentProject, projectLabel } from '../../commands/projectScope';
+import type { StructuredCommandResult } from '../../shared/commandExecutionTypes';
 
 /** Изменяемая ссылка на признак проекта 1С. */
 interface ProjectRef {
@@ -40,7 +52,7 @@ async function openInBrowser(manager: PlatformServerManager): Promise<void> {
 
 	const picked = await vscode.window.showQuickPick(items, {
 		title: running ? 'Открыть в браузере' : 'Открыть в браузере (сервер не запущен)',
-		placeHolder: running ? 'Выберите адрес' : 'Сервер ещё не запущен — адрес может быть недоступен',
+		placeHolder: running ? 'Выберите адрес' : 'Сервер ещё не запущен, адрес может быть недоступен',
 		ignoreFocusOut: true,
 	});
 	if (picked) {
@@ -96,7 +108,7 @@ function pickServices(items: PubItem[], initial: PubItem[], hasServices: boolean
 		qp.title = 'Что публиковать автономным сервером';
 		qp.placeholder = hasServices
 			? 'Отметьте сервисы; «Все …» и отдельные сервисы взаимоисключают друг друга'
-			: 'Метаданные недоступны — доступны только категории';
+			: 'Метаданные недоступны, доступны только категории';
 		qp.ignoreFocusOut = true;
 		qp.items = items;
 		qp.selectedItems = initial;
@@ -144,12 +156,13 @@ function pickServices(items: PubItem[], initial: PubItem[], hasServices: boolean
  * @param manager - Менеджер сервера
  */
 async function selectPublishedServices(manager: PlatformServerManager): Promise<void> {
+	const root = currentRoot();
 	const services = await vscode.window.withProgress(
 		{ location: vscode.ProgressLocation.Notification, title: 'Чтение сервисов из метаданных…' },
-		() => manager.loadServices()
+		() => manager.loadServices(root)
 	);
 
-	const selection = manager.getPublicationSelection();
+	const selection = manager.getPublicationSelection(root);
 
 	const items: PubItem[] = [
 		{ label: 'OData', description: 'Стандартный интерфейс OData', role: 'odata' },
@@ -193,9 +206,10 @@ async function selectPublishedServices(manager: PlatformServerManager): Promise<
 		httpAll: has('httpAll'),
 		http: names('http'),
 	};
-	await manager.setPublicationSelection(next);
+	await manager.setPublicationSelection(next, root);
 
-	if (manager.state === 'running') {
+	const owner = manager.ownerRoot;
+	if (manager.state === 'running' && owner !== undefined && root !== undefined && sameProjectRoot(owner, root)) {
 		const action = await vscode.window.showInformationMessage(
 			'Выбор публикации сохранён. Перезапустить сервер, чтобы применить?',
 			'Перезапустить'
@@ -211,20 +225,21 @@ async function selectPublishedServices(manager: PlatformServerManager): Promise<
 /**
  * Запускает отладку через автономный сервер.
  *
- * Включает порт отладки (если выключен), поднимает/перезапускает сервер с
- * `--debug` и подключает отладчик расширения к порту отладки ibsrv.
+ * Включает порт отладки (если выключен), поднимает/перезапускает сервер
+ * текущего проекта с `--debug` и подключает отладчик расширения к порту
+ * отладки ibsrv в папке рабочей области этого проекта.
  *
  * @param manager - Менеджер сервера
  */
 async function startServerDebug(manager: PlatformServerManager): Promise<void> {
-	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-	if (!workspaceFolder) {
+	const root = currentRoot();
+	const workspaceFolder = root === undefined ? undefined : workspaceFolderOf(root);
+	if (root === undefined || !workspaceFolder) {
 		vscode.window.showErrorMessage('Откройте рабочую область проекта 1С.');
 		return;
 	}
 
-	const config = vscode.workspace.getConfiguration('1c-platform-tools.server');
-	if (!config.get<boolean>('debug', false)) {
+	if (!projectConfiguration(root).get<boolean>('server.debug', false)) {
 		const action = await vscode.window.showInformationMessage(
 			'Для отладки нужен порт отладки автономного сервера. Включить его (server.debug)?',
 			'Включить'
@@ -232,32 +247,39 @@ async function startServerDebug(manager: PlatformServerManager): Promise<void> {
 		if (action !== 'Включить') {
 			return;
 		}
-		await config.update('debug', true, vscode.ConfigurationTarget.Workspace);
+		await projectConfiguration(root).update('server.debug', true, vscode.ConfigurationTarget.Workspace);
 	}
 
 	// Перечитываем настройки после возможного включения отладки.
-	const serverConfig = vscode.workspace.getConfiguration('1c-platform-tools.server');
-	const debugPort = serverConfig.get<number>('debugPort', 1550);
-	const host = serverConfig.get<string>('host', 'localhost');
+	const serverConfig = projectConfiguration(root);
+	const debugPort = serverConfig.get<number>('server.debugPort', 1550);
+	const host = serverConfig.get<string>('server.host', 'localhost');
 
-	if (manager.state === 'running') {
+	const configuration = (await projectPaths(root)).configuration?.dir;
+	if (configuration === undefined) {
+		vscode.window.showErrorMessage('Исходный код конфигурации в рабочей области не найден: отлаживать через сервер нечего.');
+		return;
+	}
+
+	const ownedByRoot = (): boolean => {
+		const owner = manager.ownerRoot;
+		return owner !== undefined && sameProjectRoot(owner, root);
+	};
+	if (manager.state === 'running' && ownedByRoot()) {
 		await manager.restart();
 	} else {
-		await manager.start();
+		await manager.start(root);
 	}
-	if (manager.state !== 'running') {
+	if (manager.state !== 'running' || !ownedByRoot()) {
 		return; // ошибка запуска уже показана менеджером
 	}
-
-	const configuration = (await projectPaths(workspaceFolder.uri.fsPath)).configuration?.dir;
-	const cfPath = configuration === '.' ? '' : configuration ?? CONVENTIONAL_PATHS.cf;
 
 	const started = await vscode.debug.startDebugging(workspaceFolder, {
 		type: DEBUG_TYPE,
 		request: 'attach',
 		name: 'Отладка 1С (автономный сервер)',
 		platformPath: process.platform === 'win32' ? '${env:PROGRAMFILES}/1cv8' : '/opt/1C/v8.3/x86_64',
-		rootProject: cfPath ? `\${workspaceFolder}/${cfPath}` : '${workspaceFolder}',
+		rootProject: path.resolve(root, configuration),
 		debugServerHost: host,
 		debugServerPort: debugPort,
 		autoAttachTypes: ['Server', 'ManagedClient'],
@@ -298,8 +320,9 @@ async function showServerMenu(manager: PlatformServerManager): Promise<void> {
 		{ label: '$(settings-gear) Открыть конфиг публикации', action: 'config' }
 	);
 
+	const owner = manager.ownerRoot;
 	const picked = await vscode.window.showQuickPick(items, {
-		title: `Автономный сервер 1С — ${stateLabel(manager.state)}`,
+		title: `Автономный сервер 1С: ${stateLabel(manager.state)}${owner === undefined ? '' : `, проект ${projectLabel(owner)}`}`,
 		ignoreFocusOut: true,
 	});
 	if (!picked) {
@@ -369,7 +392,7 @@ export function registerPlatformServerFeature(
 	statusItem.command = '1c-platform-tools.server.menu';
 
 	const refresh = (): void => {
-		if (!isProjectRef.current || !vrunner.getWorkspaceRoot()) {
+		if (!isProjectRef.current || (manager.ownerRoot === undefined && outsideProject(() => currentRoot()) === undefined)) {
 			statusItem.hide();
 			return;
 		}
@@ -380,36 +403,32 @@ export function registerPlatformServerFeature(
 	refresh();
 
 	// Пока ibsrv держит файловую базу, конфигуратор её не откроет: команды
-	// загрузки, выгрузки и обновления конфигурации БД просят освободить её
-	// на время работы и возвращают сервер сам.
-	registerInfobaseHolder({
-		label: 'Автономный сервер',
-		isHolding: () => manager.state === 'running' || manager.state === 'starting',
-		release: async () => {
-			await manager.stop();
-			return manager.state === 'stopped';
-		},
-		restore: () => manager.start(),
-	});
+	// загрузки, выгрузки и обновления конфигурации БД этой базы просят
+	// освободить её на время работы и возвращают сервер сам.
+	const holderRegistration = registerInfobaseHolder(manager.infobaseHolder());
 
 	const disposables: vscode.Disposable[] = [
 		manager,
-		new vscode.Disposable(() => registerInfobaseHolder(undefined)),
+		new vscode.Disposable(() => holderRegistration.dispose()),
 		statusItem,
 		manager.onDidChangeState(() => refresh()),
 		// Профиль задаёт адрес ИБ — при его смене сервер перегенерирует конфиг
 		// публикации и предложит перезапуск, если работает на другой базе
 		vrunner.onDidChangeActiveEnvProfile(() => void manager.onActiveProfileChanged()),
 		vrunner.onDidChangeVRunnerVersion(() => void manager.onActiveProfileChanged()),
-		vscode.commands.registerCommand('1c-platform-tools.server.menu', uiOnlyHandler('Меню сервера открывается пользователем; агенту доступны server.start, server.stop, server.restart.', () => showServerMenu(manager))),
-		vscode.commands.registerCommand('1c-platform-tools.server.start', () => manager.start()),
+		// Сервер при смене проекта продолжает работать для своего проекта
+		onDidChangeCurrentProject(() => refresh()),
+		vscode.commands.registerCommand('1c-platform-tools.server.menu', uiOnlyHandler('Меню сервера открывается пользователем; агенту доступны server.start, server.stop, server.restart.', inCurrentProject(() => showServerMenu(manager)))),
+		vscode.commands.registerCommand('1c-platform-tools.server.start', inCurrentProject((arg?: unknown) =>
+			isAgentOptions(arg) ? startForAgent(manager) : manager.start()
+		)),
 		vscode.commands.registerCommand('1c-platform-tools.server.stop', () => manager.stop()),
-		vscode.commands.registerCommand('1c-platform-tools.server.restart', () => manager.restart()),
-		vscode.commands.registerCommand('1c-platform-tools.server.openInBrowser', () => openInBrowser(manager)),
-		vscode.commands.registerCommand('1c-platform-tools.server.selectServices', () => selectPublishedServices(manager)),
-		vscode.commands.registerCommand('1c-platform-tools.server.debug', () => startServerDebug(manager)),
+		vscode.commands.registerCommand('1c-platform-tools.server.restart', inCurrentProject(() => manager.restart())),
+		vscode.commands.registerCommand('1c-platform-tools.server.openInBrowser', inCurrentProject(() => openInBrowser(manager))),
+		vscode.commands.registerCommand('1c-platform-tools.server.selectServices', inCurrentProject(() => selectPublishedServices(manager))),
+		vscode.commands.registerCommand('1c-platform-tools.server.debug', inCurrentProject(() => startServerDebug(manager))),
 		vscode.commands.registerCommand('1c-platform-tools.server.showLogs', () => manager.showLogs()),
-		vscode.commands.registerCommand('1c-platform-tools.server.openConfig', () => manager.openPublicationConfig()),
+		vscode.commands.registerCommand('1c-platform-tools.server.openConfig', inCurrentProject(() => manager.openPublicationConfig())),
 		vscode.commands.registerCommand('1c-platform-tools.server.statusBarRefresh', () => refresh()),
 		vscode.workspace.onDidChangeWorkspaceFolders(() => refresh()),
 	];
@@ -418,16 +437,38 @@ export function registerPlatformServerFeature(
 }
 
 /**
+ * Запуск сервера агентом: без вопроса пользователю, сервер другого проекта не останавливается.
+ *
+ * @param manager - Менеджер сервера
+ * @returns Отказ, когда сервер работает для другого проекта
+ */
+async function startForAgent(manager: PlatformServerManager): Promise<StructuredCommandResult | void> {
+	const root = currentRoot();
+	const owner = manager.ownerRoot;
+	if (root !== undefined && owner !== undefined && !sameProjectRoot(owner, root)) {
+		const message =
+			`Автономный сервер проекта ${projectLabel(owner)} запущен. ` +
+			'Остановите его командой server.stop и запустите снова.';
+		return { success: false, exitCode: 1, stdout: '', stderr: message };
+	}
+	await manager.start(root);
+}
+
+/**
  * Применяет состояние сервера к элементу статус-бара.
  */
 function applyStatus(item: vscode.StatusBarItem, manager: PlatformServerManager): void {
 	const urls = manager.getUrls();
+	const owner = manager.ownerRoot;
+	const running = owner !== undefined && projectsSnapshot().projects.length > 1
+		? `Автономный сервер проекта ${projectLabel(owner)} запущен`
+		: 'Автономный сервер запущен';
 	switch (manager.state) {
 		case 'running':
 			// Янтарный фон (единственный «выделяющий» фон статус-бара) — явный признак,
 			// что сервер запущен. Цвет текста VS Code подберёт контрастный автоматически.
 			item.text = `$(broadcast) 1С: Сервер${manager.port ? ` :${manager.port}` : ''}`;
-			item.tooltip = urls ? `Автономный сервер запущен\n${urls.root}` : 'Автономный сервер запущен';
+			item.tooltip = urls ? `${running}\n${urls.root}` : running;
 			item.color = undefined;
 			item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
 			break;

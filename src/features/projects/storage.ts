@@ -3,9 +3,15 @@
  */
 
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { createProject, type Project } from './project';
 import { UNTAGGED_LABEL } from './constants';
 import { expandHomePath, updateWithPathSeparatorStr } from './pathUtils';
+
+/** Путь для сравнения: абсолютный, без завершающего разделителя и без учёта регистра. */
+function pathKey(value: string): string {
+	return path.resolve(value).replace(/[\\/]+$/, '').toLowerCase();
+}
 
 export interface FavoriteEntry {
 	label: string;
@@ -72,10 +78,10 @@ export class ProjectStorage {
 	}
 
 	hasPath(rootPath: string, expandPath = false): Project | undefined {
-		const norm = rootPath.toLowerCase();
+		const norm = pathKey(rootPath);
 		for (const p of this.items) {
 			const exp = expandHomePath(p.rootPath);
-			if (exp.toLowerCase() === norm || exp === rootPath) {
+			if (pathKey(exp) === norm) {
 				return expandPath ? { ...p, rootPath: exp } : p;
 			}
 		}

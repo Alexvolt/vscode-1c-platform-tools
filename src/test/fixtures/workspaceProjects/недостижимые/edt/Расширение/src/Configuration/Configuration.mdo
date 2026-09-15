@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:Configuration xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="9b8a7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d">
+  <name>Расширение</name>
+  <objectBelonging>Adopted</objectBelonging>
+  <namePrefix>Р_</namePrefix>
+</mdclass:Configuration>

@@ -31,17 +31,32 @@ import {
 } from '../../shared/ibsrvPublication';
 import { loadProjectMetadataTree } from '../metadata/metadataTreeService';
 import { extractPublishableServices, PublishableServices } from './serverServices';
+import type { InfobaseHolder } from '../../shared/exclusiveInfobase';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import { projectMemento, SERVER_PUBLICATION_STATE } from '../../shared/projectState';
+import { currentRoot, runWithProject, sameProjectRoot } from '../../shared/workspaceProjects';
+import { projectLabel } from '../../commands/projectScope';
 
 const log = logger.scope('server');
 
 /** Имя информационной базы автономного сервера. */
 const INFOBASE_NAME = 'DefAlias';
 
-/** Ключ хранения выбора публикуемых сервисов в workspaceState. */
-const PUBLICATION_SELECTION_KEY = '1c-platform-tools.server.publicationSelection';
+/** Кнопка перезапуска сервера для другого проекта. */
+export const SWITCH_SERVER_PROJECT_ACTION = 'Остановить и запустить';
 
 /**
- * Сохранённый выбор публикации (workspaceState).
+ * Вопрос перед запуском сервера, когда он уже работает для другого проекта.
+ *
+ * @param owner - Имя проекта, для которого сервер запущен
+ * @param target - Имя проекта, для которого его запускают
+ */
+export function serverProjectSwitchQuestion(owner: string, target: string): string {
+	return `Автономный сервер проекта ${owner} запущен. Остановить его и запустить для ${target}?`;
+}
+
+/**
+ * Сохранённый выбор публикации (состояние проекта).
  *
  * `webAll`/`httpAll` — публиковать все сервисы категории; иначе публикуются
  * только перечисленные в `web`/`http`.
@@ -154,6 +169,8 @@ export class PlatformServerManager {
 	private _state: ServerState = 'stopped';
 	/** Каталог ИБ, с которым сервер реально запущен (для детекта смены профиля). */
 	private runningIbPath: string | undefined;
+	/** Корень проекта, для которого сервер запущен. */
+	private owner: string | undefined;
 	private readonly output: vscode.OutputChannel;
 	private readonly stateEmitter = new vscode.EventEmitter<ServerState>();
 	private currentUrls: ServerUrls | undefined;
@@ -180,6 +197,29 @@ export class PlatformServerManager {
 		return this._state;
 	}
 
+	/** Корень проекта, для которого сервер запущен или запускается. */
+	public get ownerRoot(): string | undefined {
+		return this._state === 'running' || this._state === 'starting' ? this.owner : undefined;
+	}
+
+	/**
+	 * Держатель файловой базы для команд с монопольным доступом: возвращает
+	 * сервер тому проекту, для которого он работал.
+	 */
+	public infobaseHolder(): InfobaseHolder {
+		let released: string | undefined;
+		return {
+			label: 'Автономный сервер',
+			heldInfobase: () => (this.ownerRoot === undefined ? undefined : this.runningIbPath),
+			release: async () => {
+				released = this.owner;
+				await this.stop();
+				return this._state === 'stopped';
+			},
+			restore: () => this.start(released),
+		};
+	}
+
 	/** Адреса опубликованной ИБ (доступны при running). */
 	public getUrls(): ServerUrls | undefined {
 		return this.currentUrls;
@@ -191,11 +231,11 @@ export class PlatformServerManager {
 	 * Если конфиг публикации уже существует, параметры берутся из него (учитывая
 	 * ручные правки порта); иначе — из настроек расширения.
 	 *
+	 * @param workspaceRoot - Корень проекта
 	 * @returns Набор URL, как они будут выглядеть при запуске
 	 */
-	public async previewUrls(): Promise<ServerUrls> {
-		const settings = this.readSettings();
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+	public async previewUrls(workspaceRoot: string | undefined = currentRoot()): Promise<ServerUrls> {
+		const settings = this.readSettings(workspaceRoot);
 		if (workspaceRoot) {
 			const params = await this.readConfigParams(this.getConfigPath(workspaceRoot, settings), settings);
 			return buildServerUrls(params.host, params.port, params.base);
@@ -209,23 +249,45 @@ export class PlatformServerManager {
 	}
 
 	/**
-	 * Запускает автономный сервер.
+	 * Запускает автономный сервер для проекта.
 	 *
-	 * Идемпотентно: если сервер уже запущен или запускается — повторно не стартует.
+	 * Идемпотентно для того же проекта. Сервер другого проекта останавливается
+	 * только после согласия пользователя.
+	 *
+	 * @param workspaceRoot - Корень проекта; по умолчанию текущий
 	 */
-	public async start(): Promise<void> {
-		if (this._state === 'running' || this._state === 'starting') {
-			vscode.window.showInformationMessage('Автономный сервер уже запущен.');
-			return;
-		}
-
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+	public async start(workspaceRoot: string | undefined = currentRoot()): Promise<void> {
 		if (!workspaceRoot) {
 			vscode.window.showErrorMessage('Откройте рабочую область проекта 1С.');
 			return;
 		}
 
-		const settings = this.readSettings();
+		if (this._state === 'running' || this._state === 'starting') {
+			const owner = this.owner;
+			if (owner === undefined || sameProjectRoot(owner, workspaceRoot)) {
+				vscode.window.showInformationMessage('Автономный сервер уже запущен.');
+				return;
+			}
+			const action = await vscode.window.showWarningMessage(
+				serverProjectSwitchQuestion(projectLabel(owner), projectLabel(workspaceRoot)),
+				SWITCH_SERVER_PROJECT_ACTION
+			);
+			if (action !== SWITCH_SERVER_PROJECT_ACTION) {
+				return;
+			}
+			await this.stop();
+		}
+
+		await runWithProject(workspaceRoot, () => this.startIn(workspaceRoot));
+	}
+
+	/**
+	 * Поднимает процесс ibsrv для проекта.
+	 *
+	 * @param workspaceRoot - Корень проекта
+	 */
+	private async startIn(workspaceRoot: string): Promise<void> {
+		const settings = this.readSettings(workspaceRoot);
 
 		// Версия платформы: настройка сервера → --v8version активного профиля → наибольшая.
 		const requestedVersion = settings.platformVersion || (await this.vrunner.getActiveV8Version()) || '';
@@ -244,6 +306,7 @@ export class PlatformServerManager {
 			return;
 		}
 		this.runningIbPath = ibPath;
+		this.owner = workspaceRoot;
 
 		this.setState('starting');
 		this.output.show(true);
@@ -292,9 +355,9 @@ export class PlatformServerManager {
 			if (this._state === 'starting' || this._state === 'running') {
 				// Незапланированное завершение
 				this.output.appendLine(`ibsrv завершился (code=${code}, signal=${signal})`);
-				this.setState(this._state === 'starting' ? 'error' : 'stopped');
 				this.currentUrls = undefined;
 				this.activeConfig = undefined;
+				this.setState(this._state === 'starting' ? 'error' : 'stopped');
 			}
 		});
 
@@ -324,6 +387,7 @@ export class PlatformServerManager {
 			this.currentUrls = undefined;
 			this.activeConfig = undefined;
 			this.runningIbPath = undefined;
+			this.owner = undefined;
 			return;
 		}
 
@@ -347,14 +411,19 @@ export class PlatformServerManager {
 		this.activeConfig = undefined;
 		this.exitPromise = undefined;
 		this.runningIbPath = undefined;
+		this.owner = undefined;
 	}
 
 	/**
 	 * Перезапускает сервер (корректно завершает текущий процесс перед стартом).
+	 *
+	 * Запущенный сервер перезапускается для своего проекта, остановленный
+	 * запускается для текущего.
 	 */
 	public async restart(): Promise<void> {
+		const root = this.ownerRoot ?? currentRoot();
 		await this.stop();
-		await this.start();
+		await this.start(root);
 	}
 
 	/** Показывает журнал сервера. */
@@ -365,13 +434,12 @@ export class PlatformServerManager {
 	/**
 	 * Открывает конфиг публикации в редакторе, создавая его при отсутствии.
 	 */
-	public async openPublicationConfig(): Promise<void> {
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+	public async openPublicationConfig(workspaceRoot: string | undefined = currentRoot()): Promise<void> {
 		if (!workspaceRoot) {
 			vscode.window.showErrorMessage('Откройте рабочую область проекта 1С.');
 			return;
 		}
-		const settings = this.readSettings();
+		const settings = this.readSettings(workspaceRoot);
 		const configPath = this.getConfigPath(workspaceRoot, settings);
 
 		if (!(await fileExists(configPath))) {
@@ -416,60 +484,67 @@ export class PlatformServerManager {
 	}
 
 	/**
-	 * Читает настройки сервера из конфигурации расширения.
+	 * Читает настройки сервера проекта.
+	 *
+	 * @param workspaceRoot - Корень проекта
 	 */
-	private readSettings(): ServerSettings {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools.server');
+	private readSettings(workspaceRoot: string | undefined): ServerSettings {
+		const config = projectConfiguration(workspaceRoot);
 		return {
-			platformPath: config.get<string>('path.platform', ''),
-			platformVersion: config.get<string>('platformVersion', ''),
-			host: config.get<string>('host', 'localhost'),
-			port: config.get<number>('port', 8314),
-			httpBase: config.get<string>('httpBase', 'ib'),
-			dataPath: config.get<string>('path.data', ''),
-			distributeLicenses: config.get<boolean>('distributeLicenses', true),
-			debug: config.get<boolean>('debug', false),
-			debugPort: config.get<number>('debugPort', 1550),
-			directRegPort: config.get<string>('directRegPort', '').trim(),
-			directRange: config.get<string>('directRange', '').trim(),
-			publication: this.resolvePublication(),
+			platformPath: config.get<string>('server.path.platform', ''),
+			platformVersion: config.get<string>('server.platformVersion', ''),
+			host: config.get<string>('server.host', 'localhost'),
+			port: config.get<number>('server.port', 8314),
+			httpBase: config.get<string>('server.httpBase', 'ib'),
+			dataPath: config.get<string>('server.path.data', ''),
+			distributeLicenses: config.get<boolean>('server.distributeLicenses', true),
+			debug: config.get<boolean>('server.debug', false),
+			debugPort: config.get<number>('server.debugPort', 1550),
+			directRegPort: config.get<string>('server.directRegPort', '').trim(),
+			directRange: config.get<string>('server.directRange', '').trim(),
+			publication: this.resolvePublication(workspaceRoot),
 		};
 	}
 
 	/**
-	 * Текущий выбор публикуемых сервисов.
+	 * Выбор публикуемых сервисов проекта.
 	 *
 	 * Если выбор ещё не сохранён, берётся из настроек `server.publish*`
 	 * (по умолчанию — публиковать все категории).
 	 *
+	 * @param workspaceRoot - Корень проекта; по умолчанию текущий
 	 * @returns Сохранённый или дефолтный выбор публикации
 	 */
-	public getPublicationSelection(): PublicationSelection {
-		const stored = this.context.workspaceState.get<PublicationSelection>(PUBLICATION_SELECTION_KEY);
+	public getPublicationSelection(workspaceRoot: string | undefined = currentRoot()): PublicationSelection {
+		const stored = projectMemento(workspaceRoot).get<PublicationSelection>(SERVER_PUBLICATION_STATE);
 		if (stored) {
 			return stored;
 		}
-		const config = vscode.workspace.getConfiguration('1c-platform-tools.server');
+		const config = projectConfiguration(workspaceRoot);
 		return {
-			odata: config.get<boolean>('publishOData', true),
-			webAll: config.get<boolean>('publishWebServices', true),
+			odata: config.get<boolean>('server.publishOData', true),
+			webAll: config.get<boolean>('server.publishWebServices', true),
 			web: [],
-			httpAll: config.get<boolean>('publishHttpServices', true),
+			httpAll: config.get<boolean>('server.publishHttpServices', true),
 			http: [],
 		};
 	}
 
 	/**
-	 * Сохраняет выбор публикуемых сервисов и перегенерирует конфиг публикации.
+	 * Сохраняет выбор публикуемых сервисов проекта и перегенерирует его конфиг публикации.
 	 *
 	 * Серверные параметры (порт/хост/база/лицензии) при перегенерации берутся из
 	 * существующего файла (сохраняя ручные правки), иначе — из настроек.
 	 *
 	 * @param selection - Новый выбор публикации
+	 * @param workspaceRoot - Корень проекта; по умолчанию текущий
 	 */
-	public async setPublicationSelection(selection: PublicationSelection): Promise<void> {
-		await this.context.workspaceState.update(PUBLICATION_SELECTION_KEY, selection);
-		await this.regeneratePublicationConfig();
+	public async setPublicationSelection(
+		selection: PublicationSelection,
+		workspaceRoot: string | undefined = currentRoot()
+	): Promise<void> {
+		await projectMemento(workspaceRoot).update(SERVER_PUBLICATION_STATE, selection);
+		await this.regeneratePublicationConfig(workspaceRoot);
 	}
 
 	/**
@@ -477,18 +552,19 @@ export class PlatformServerManager {
 	 *
 	 * Профиль задаёт строку подключения к ИБ (`--ibconnection`), а автономный
 	 * сервер публикует именно её каталог. При смене профиля конфиг публикации
-	 * перегенерируется под новую ИБ; если сервер уже запущен на другой базе —
-	 * пользователю предлагается перезапуск.
+	 * проекта перегенерируется под новую ИБ; если сервер этого проекта уже
+	 * запущен на другой базе — пользователю предлагается перезапуск.
 	 */
 	public async onActiveProfileChanged(): Promise<void> {
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+		const workspaceRoot = currentRoot();
 		if (!workspaceRoot) {
 			return;
 		}
-		await this.regeneratePublicationConfig();
+		await this.regeneratePublicationConfig(workspaceRoot);
 		this.setState(this._state); // обновить панель/статус под новый профиль
 
-		if (this._state !== 'running') {
+		const owner = this.ownerRoot;
+		if (this._state !== 'running' || owner === undefined || !sameProjectRoot(owner, workspaceRoot)) {
 			return;
 		}
 		const currentIbPath = await this.resolveFileInfobasePath(workspaceRoot, true);
@@ -512,8 +588,7 @@ export class PlatformServerManager {
 	 * активного env-профиля. Если файловой ИБ нет — перегенерация пропускается
 	 * (файл будет создан при следующем запуске).
 	 */
-	private async regeneratePublicationConfig(): Promise<void> {
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+	private async regeneratePublicationConfig(workspaceRoot: string | undefined): Promise<void> {
 		if (!workspaceRoot) {
 			return;
 		}
@@ -521,7 +596,7 @@ export class PlatformServerManager {
 		if (!ibPath) {
 			return;
 		}
-		const settings = this.readSettings();
+		const settings = this.readSettings(workspaceRoot);
 		const dataDir = this.getDataDir(workspaceRoot, settings);
 		const configPath = path.join(dataDir, 'publication.yaml');
 		const params = await this.readConfigParams(configPath, settings);
@@ -537,8 +612,8 @@ export class PlatformServerManager {
 	/**
 	 * Преобразует сохранённый выбор в параметры публикации для конфига.
 	 */
-	private resolvePublication(): PublicationOptions {
-		const selection = this.getPublicationSelection();
+	private resolvePublication(workspaceRoot: string | undefined): PublicationOptions {
+		const selection = this.getPublicationSelection(workspaceRoot);
 		return {
 			odata: selection.odata,
 			webServices: {
@@ -557,8 +632,7 @@ export class PlatformServerManager {
 	 *
 	 * @returns Имена сервисов по категориям или undefined при ошибке чтения
 	 */
-	public async loadServices(): Promise<PublishableServices | undefined> {
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+	public async loadServices(workspaceRoot: string | undefined = currentRoot()): Promise<PublishableServices | undefined> {
 		if (!workspaceRoot) {
 			return undefined;
 		}
@@ -580,7 +654,7 @@ export class PlatformServerManager {
 	 * @returns Абсолютный путь к каталогу ИБ или undefined при ошибке
 	 */
 	private async resolveFileInfobasePath(workspaceRoot: string, silent = false): Promise<string | undefined> {
-		const connection = await this.vrunner.getActiveIbConnectionValue();
+		const connection = await runWithProject(workspaceRoot, () => this.vrunner.getActiveIbConnectionValue());
 		const trimmed = connection.trim();
 
 		if (!trimmed.startsWith('/F')) {
@@ -669,7 +743,7 @@ export class PlatformServerManager {
 
 		while (Date.now() < deadline) {
 			if (child.exitCode !== null || this.child !== child) {
-				this.fail('ibsrv завершился до готовности. Подробности — в журнале сервера.');
+				this.fail('ibsrv завершился до готовности. Подробности в журнале сервера.');
 				return false;
 			}
 			if (await this.probe(urls.root)) {

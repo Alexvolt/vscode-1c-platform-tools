@@ -1,7 +1,7 @@
 /**
  * Host-side панель ER-canvas (Cytoscape + ELK).
  *
- * Один webview-инстанс на workspace; повторный вызов открывает уже существующую панель.
+ * Одна панель на окно: повторный вызов открывает её же, для другого проекта с его графом.
  *
  * @module er/erCanvasPanel
  */
@@ -11,6 +11,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../../../shared/logger';
+import { sameProjectRoot } from '../../../shared/workspaceProjects';
 import { clearMdSparrowJarCache } from '../mdSparrowBootstrap';
 import { MdSparrowOutdatedError } from '../mdSparrowErrors';
 import { supportedErFormats } from './erExporters/exporterRegistry';
@@ -29,11 +30,18 @@ const log = logger.scope('er');
  */
 const MAX_RENDER_NODES = 500;
 
+/** Загрузка графа метаданных проекта. */
+export type ErGraphLoader = (context: vscode.ExtensionContext, root: string) => Promise<ErGraph>;
+
 interface OpenErCanvasParams {
 	readonly context: vscode.ExtensionContext;
 	readonly workspaceRoot: string;
 	readonly initialScope: ErScope;
+	/** По умолчанию граф строит md-sparrow с кэшем */
+	readonly loadGraph?: ErGraphLoader;
 }
+
+const loadProjectGraph: ErGraphLoader = async (context, root) => (await loadErGraph(context, root, {})).graph;
 
 interface InitPayload {
 	readonly subgraph: ErSubgraph;
@@ -77,19 +85,48 @@ interface InboundMessage {
 
 interface CanvasInstance {
 	readonly panel: vscode.WebviewPanel;
+	readonly defaultFormat: ErExportFormat;
+	readonly exportDirRel: string;
+	/** Проект, чей граф в панели */
+	root: string;
 	graph: ErGraph;
+	/** Граф проекта {@link root} загружается, загружен или не загрузился */
+	graphState: 'loading' | 'loaded' | 'failed';
 	scope: ErScope;
 }
 
+/** Сообщения webview о графе на экране: до загрузки графа проекта панели они относятся к прежнему. */
+const GRAPH_MESSAGES = new Set(['openObject', 'exportContent', 'requestScope', 'pickAndAddObject']);
+
 let activeCanvas: CanvasInstance | undefined;
 
-/** Открывает панель ER-canvas; если уже открыта, переиспользует и обновляет scope. */
+/**
+ * Открывает панель ER-canvas; если уже открыта, переиспользует её: для того же проекта
+ * обновляет scope, для другого загружает его граф.
+ */
 export async function openErCanvasPanel(params: OpenErCanvasParams): Promise<void> {
 	const { context, workspaceRoot, initialScope } = params;
+	const loadGraph = params.loadGraph ?? loadProjectGraph;
 	if (activeCanvas) {
-		activeCanvas.scope = initialScope;
-		activeCanvas.panel.reveal(vscode.ViewColumn.Active);
-		await postScopeChange(activeCanvas, initialScope);
+		const instance = activeCanvas;
+		instance.panel.reveal(vscode.ViewColumn.Active);
+		if (sameProjectRoot(instance.root, workspaceRoot) && instance.graphState !== 'failed') {
+			if (instance.graphState === 'loaded') {
+				await postScopeChange(instance, initialScope);
+			} else {
+				instance.scope = initialScope;
+			}
+			return;
+		}
+		instance.root = workspaceRoot;
+		instance.graph = emptyGraph(workspaceRoot);
+		instance.graphState = 'loading';
+		instance.scope = initialScope;
+		await instance.panel.webview.postMessage({
+			type: 'init',
+			payload: emptyInitPayload(initialScope, instance.defaultFormat, instance.exportDirRel),
+		});
+		void loadAndInitCanvas(instance, context, loadGraph);
 		return;
 	}
 
@@ -111,7 +148,11 @@ export async function openErCanvasPanel(params: OpenErCanvasParams): Promise<voi
 	);
 	const instance: CanvasInstance = {
 		panel,
+		defaultFormat,
+		exportDirRel,
+		root: workspaceRoot,
 		graph: emptyGraph(workspaceRoot),
+		graphState: 'loading',
 		scope: initialScope,
 	};
 	activeCanvas = instance;
@@ -123,9 +164,80 @@ export async function openErCanvasPanel(params: OpenErCanvasParams): Promise<voi
 	});
 
 	// Панель показывается мгновенно с пустым состоянием — граф грузится в фоне
-	const emptyInit: InitPayload = {
+	const emptyInit = emptyInitPayload(initialScope, defaultFormat, exportDirRel);
+	const nonce = randomUUID();
+	panel.webview.html = await loadCanvasHtml(panel.webview, context.extensionUri, emptyInit, nonce);
+
+	panel.webview.onDidReceiveMessage(
+		(message: InboundMessage) => {
+			void handleMessage(message, instance, exportDirRel);
+		},
+		undefined,
+		context.subscriptions
+	);
+
+	// Загружаем граф в фоне — webview видит статус в своей footer-строке
+	void loadAndInitCanvas(instance, context, loadGraph);
+}
+
+/**
+ * Загружает граф проекта панели в фоне и отправляет данные в webview через graphReady.
+ * Граф проекта, для которого панель открыли заново за время загрузки, не показывается.
+ */
+async function loadAndInitCanvas(
+	instance: CanvasInstance,
+	context: vscode.ExtensionContext,
+	loadGraph: ErGraphLoader
+): Promise<void> {
+	const root = instance.root;
+	await instance.panel.webview.postMessage({
+		type: 'loading',
+		payload: { message: 'Загрузка графа метаданных…' },
+	});
+	try {
+		const graph = await loadGraph(context, root);
+		if (!sameProjectRoot(instance.root, root)) {
+			return;
+		}
+		instance.graph = graph;
+		instance.graphState = 'loaded';
+		const subgraphResult = computeSubgraphForRender(graph, instance.scope);
+		await instance.panel.webview.postMessage({
+			type: 'graphReady',
+			payload: {
+				subgraph: subgraphResult.subgraph,
+				scope: subgraphResult.scope,
+				truncated: subgraphResult.truncated,
+				fullNodeCount: subgraphResult.fullNodeCount,
+				availableObjectTypes: listObjectTypes(graph),
+				availableRelationKinds: listRelationKinds(graph),
+				catalog: buildCatalog(graph),
+			},
+		});
+	} catch (e) {
+		if (!sameProjectRoot(instance.root, root)) {
+			return;
+		}
+		const message = e instanceof Error ? e.message : String(e);
+		log.error(`не удалось загрузить граф: ${message}`);
+		await instance.panel.webview.postMessage({
+			type: 'loadError',
+			payload: { message },
+		});
+		if (e instanceof MdSparrowOutdatedError) {
+			await clearMdSparrowJarCache(context);
+			void loadAndInitCanvas(instance, context, loadGraph);
+			return;
+		}
+		instance.graphState = 'failed';
+	}
+}
+
+/** Пустая панель: граф ещё не загружен. */
+function emptyInitPayload(scope: ErScope, defaultFormat: ErExportFormat, exportDirRel: string): InitPayload {
+	return {
 		subgraph: { nodes: [], edges: [] },
-		scope: initialScope,
+		scope,
 		truncated: false,
 		fullNodeCount: 0,
 		availableObjectTypes: [],
@@ -135,60 +247,6 @@ export async function openErCanvasPanel(params: OpenErCanvasParams): Promise<voi
 		defaultFormat,
 		defaultExportDirRel: exportDirRel,
 	};
-	const nonce = randomUUID();
-	panel.webview.html = await loadCanvasHtml(panel.webview, context.extensionUri, emptyInit, nonce);
-
-	panel.webview.onDidReceiveMessage(
-		(message: InboundMessage) => {
-			void handleMessage(message, instance, context, workspaceRoot, exportDirRel);
-		},
-		undefined,
-		context.subscriptions
-	);
-
-	// Загружаем граф в фоне — webview видит статус в своей footer-строке
-	void loadAndInitCanvas(instance, context, workspaceRoot, initialScope);
-}
-
-/** Загружает граф в фоне и отправляет данные в webview через graphReady. */
-async function loadAndInitCanvas(
-	instance: CanvasInstance,
-	context: vscode.ExtensionContext,
-	workspaceRoot: string,
-	initialScope: ErScope
-): Promise<void> {
-	await instance.panel.webview.postMessage({
-		type: 'loading',
-		payload: { message: 'Загрузка графа метаданных…' },
-	});
-	try {
-		const loadResult = await loadErGraph(context, workspaceRoot, {});
-		instance.graph = loadResult.graph;
-		const subgraphResult = computeSubgraphForRender(loadResult.graph, initialScope);
-		await instance.panel.webview.postMessage({
-			type: 'graphReady',
-			payload: {
-				subgraph: subgraphResult.subgraph,
-				scope: subgraphResult.scope,
-				truncated: subgraphResult.truncated,
-				fullNodeCount: subgraphResult.fullNodeCount,
-				availableObjectTypes: listObjectTypes(loadResult.graph),
-				availableRelationKinds: listRelationKinds(loadResult.graph),
-				catalog: buildCatalog(loadResult.graph),
-			},
-		});
-	} catch (e) {
-		const message = e instanceof Error ? e.message : String(e);
-		log.error(`не удалось загрузить граф: ${message}`);
-		await instance.panel.webview.postMessage({
-			type: 'loadError',
-			payload: { message },
-		});
-		if (e instanceof MdSparrowOutdatedError) {
-			await clearMdSparrowJarCache(context);
-			void loadAndInitCanvas(instance, context, workspaceRoot, initialScope);
-		}
-	}
 }
 
 /** Считает подграф под scope; если узлов > MAX_RENDER_NODES — поэтапно снижает hops, иначе fallback на seeds. */
@@ -268,8 +326,6 @@ function emptyGraph(projectRoot: string): ErGraph {
 async function handleMessage(
 	message: InboundMessage,
 	instance: CanvasInstance,
-	context: vscode.ExtensionContext,
-	workspaceRoot: string,
 	defaultExportDirRel: string
 ): Promise<void> {
 	if (!message || typeof message !== 'object' || typeof message.type !== 'string') {
@@ -288,13 +344,16 @@ async function handleMessage(
 		}
 		return;
 	}
+	if (instance.graphState !== 'loaded' && GRAPH_MESSAGES.has(message.type)) {
+		return;
+	}
 	if (message.type === 'openObject') {
 		const payload = message.payload as OpenObjectPayload | undefined;
 		if (!payload?.relativePath) {
 			void vscode.window.showInformationMessage(`Файл объекта не найден для ${payload?.key ?? ''}.`);
 			return;
 		}
-		const abs = path.resolve(workspaceRoot, payload.relativePath);
+		const abs = path.resolve(instance.root, payload.relativePath);
 		try {
 			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(abs));
 			await vscode.window.showTextDocument(doc, { preview: true });
@@ -309,7 +368,7 @@ async function handleMessage(
 		if (!payload) {
 			return;
 		}
-		await saveExport(payload, workspaceRoot, defaultExportDirRel);
+		await saveExport(payload, instance.root, defaultExportDirRel);
 		return;
 	}
 	if (message.type === 'requestScope') {

@@ -1,8 +1,15 @@
 import * as vscode from 'vscode';
+import { sameOrUnder } from '../../shared/projectLayout';
+import {
+	onDidChangeCurrentProject,
+	onDidChangeProjects,
+	projectScanRoots,
+} from '../../shared/workspaceProjects';
 import {
 	TodoPanelTreeDataProvider,
 	type FilterScope,
 } from './todoPanelView';
+import { configuredTodoTags } from './todoScanner';
 
 export interface RegisterTodoFeatureParams {
 	todoPanelProvider: TodoPanelTreeDataProvider;
@@ -106,14 +113,7 @@ export function registerTodoFeature(
 	const todoFilterByScopeCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.todo.filterByScope',
 		async () => {
-			const config = vscode.workspace.getConfiguration('1c-platform-tools');
-			const tags = config.get<string[]>('todo.tags') ?? [
-				'TODO',
-				'FIXME',
-				'XXX',
-				'HACK',
-				'BUG',
-			];
+			const tags = configuredTodoTags(projectScanRoots().map((scanRoot) => scanRoot.root));
 			const scopeSet = new Set(scopeItems.map((i) => i.scope));
 			const tagItems: TagQuickPickItem[] = tags.map((tag) => ({
 				label: `$(tag)  ${tag}`,
@@ -174,6 +174,9 @@ export function registerTodoFeature(
 		if (!/\.(bsl|os|md|feature)$/i.test(doc.uri.fsPath)) {
 			return;
 		}
+		if (doc.uri.scheme !== 'file' || !projectScanRoots().some((scanRoot) => sameOrUnder(doc.uri.fsPath, scanRoot.root))) {
+			return;
+		}
 		if (todoSaveDebounce.timer) {
 			clearTimeout(todoSaveDebounce.timer);
 		}
@@ -182,6 +185,9 @@ export function registerTodoFeature(
 			void todoPanelProvider.refresh();
 		}, 1500);
 	});
+
+	const onProjectsChange = onDidChangeProjects(() => todoPanelProvider.projectsChanged());
+	const onCurrentProjectChange = onDidChangeCurrentProject(() => todoPanelProvider.currentProjectChanged());
 
 	const todoDisposeDebounce: vscode.Disposable = {
 		dispose: () => {
@@ -204,6 +210,8 @@ export function registerTodoFeature(
 		todoPanelProvider.onDidChangeTreeData(updateTodoGroupByContext),
 		onTodoActiveEditorChange,
 		onTodoRelevantSave,
+		onProjectsChange,
+		onCurrentProjectChange,
 		todoDisposeDebounce,
 	];
 }

@@ -10,6 +10,8 @@ import * as fs from 'node:fs/promises';
 import * as fssync from 'node:fs';
 import { globSync } from 'glob';
 import { logger } from '../../shared/logger';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import { currentRoot } from '../../shared/workspaceProjects';
 import {
 	type ReleaseComponentSpec,
 	cachedReleaseComponent,
@@ -150,30 +152,17 @@ async function ensureJar(
 }
 
 /**
- * Гарантирует наличие JRE и JAR согласно настройкам расширения.
- */
-export function ensureMdSparrowRuntime(context: vscode.ExtensionContext): Promise<MdSparrowRuntime> {
-	// Готовим один раз на все параллельные обращения: иначе второе успевало взять
-	// путь к java из ещё не распакованной JRE и падало с ENOENT
-	if (runtimeInFlight === undefined) {
-		runtimeInFlight = prepareMdSparrowRuntime(context).finally(() => {
-			runtimeInFlight = undefined;
-		});
-	}
-	return runtimeInFlight;
-}
-
-/** Идущая сейчас подготовка: JRE распаковывается дольше, чем скачивается jar. */
-let runtimeInFlight: Promise<MdSparrowRuntime> | undefined = undefined;
-
-/**
- * Готовит java и jar md-sparrow.
+ * Гарантирует наличие JRE и JAR согласно настройкам проекта.
  *
  * @param context - Контекст расширения
+ * @param root - Корень проекта, для которого читаются настройки компонентов
  * @returns Пути к java и jar с тегом релиза
  */
-async function prepareMdSparrowRuntime(context: vscode.ExtensionContext): Promise<MdSparrowRuntime> {
-	const cfg = vscode.workspace.getConfiguration('1c-platform-tools');
+export async function ensureMdSparrowRuntime(
+	context: vscode.ExtensionContext,
+	root: string | undefined = currentRoot()
+): Promise<MdSparrowRuntime> {
+	const cfg = projectConfiguration(root);
 	const download = cfg.get<boolean>('components.autoload.metadataJar', true);
 	const downloadJre = cfg.get<boolean>('components.autoload.java', true);
 	const jarPathSetting = cfg.get<string>('components.path.metadataJar', '').trim();
@@ -183,26 +172,56 @@ async function prepareMdSparrowRuntime(context: vscode.ExtensionContext): Promis
 	}
 
 	const base = installBaseDir(context);
-	await fs.mkdir(base, { recursive: true });
-
-	const java = await ensurePortableJre(base, downloadJre, javaPathSetting);
-	const { jarPath, tag } = await ensureJar(base, download, jarPathSetting, resolveGithubToken());
+	// Параллельные обращения с одинаковыми настройками ждут одну подготовку
+	const java = await preparedOnce(`jre|${base}|${downloadJre}|${javaPathSetting}`, async () => {
+		await fs.mkdir(base, { recursive: true });
+		return ensurePortableJre(base, downloadJre, javaPathSetting);
+	});
+	const { jarPath, tag } = await preparedOnce(`jar|${base}|${download}|${jarPathSetting}`, () =>
+		ensureJar(base, download, jarPathSetting, resolveGithubToken())
+	);
 
 	return { java, jarPath, releaseTag: tag };
 }
 
+/** Идущие сейчас подготовки по ключу настроек. */
+const preparationsInFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * Запускает подготовку, если с тем же ключом она ещё не идёт.
+ *
+ * @param key - Что готовится и с какими настройками
+ * @param prepare - Подготовка
+ */
+function preparedOnce<T>(key: string, prepare: () => Promise<T>): Promise<T> {
+	const running = preparationsInFlight.get(key) as Promise<T> | undefined;
+	if (running !== undefined) {
+		return running;
+	}
+	const started = prepare().finally(() => {
+		preparationsInFlight.delete(key);
+	});
+	preparationsInFlight.set(key, started);
+	return started;
+}
+
 /**
  * Фоновая проверка наличия нового релиза md-sparrow; при обнаружении чистит кэш JAR и зовёт колбэк.
+ *
+ * @param context - Контекст расширения
+ * @param onUpdateApplied - Вызывается после очистки кэша
+ * @param root - Корень проекта, для которого читаются настройки компонентов
  */
 export function checkMdSparrowUpdateInBackground(
 	context: vscode.ExtensionContext,
-	onUpdateApplied: () => void
+	onUpdateApplied: () => void,
+	root: string | undefined = currentRoot()
 ): void {
 	// Компоненты не качаются в недоверенной папке: дальше их запускает Java
 	if (!vscode.workspace.isTrusted) {
 		return;
 	}
-	const cfg = vscode.workspace.getConfiguration('1c-platform-tools');
+	const cfg = projectConfiguration(root);
 	if (cfg.get<string>('components.path.metadataJar', '').trim()) {
 		return;
 	}

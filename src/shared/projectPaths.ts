@@ -57,7 +57,7 @@ export interface RelativeExternal extends RelativeRoot {
 	kind: ExternalKind;
 }
 
-/** Пути активной конфигурации, её расширений и внешних объектов. */
+/** Пути конфигурации проекта, её расширений и внешних объектов. */
 export interface ProjectPaths {
 	configuration?: RelativeRoot;
 	/** Расширения решения. */
@@ -136,12 +136,9 @@ function externalContainer(
 }
 
 /**
- * Пути раскладки рабочей области.
+ * Пути раскладки проекта: его конфигурация, расширения и внешние объекты.
  *
- * Конфигурация и расширения берутся у активной конфигурации, внешние объекты у
- * всей рабочей области: они к конфигурации не привязаны.
- *
- * @param workspaceRoot - Корень рабочей области
+ * @param workspaceRoot - Корень проекта
  */
 export async function projectPaths(workspaceRoot: string): Promise<ProjectPaths> {
 	const [scope, layout] = await Promise.all([configurationScope(workspaceRoot), resolveProjectLayout(workspaceRoot)]);

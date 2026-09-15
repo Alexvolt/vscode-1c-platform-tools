@@ -18,6 +18,8 @@ import {
 	resolveGithubToken,
 	type ReleaseComponentSpec,
 } from './githubReleaseLoader';
+import { projectConfiguration } from './projectConfiguration';
+import { currentRoot } from './workspaceProjects';
 
 /** Релизы OVM: в каждом лежит один и тот же `ovm.exe` (на Linux и macOS запускается через Mono). */
 const OVM_SPEC: ReleaseComponentSpec = {
@@ -33,11 +35,12 @@ const OVM_SPEC: ReleaseComponentSpec = {
  * Путь к `ovm.exe`: своя сборка из настроек либо кэш, который при необходимости загружается и обновляется.
  *
  * @param context контекст расширения (кэш живёт в globalStorage)
+ * @param root корень проекта, для которого читаются настройки компонентов
  * @returns абсолютный путь к файлу
  * @throws Error если автозагрузка выключена и не задан components.path.ovm, либо файл не найден.
  */
-export async function ensureOvm(context: vscode.ExtensionContext): Promise<string> {
-	const cfg = vscode.workspace.getConfiguration('1c-platform-tools');
+export async function ensureOvm(context: vscode.ExtensionContext, root: string | undefined = currentRoot()): Promise<string> {
+	const cfg = projectConfiguration(root);
 	const override = cfg.get<string>('components.path.ovm', '').trim();
 	if (override) {
 		if (override.includes('${')) {

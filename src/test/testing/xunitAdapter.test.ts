@@ -2,7 +2,6 @@ import * as assert from 'node:assert';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { epfTestSourceInfo, XUnitAdapter } from '../../features/testing/adapters/xunitAdapter';
-import { initActiveConfiguration, setActiveConfiguration } from '../../shared/activeConfiguration';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { TESTS_SUBDIRS, testsSubPath } from '../../shared/pathDefaults';
 import { invalidateProjectLayout, testsDirectoryName } from '../../shared/projectLayout';
@@ -30,20 +29,6 @@ function vrunnerAt(workspaceRoot: string): VRunnerManager {
 
 /** Намерение из аргументов плана. */
 const intentOf = (args: string[]): VRunnerIntent => JSON.parse(args[0]) as VRunnerIntent;
-
-/** Хранилище выбора конфигурации в памяти. */
-function memoryContext(): unknown {
-	const values = new Map<string, unknown>();
-	return {
-		workspaceState: {
-			get: (key: string) => values.get(key),
-			update: async (key: string, value: unknown) => {
-				values.set(key, value);
-			},
-			keys: () => [...values.keys()],
-		},
-	};
-}
 
 suite('xunitAdapter', () => {
 	test('epfTestSourceInfo: стандартная структура decompileepf', () => {
@@ -114,10 +99,8 @@ suite('xunitAdapter', () => {
 });
 
 suite('поиск тестов в раскладке EDT', () => {
-	setup(async () => {
+	setup(() => {
 		invalidateProjectLayout();
-		initActiveConfiguration(memoryContext() as never);
-		await setActiveConfiguration(undefined);
 	});
 
 	test('xUnit ищет тестовые обработки и в проекте EDT', async () => {

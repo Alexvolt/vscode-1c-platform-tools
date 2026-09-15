@@ -22,6 +22,8 @@ import { createVRunnerTask, type TaskOutputChain } from '../tasks/vrunnerTask';
 import { logger } from '../../shared/logger';
 import { findEdtInstallations, pickEdtInstallation, type EdtInstallation } from '../../shared/edtLocator';
 import { isEdtProject } from '../../shared/projectLayout';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import { currentRoot } from '../../shared/workspaceProjects';
 
 const log = logger.scope('edt');
 
@@ -33,6 +35,70 @@ const DEFAULT_WORKSPACE_DIR = 'edt-workspace';
 
 /** Идёт ли сейчас команда EDT: рабочую область нельзя делить. */
 let running: Promise<number> | undefined;
+
+/** Ответ, когда 1С:EDT на машине не найдена. */
+export const EDT_NOT_FOUND_MESSAGE =
+	'1С:EDT не найдена. Установите её через 1cedtstart или укажите каталог в настройке «Каталог установки 1С:EDT».';
+
+/** Сколько последнего вывода команды хранится для объяснения ошибки. */
+const OUTPUT_TAIL_LIMIT = 64_000;
+
+/** Известные ответы 1cedtcli: русский и английский текст одного и того же отказа. */
+const EDT_FAILURES: { pattern: RegExp; explain: (match: RegExpMatchArray) => string }[] = [
+	{
+		pattern: /рабочая область '[^']*' уже используется другим приложением|workspace .* is currently in use by another application/i,
+		explain: () =>
+			'Рабочая область 1С:EDT занята: её держит открытая EDT или другой процесс 1cedtcli. Закройте EDT на этой рабочей области и повторите команду.',
+	},
+	{
+		pattern: /Проект с именем (.+?) уже существует в рабочей области|project (?:with name )?'?(.+?)'? already exists in the workspace/i,
+		explain: (match) => `Проект ${match[1] ?? match[2]} уже подключён к рабочей области 1С:EDT.`,
+	},
+	{
+		pattern: /Project not found: (.+)|Не найдено проекта с именем (.+?) в рабочей области/i,
+		explain: (match) => `Проекта ${(match[1] ?? match[2]).trim()} нет в рабочей области 1С:EDT.`,
+	},
+];
+
+/**
+ * Причина неудачной команды по выводу 1cedtcli.
+ *
+ * @param output - Вывод команды
+ * @returns Объяснение для пользователя либо undefined, если отказ не распознан
+ */
+export function explainEdtFailure(output: string): string | undefined {
+	for (const failure of EDT_FAILURES) {
+		const match = output.match(failure.pattern);
+		if (match) {
+			return failure.explain(match);
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Определение задачи графической EDT на рабочей области: по нему команды
+ * узнают, что редактор держит рабочую область.
+ *
+ * @param workspaceDir - Каталог рабочей области EDT
+ */
+export function edtEditorTaskDefinition(workspaceDir: string): vscode.TaskDefinition {
+	return { type: EDT_TASK_TYPE, command: 'open', workspace: path.resolve(workspaceDir) };
+}
+
+/** Открыта ли графическая EDT на рабочей области командой «Запустить EDT». */
+function editorHoldsWorkspace(workspaceDir: string): boolean {
+	const wanted = path.resolve(workspaceDir).toLowerCase();
+	return vscode.tasks.taskExecutions.some((execution) => {
+		const definition = execution.task.definition;
+		return (
+			definition.type === EDT_TASK_TYPE &&
+			definition.command === 'open' &&
+			typeof definition.workspace === 'string' &&
+			definition.workspace.toLowerCase() === wanted
+		);
+	});
+}
 
 /** Настройки раздела «1С:EDT». */
 export interface EdtSettings {
@@ -49,10 +115,12 @@ export interface EdtSettings {
 }
 
 /**
- * Читает настройки EDT.
+ * Читает настройки EDT проекта.
+ *
+ * @param root - Корень проекта
  */
-export function readEdtSettings(): EdtSettings {
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
+export function readEdtSettings(root: string | undefined = currentRoot()): EdtSettings {
+	const config = projectConfiguration(root);
 	return {
 		path: config.get<string>('edt.path', ''),
 		version: config.get<string>('edt.version', ''),
@@ -99,7 +167,11 @@ export function edtStagingRoot(workspaceRoot: string, buildPath: string): string
  * @param workspaceRoot - Корень рабочей области VS Code
  * @param buildPath - Каталог сборки проекта
  */
-export function edtWorkspaceDir(workspaceRoot: string, buildPath: string, settings: EdtSettings = readEdtSettings()): string {
+export function edtWorkspaceDir(
+	workspaceRoot: string,
+	buildPath: string,
+	settings: EdtSettings = readEdtSettings(workspaceRoot)
+): string {
 	const configured = settings.workspace.trim();
 	if (configured) {
 		return path.isAbsolute(configured) ? configured : path.join(workspaceRoot, configured);
@@ -256,9 +328,7 @@ export async function runEdtCommand(request: EdtCommand): Promise<number> {
 	const settings = readEdtSettings();
 	const installation = resolveEdt(settings);
 	if (!installation) {
-		void vscode.window.showErrorMessage(
-			'1С:EDT не найдена. Установите её через 1cedtstart или укажите каталог в настройке «Каталог установки 1С:EDT».'
-		);
+		void vscode.window.showErrorMessage(EDT_NOT_FOUND_MESSAGE);
 		return 1;
 	}
 
@@ -267,11 +337,19 @@ export async function runEdtCommand(request: EdtCommand): Promise<number> {
 		await running.catch(() => undefined);
 	}
 
+	if (editorHoldsWorkspace(request.workspaceDir)) {
+		void vscode.window.showErrorMessage(
+			'1С:EDT открыта на рабочей области проекта, а 1cedtcli с занятой рабочей областью не работает. Закройте EDT и повторите команду.'
+		);
+		return 1;
+	}
+
 	const args = buildEdtArgs(request, settings);
 	// Задача исполняет команду процессом, а не терминалом пользователя: экранирование по оболочке процесса
 	const command = buildProcessCommand(installation.cli, args);
 	log.info(`EDT ${installation.version}: ${request.command}`);
 
+	let output = '';
 	running = new Promise<number>((resolve) => {
 		const task = createVRunnerTask({
 			name: request.title,
@@ -280,6 +358,9 @@ export async function runEdtCommand(request: EdtCommand): Promise<number> {
 			definition: { type: EDT_TASK_TYPE, command: request.command },
 			exitCallback: resolve,
 			appendOutput: request.output?.append(),
+			onOutput: (chunk) => {
+				output = (output + chunk).slice(-OUTPUT_TAIL_LIMIT);
+			},
 		});
 		void vscode.tasks.executeTask(task);
 	});
@@ -287,7 +368,11 @@ export async function runEdtCommand(request: EdtCommand): Promise<number> {
 	try {
 		const exitCode = await running;
 		if (exitCode !== 0) {
-			log.warn(`EDT ${request.command}: код возврата ${exitCode}`);
+			const reason = explainEdtFailure(output);
+			log.warn(`EDT ${request.command}: код возврата ${exitCode}${reason ? `: ${reason}` : ''}`);
+			if (reason) {
+				void vscode.window.showErrorMessage(reason);
+			}
 		}
 		return exitCode;
 	} finally {

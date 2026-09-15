@@ -44,3 +44,38 @@ suite('версия vanessa-runner: событие первого определ
 		}
 	});
 });
+
+suite('версия vanessa-runner: переустановка в другом проекте', () => {
+	const vrunner = VRunnerManager.getInstance();
+	let root: string;
+	let other: string;
+
+	setup(() => {
+		root = fs.mkdtempSync(path.join(os.tmpdir(), 'vrunner-reinstall-'));
+		other = fs.mkdtempSync(path.join(os.tmpdir(), 'vrunner-current-'));
+	});
+
+	teardown(() => {
+		for (const dir of [root, other]) {
+			fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+		}
+	});
+
+	test('смена установки проекта, который сейчас не текущий, обновляет его версию', async () => {
+		writeLocalRunner(root, '2.6.0');
+		await vrunner.runWithProjectRoot(root, () => vrunner.getVRunnerVersion());
+		writeLocalRunner(root, '3.0.0');
+
+		await vrunner.runWithProjectRoot(other, () => vrunner.refreshVRunnerVersion(root));
+
+		assert.strictEqual(await vrunner.runWithProjectRoot(root, async () => vrunner.getCachedVRunnerVersionLabel()), '3.0.0');
+	});
+
+	test('версию корня, для которого её не определяли, переустановка не определяет', async () => {
+		writeLocalRunner(other, '3.0.0');
+
+		await vrunner.runWithProjectRoot(root, () => vrunner.refreshVRunnerVersion(other));
+
+		assert.strictEqual(await vrunner.runWithProjectRoot(other, async () => vrunner.getCachedVRunnerVersionLabel()), undefined);
+	});
+});

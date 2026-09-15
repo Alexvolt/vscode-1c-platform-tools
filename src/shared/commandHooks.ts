@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { logger } from './logger';
+import { projectRootKey } from './workspaceProjects';
 
 const execAsync = promisify(exec);
 const log = logger.scope('hooks');
@@ -30,29 +31,48 @@ interface HooksConfig {
 	hooks?: Record<string, HookEntry>;
 }
 
-/** Кэш: путь к файлу → распарсенная конфигурация (undefined = файл отсутствует) */
-const configCache = new Map<string, HooksConfig | undefined>();
-
-async function loadConfig(workspaceRoot: string): Promise<HooksConfig | undefined> {
-	const filePath = path.join(workspaceRoot, HOOKS_FILE);
-	if (configCache.has(filePath)) {
-		return configCache.get(filePath);
-	}
-	try {
-		const text = await fs.readFile(filePath, 'utf-8');
-		const config = JSON.parse(text) as HooksConfig;
-		configCache.set(filePath, config);
-		return config;
-	} catch {
-		configCache.set(filePath, undefined);
-		return undefined;
-	}
+/** Разобранный файл хуков и отметка файла, по которой он прочитан. */
+interface CachedHooks {
+	stamp: string;
+	/** undefined: файл не разобрался */
+	config: HooksConfig | undefined;
 }
 
-/** Сбросить кэш (полезно при изменении файла). */
+/** Кэш: ключ корня проекта → разобранный файл хуков */
+const configCache = new Map<string, CachedHooks>();
+
+async function loadConfig(workspaceRoot: string): Promise<HooksConfig | undefined> {
+	const key = projectRootKey(workspaceRoot);
+	const file = path.join(workspaceRoot, HOOKS_FILE);
+	let stamp: string;
+	try {
+		const stat = await fs.stat(file);
+		stamp = `${stat.mtimeMs}:${stat.size}`;
+	} catch {
+		configCache.delete(key);
+		return undefined;
+	}
+	const cached = configCache.get(key);
+	if (cached?.stamp === stamp) {
+		return cached.config;
+	}
+	let config: HooksConfig | undefined;
+	try {
+		config = JSON.parse(await fs.readFile(file, 'utf-8')) as HooksConfig;
+	} catch {
+		config = undefined;
+	}
+	configCache.set(key, { stamp, config });
+	return config;
+}
+
+/**
+ * Сбрасывает кэш хуков проекта.
+ *
+ * @param workspaceRoot - Корень проекта
+ */
 export function invalidateHooksCache(workspaceRoot: string): void {
-	const filePath = path.join(workspaceRoot, HOOKS_FILE);
-	configCache.delete(filePath);
+	configCache.delete(projectRootKey(workspaceRoot));
 }
 
 function resolveEntry(config: HooksConfig, commandId: string): HookEntry | undefined {

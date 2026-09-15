@@ -6,6 +6,8 @@ import {
 	registerProjectsRuntime,
 	type RegisterProjectsRuntimeResult,
 } from '../features/projects/registerProjectsRuntime';
+import { registerWorkspaceProjectsFeature } from '../features/projects/registerWorkspaceProjectsFeature';
+import { createShowNot1CProjectMessage } from './projectUi';
 
 export interface ProjectsFlow {
 	registerRuntime: (
@@ -14,11 +16,12 @@ export interface ProjectsFlow {
 }
 
 /**
- * Инициализирует flow фичи «1С: Проекты»: bootstrap сразу, runtime по требованию.
+ * Инициализирует flow фичи «1С: Проекты»: проекты рабочей области и bootstrap сразу, runtime по требованию.
  */
 export function registerProjectsFlow(
 	context: vscode.ExtensionContext
 ): ProjectsFlow {
+	registerWorkspaceProjectsFeature(context, createShowNot1CProjectMessage());
 	const bootstrap = registerProjectsBootstrap(context);
 
 	return {

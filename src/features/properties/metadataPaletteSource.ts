@@ -30,6 +30,7 @@ import { ensureMdSparrowRuntime } from '../metadata/mdSparrowBootstrap';
 import { runMdSparrowParamsMutation, runMdSparrowParamsRead, type MdSparrowOp } from '../metadata/mdSparrowParams';
 import { mdSparrowSchemaFlagFromConfigurationXml } from '../metadata/mdSparrowSchemaVersion';
 import { logger } from '../../shared/logger';
+import { onDidChangeCurrentProject } from '../../shared/workspaceProjects';
 import { applyPaletteEdits, paletteGroupsFromSpec } from './propertyPaletteSpec';
 import { extendableOf, propertyStatesOf, withPropertyStates } from '../metadata/metadataObjectEditSpec';
 import { SOURCE_PROPERTIES_TABS } from './sourcePropertiesSpec';
@@ -80,6 +81,8 @@ export interface MetadataPaletteSourceParams {
 	metadataTreeProvider: MetadataTreeDataProvider;
 	metadataTreeView: vscode.TreeView<vscode.TreeItem>;
 	propertyPaletteProvider: PropertyPaletteViewProvider;
+	/** Смена текущего проекта; по умолчанию событие проектов рабочей области. */
+	projectChanges?: vscode.Event<unknown>;
 }
 
 /**
@@ -263,6 +266,7 @@ function targetFor(item: vscode.TreeItem): PaletteTarget | undefined {
  */
 export function registerMetadataPaletteSource(params: MetadataPaletteSourceParams): vscode.Disposable[] {
 	const { context, metadataTreeView, propertyPaletteProvider } = params;
+	const projectChanges = params.projectChanges ?? onDidChangeCurrentProject;
 	let timer: NodeJS.Timeout | undefined;
 	/** Номер последнего запроса: ответ на устаревшее выделение показывать нельзя. */
 	let generation = 0;
@@ -322,6 +326,15 @@ export function registerMetadataPaletteSource(params: MetadataPaletteSourceParam
 	return [
 		metadataTreeView.onDidChangeSelection(() => schedule(true)),
 		propertyPaletteProvider.onDidChangeVisibility(() => schedule(false)),
+		// Свойства прежнего проекта гаснут, начатое чтение в панель уже не попадёт
+		projectChanges(() => {
+			if (timer) {
+				clearTimeout(timer);
+				timer = undefined;
+			}
+			generation++;
+			propertyPaletteProvider.reset();
+		}),
 		new vscode.Disposable(() => {
 			if (timer) {
 				clearTimeout(timer);

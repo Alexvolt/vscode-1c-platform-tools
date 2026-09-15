@@ -16,6 +16,7 @@ import {
 import { decodeProcessOutput } from './processOutput';
 import { VRunnerManager } from './vrunnerManager';
 import { findEdtInstallations, pickEdtInstallation } from './edtLocator';
+import { projectConfiguration } from './projectConfiguration';
 
 const execFileAsync = promisify(execFile);
 const HOST_EXTENSION_ID = 'yellow-hammer.1c-platform-tools';
@@ -31,7 +32,7 @@ const CLI_VERSION_TIMEOUT_MS = 5_000;
 export async function collectEnvironmentSummary(
 	context: vscode.ExtensionContext
 ): Promise<EnvironmentSummary> {
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
+	const config = projectConfiguration();
 	const [oscript, vrunner, components] = await Promise.all([
 		readOscriptInfo(),
 		readVrunnerInfo(),

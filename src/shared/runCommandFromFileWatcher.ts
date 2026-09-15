@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
+import { currentRoot, projectOf, runWithProject } from './workspaceProjects';
 
 const log = logger.scope('trigger');
 
@@ -26,14 +27,14 @@ async function handleRunCommandFile(uri: vscode.Uri): Promise<void> {
 	}
 }
 
+/**
+ * Следит за файлом-командой `.cursor/1c-platform-tools-run-command` во всех папках
+ * рабочей области. Команда выполняется в проекте, где лежит файл; вне проектов
+ * в текущем.
+ */
 export function registerRunCommandFileWatcher(context: vscode.ExtensionContext): void {
-	const folder = vscode.workspace.workspaceFolders?.[0];
-	if (!folder) {
-		return;
-	}
-	const pattern = new vscode.RelativePattern(folder, `.cursor/${RUN_COMMAND_FILE}`);
-	const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-	const run = (uri: vscode.Uri) => void handleRunCommandFile(uri);
+	const watcher = vscode.workspace.createFileSystemWatcher(`**/.cursor/${RUN_COMMAND_FILE}`);
+	const run = (uri: vscode.Uri) => void runWithProject(projectOf(uri) ?? currentRoot(), () => handleRunCommandFile(uri));
 	watcher.onDidCreate(run);
 	watcher.onDidChange(run);
 	context.subscriptions.push(watcher);

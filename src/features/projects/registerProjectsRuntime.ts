@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
+import { onDidChangeCurrentProject, onDidChangeProjects } from '../../shared/workspaceProjects';
 import { registerProjectsDecoration } from './decoration';
 import { registerProjectsCommands } from './commands';
 import { HelpAndSupportProvider } from './helpAndSupportProvider';
@@ -59,10 +60,16 @@ export async function registerProjectsRuntime(
 
 	registerProjectsDecoration(context);
 	showStatusBar(projectStorage, oneCLocator);
+	const onProjectsChanged = (): void => {
+		showStatusBar(projectStorage, oneCLocator);
+		providers.autodetectProvider.refresh();
+	};
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeWorkspaceFolders(() => {
 			showStatusBar(projectStorage, oneCLocator);
-		})
+		}),
+		onDidChangeProjects(onProjectsChanged),
+		onDidChangeCurrentProject(onProjectsChanged)
 	);
 
 	const projectsCommandDisposables = registerProjectsCommands(
@@ -84,6 +91,7 @@ export async function registerProjectsRuntime(
 			if (filename === 'projects.json') {
 				projectStorage.load();
 				providers.refreshStorage();
+				showStatusBar(projectStorage, oneCLocator);
 			}
 		});
 	} catch {
@@ -97,6 +105,12 @@ export async function registerProjectsRuntime(
 				providers.updateStorageTitle();
 				providers.updateAutodetectTitle();
 			});
+		}
+		if (
+			e.affectsConfiguration('1c-platform-tools.projects.showProjectNameInStatusBar') ||
+			e.affectsConfiguration('1c-platform-tools.projects.openInNewWindowWhenClickingInStatusBar')
+		) {
+			showStatusBar(projectStorage, oneCLocator);
 		}
 		if (e.affectsConfiguration('1c-platform-tools.artifacts.exclude')) {
 			onArtifactsExcludeChanged?.();

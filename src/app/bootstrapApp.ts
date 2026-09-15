@@ -25,7 +25,6 @@ import { registerArtifactsFlow } from './registerArtifactsFlow';
 import { registerTodoFlow } from './registerTodoFlow';
 import { registerMainTreeFlow } from './registerMainTreeFlow';
 import { registerTestingFlow } from './registerTestingFlow';
-import { registerActiveConfigurationFeature } from '../features/project/activeConfigurationFeature';
 import { registerEdtFeature } from '../features/edt/registerEdtFeature';
 import { registerLaunchFeature } from '../features/launch/launchFeature';
 import { registerPlatformServerFeature } from '../features/launch/platformServerFeature';
@@ -37,6 +36,8 @@ import { registerIbasesFeature } from '../features/ibases/registerIbasesFeature'
 import { initGithubToken } from '../shared/githubToken';
 import { initTerminalEnv } from '../shared/terminalEnv';
 import { onWorkspaceTrustGranted } from '../shared/workspaceTrust';
+import { registerProjectLayoutWatch } from '../shared/projectLayoutWatch';
+import { hasProjects, initWorkspaceProjects } from '../shared/workspaceProjects';
 
 /**
  * Выполняет полную инициализацию расширения.
@@ -45,6 +46,10 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 	// До первой загрузки компонентов: иначе первые запросы уйдут анонимными
 	await initGithubToken(context);
 	initTerminalEnv(context.environmentVariableCollection);
+
+	// Раньше всего, что читает корень проекта или раскладку
+	registerProjectLayoutWatch(context);
+	context.subscriptions.push(initWorkspaceProjects(context));
 
 	const { registerRuntime: registerProjectsRuntime } = registerProjectsFlow(context);
 
@@ -70,8 +75,12 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 
 	const { commands, commandDisposables } = registerCoreCommands(context);
 
-	// Изменяемая ссылка: после создания packagedef из палитры станет true, команды будут работать без перезагрузки
-	const isProjectRef = { current: isProject };
+	// Признак читается при каждом обращении: проект появляется и пропадает без перезагрузки окна
+	const isProjectRef = {
+		get current(): boolean {
+			return hasProjects();
+		},
+	};
 
 	const showNot1CProjectMessage = createShowNot1CProjectMessage();
 	const {
@@ -89,7 +98,6 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 	});
 
 	const { testingFeatureDisposables, rebuildTesting } = registerTestingFlow(isProjectRef);
-	const activeConfigurationDisposables = registerActiveConfigurationFeature(context, isProjectRef);
 	const edtDisposables = registerEdtFeature();
 	const launchFeatureDisposables = registerLaunchFeature(context, isProjectRef);
 	const platformServerDisposables = registerPlatformServerFeature(context, isProjectRef);
@@ -101,13 +109,14 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 	);
 	const tasksFeatureDisposables = registerTasksFeature();
 
-	registerProjectCreatedHandler({
-		isProjectRef,
-		treeDataProvider,
-		artifactsProvider,
-		metadataTreeProvider,
-		rebuildTesting,
-	});
+	context.subscriptions.push(
+		registerProjectCreatedHandler({
+			treeDataProvider,
+			artifactsProvider,
+			metadataTreeProvider,
+			rebuildTesting,
+		})
+	);
 
 	// В недоверенной папке команды не выполнялись, поэтому после выдачи
 	// доверия деревья перечитываются
@@ -139,7 +148,6 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 		...mainTreeCommandDisposables,
 		...todoFeatureDisposables,
 		...testingFeatureDisposables,
-		...activeConfigurationDisposables,
 		...edtDisposables,
 		...launchFeatureDisposables,
 		...platformServerDisposables,

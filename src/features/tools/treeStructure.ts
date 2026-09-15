@@ -116,18 +116,6 @@ export interface TreeGroup {
  */
 export const TREE_GROUPS: TreeGroup[] = [
 	{
-		groupLabel: 'EDT',
-		sectionType: 'edt',
-		defaultCollapsibleState: 'collapsed',
-		commands: [
-			{ command: '1c-platform-tools.edt.import', title: getEdtImportCommandName().title, treeLabel: '📥 Импортировать в проект EDT' , formats: ['designer']},
-			{ command: '1c-platform-tools.edt.export', title: getEdtExportCommandName().title, treeLabel: '📤 Выгрузить проект EDT в XML' , formats: ['edt']},
-			{ command: '1c-platform-tools.edt.formatModules', title: getEdtFormatCommandName().title, treeLabel: '🧹 Форматировать модули' , formats: ['edt']},
-			{ command: '1c-platform-tools.edt.sortProject', title: getEdtSortCommandName().title, treeLabel: '🔤 Сортировать объекты' , formats: ['edt']},
-			{ command: '1c-platform-tools.edt.projectInfo', title: getEdtProjectInfoCommandName().title, treeLabel: 'ℹ️ Сведения о проекте' , formats: ['edt']},
-		],
-	},
-	{
 		groupLabel: 'Информационная база',
 		sectionType: 'infobase',
 		defaultCollapsibleState: 'collapsed',
@@ -184,6 +172,18 @@ export const TREE_GROUPS: TreeGroup[] = [
 			{ command: '1c-platform-tools.epf.decompileProcessor', title: getDecompileExternalProcessorCommandName().title, treeLabel: '🔓 Разобрать обработки' },
 			{ command: '1c-platform-tools.epf.decompileReport', title: getDecompileExternalReportCommandName().title, treeLabel: '🔓 Разобрать отчёты' },
 			{ command: '1c-platform-tools.epf.clearCache', title: getClearCacheCommandName().title, treeLabel: '🗑️ Удалить кэш' },
+		],
+	},
+	{
+		groupLabel: 'EDT',
+		sectionType: 'edt',
+		defaultCollapsibleState: 'collapsed',
+		commands: [
+			{ command: '1c-platform-tools.edt.import', title: getEdtImportCommandName().title, treeLabel: '📥 Импортировать в проект EDT' , formats: ['designer']},
+			{ command: '1c-platform-tools.edt.export', title: getEdtExportCommandName().title, treeLabel: '📤 Выгрузить проект EDT в XML' , formats: ['edt']},
+			{ command: '1c-platform-tools.edt.formatModules', title: getEdtFormatCommandName().title, treeLabel: '🧹 Форматировать модули' , formats: ['edt']},
+			{ command: '1c-platform-tools.edt.sortProject', title: getEdtSortCommandName().title, treeLabel: '🔤 Сортировать объекты' , formats: ['edt']},
+			{ command: '1c-platform-tools.edt.projectInfo', title: getEdtProjectInfoCommandName().title, treeLabel: 'ℹ️ Сведения о проекте' , formats: ['edt']},
 		],
 	},
 	{

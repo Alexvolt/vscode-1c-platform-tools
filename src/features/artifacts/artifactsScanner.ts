@@ -1,5 +1,5 @@
 /**
- * Артефакты рабочей области: исходный код из раскладки проекта, собранные файлы
+ * Артефакты проектов: исходный код из раскладки проекта, собранные файлы
  * поиском по маске с исключениями `artifacts.exclude`.
  *
  * @module artifactsScanner
@@ -7,6 +7,7 @@
 
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { projectConfiguration } from '../../shared/projectConfiguration';
 import {
 	externalDirectory,
 	externalEntry,
@@ -16,6 +17,8 @@ import {
 	type SourceFormat,
 	type SourceRoot,
 } from '../../shared/projectLayout';
+import type { ProjectScanRoot } from '../../shared/workspaceProjects';
+import { detectedScanRoots, isOutsideScanRoot, projectRelativePath } from './projectScan';
 
 export type ArtifactType = 'configuration' | 'extension' | 'processor' | 'report';
 
@@ -37,6 +40,7 @@ export interface Artifact {
 	/** Каталог или файл, с которым работают команды. */
 	uri: vscode.Uri;
 	name: string;
+	/** Путь от корня проекта через `/`. */
 	relativePath: string;
 	kind: 'source' | 'binary';
 	/** У исходного кода: формат каталога. */
@@ -45,7 +49,7 @@ export interface Artifact {
 	sourceEntryUri?: vscode.Uri;
 }
 
-/** Результат {@link scanArtifacts}. */
+/** Артефакты одного проекта по видам. */
 export interface ArtifactsScanResult {
 	configurations: Artifact[];
 	extensions: Artifact[];
@@ -53,8 +57,14 @@ export interface ArtifactsScanResult {
 	reports: Artifact[];
 }
 
-function excludeSegments(): string[] {
-	const config = vscode.workspace.getConfiguration('1c-platform-tools');
+/** Результат {@link scanArtifacts} для одного проекта. */
+export interface ProjectArtifacts extends ArtifactsScanResult {
+	/** Корень проекта. */
+	root: string;
+}
+
+function excludeSegments(root: string): string[] {
+	const config = projectConfiguration(root);
 	const configured = config.get<string[]>('artifacts.exclude');
 	const segments = Array.isArray(configured)
 		? configured
@@ -63,96 +73,113 @@ function excludeSegments(): string[] {
 	return [...new Set([...ALWAYS_EXCLUDED, ...own])];
 }
 
-function isExcluded(uri: vscode.Uri, segments: readonly string[]): boolean {
-	const normalized = uri.fsPath.replaceAll('\\', '/');
-	return segments.some((segment) => normalized.includes(`/${segment}/`) || normalized.endsWith(`/${segment}`));
-}
-
 function throwIfCancelled(token: vscode.CancellationToken | undefined): void {
 	if (token?.isCancellationRequested) {
 		throw new vscode.CancellationError();
 	}
 }
 
-function relativePathOf(uri: vscode.Uri): string {
-	const folders = vscode.workspace.workspaceFolders ?? [];
-	if (folders.length === 0) {
-		return uri.fsPath;
-	}
-	// Исходный код в корне рабочей области: сама папка, а не её полный путь
-	if (folders.some((folder) => folder.uri.fsPath === uri.fsPath)) {
-		return '.';
-	}
-	return vscode.workspace.asRelativePath(uri, false).replaceAll('\\', '/');
-}
-
-function sourceArtifact(type: ArtifactType, dir: string, name: string, format: SourceFormat, entry: string): Artifact {
-	const uri = vscode.Uri.file(dir);
+function sourceArtifact(
+	root: string,
+	type: ArtifactType,
+	dir: string,
+	name: string,
+	format: SourceFormat,
+	entry: string
+): Artifact {
 	return {
 		type,
-		uri,
+		uri: vscode.Uri.file(dir),
 		name: name || path.basename(dir),
-		relativePath: relativePathOf(uri),
+		relativePath: projectRelativePath(root, dir),
 		kind: 'source',
 		format,
 		sourceEntryUri: vscode.Uri.file(entry),
 	};
 }
 
-/** Исходный код рабочей области: конфигурации, расширения и внешние объекты, тестовые вместе с остальными. */
-function sourcesOf(layout: ProjectLayout): Artifact[] {
-	const configurations = [layout.configuration, ...layout.others].filter((root): root is SourceRoot => root !== undefined);
+/** Исходный код проекта: конфигурации, расширения и внешние объекты, тестовые вместе с остальными. */
+function sourcesOf(scanRoot: ProjectScanRoot, layout: ProjectLayout): Artifact[] {
+	const root = scanRoot.root;
+	const configurations = [layout.configuration, ...layout.others].filter((source): source is SourceRoot => source !== undefined);
 	const extensions = [...layout.extensions, ...layout.testExtensions];
 	const externals = [...layout.processors, ...layout.reports, ...layout.testProcessors];
-	const ofRoot = (type: ArtifactType, root: SourceRoot) => sourceArtifact(type, root.dir, root.name, root.format, sourceEntry(root));
+	const ofRoot = (type: ArtifactType, source: SourceRoot) =>
+		sourceArtifact(root, type, source.dir, source.name, source.format, sourceEntry(source));
 	return [
-		...configurations.map((root) => ofRoot('configuration', root)),
-		...extensions.map((root) => ofRoot('extension', root)),
-		...externals.map((root) => sourceArtifact(root.kind, externalDirectory(root), root.name, root.format, externalEntry(root))),
-	];
+		...configurations.map((source) => ofRoot('configuration', source)),
+		...extensions.map((source) => ofRoot('extension', source)),
+		...externals.map((source) =>
+			sourceArtifact(root, source.kind, externalDirectory(source), source.name, source.format, externalEntry(source))
+		),
+	].filter((artifact) => !isOutsideScanRoot(scanRoot, artifact.uri.fsPath, []));
 }
 
 async function binariesIn(
-	root: string,
+	scanRoot: ProjectScanRoot,
 	exclude: readonly string[],
 	token: vscode.CancellationToken | undefined
 ): Promise<Artifact[]> {
-	const pattern = new vscode.RelativePattern(vscode.Uri.file(root), BINARY_GLOB);
+	const pattern = new vscode.RelativePattern(vscode.Uri.file(scanRoot.root), BINARY_GLOB);
 	const files = await vscode.workspace.findFiles(pattern, undefined, undefined, token);
 	const found: Artifact[] = [];
 	for (const uri of files) {
 		const type = BINARY_TYPES.get(path.extname(uri.fsPath).toLowerCase());
-		if (!type || isExcluded(uri, exclude)) {
+		if (!type || isOutsideScanRoot(scanRoot, uri.fsPath, exclude)) {
 			continue;
 		}
-		found.push({ type, uri, name: path.basename(uri.fsPath), relativePath: relativePathOf(uri), kind: 'binary' });
+		found.push({
+			type,
+			uri,
+			name: path.basename(uri.fsPath),
+			relativePath: projectRelativePath(scanRoot.root, uri.fsPath),
+			kind: 'binary',
+		});
 	}
 	return found;
 }
 
 /**
- * Артефакты рабочей области.
+ * Артефакты одного проекта.
  *
+ * @param scanRoot - Проект и каталоги, которые ему не принадлежат
  * @param token - Отмена при повторном обновлении
- * @param roots - Корни для обхода; по умолчанию папки рабочей области
  */
-export async function scanArtifacts(
-	token?: vscode.CancellationToken,
-	roots?: readonly string[]
-): Promise<ArtifactsScanResult> {
-	const folders = roots ?? (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
-	const exclude = excludeSegments();
-	const found: Artifact[] = [];
-	for (const root of folders) {
-		throwIfCancelled(token);
-		found.push(...sourcesOf(await resolveProjectLayout(root)));
-		found.push(...(await binariesIn(root, exclude, token)));
-	}
+export async function scanProjectArtifacts(
+	scanRoot: ProjectScanRoot,
+	token?: vscode.CancellationToken
+): Promise<ProjectArtifacts> {
+	const found = [
+		...sourcesOf(scanRoot, await resolveProjectLayout(scanRoot.root)),
+		...(await binariesIn(scanRoot, excludeSegments(scanRoot.root), token)),
+	];
 	const of = (type: ArtifactType) => found.filter((artifact) => artifact.type === type);
 	return {
+		root: scanRoot.root,
 		configurations: of('configuration'),
 		extensions: of('extension'),
 		processors: of('processor'),
 		reports: of('report'),
 	};
+}
+
+/**
+ * Артефакты проектов окна.
+ *
+ * @param token - Отмена при повторном обновлении
+ * @param roots - Проекты для обхода; по умолчанию все проекты после обнаружения
+ * @returns По проекту в порядке проектов
+ */
+export async function scanArtifacts(
+	token?: vscode.CancellationToken,
+	roots?: readonly ProjectScanRoot[]
+): Promise<ProjectArtifacts[]> {
+	const scanRoots = roots ?? (await detectedScanRoots());
+	const result: ProjectArtifacts[] = [];
+	for (const scanRoot of scanRoots) {
+		throwIfCancelled(token);
+		result.push(await scanProjectArtifacts(scanRoot, token));
+	}
+	throwIfCancelled(token);
+	return result;
 }

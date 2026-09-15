@@ -13,6 +13,8 @@ import * as fssync from 'node:fs';
 import * as path from 'node:path';
 import { globSync } from 'glob';
 import { logger } from '../../shared/logger';
+import { projectConfiguration } from '../../shared/projectConfiguration';
+import { currentRoot } from '../../shared/workspaceProjects';
 import {
 	type ReleaseComponentSpec,
 	cachedReleaseComponent,
@@ -202,12 +204,17 @@ export function runtimeFromFile(file: string): OnecDebugAdapterRuntime {
 }
 
 /**
- * Гарантирует наличие onec-debug-adapter согласно настройкам расширения.
+ * Гарантирует наличие onec-debug-adapter согласно настройкам проекта.
  *
+ * @param context - Контекст расширения
+ * @param root - Корень проекта, для которого читаются настройки компонентов
  * @throws Error если автозагрузка выключена и не задан components.path.adapter, либо адаптер не найден.
  */
-export async function ensureOnecDebugAdapter(context: vscode.ExtensionContext): Promise<OnecDebugAdapterRuntime> {
-	const cfg = vscode.workspace.getConfiguration('1c-platform-tools');
+export async function ensureOnecDebugAdapter(
+	context: vscode.ExtensionContext,
+	root: string | undefined = currentRoot()
+): Promise<OnecDebugAdapterRuntime> {
+	const cfg = projectConfiguration(root);
 	const override = cfg.get<string>('components.path.adapter', '').trim();
 	if (override) {
 		if (override.includes('${')) {
@@ -252,9 +259,17 @@ export function describeRuntime(runtime: OnecDebugAdapterRuntime): string {
 	return [runtime.command, ...runtime.args].join(' ');
 }
 
-/** Фоновая проверка нового релиза адаптера (чистит кэш, чтобы следующий запуск скачал свежий). */
-export function checkOnecDebugAdapterUpdateInBackground(context: vscode.ExtensionContext): void {
-	const cfg = vscode.workspace.getConfiguration('1c-platform-tools');
+/**
+ * Фоновая проверка нового релиза адаптера (чистит кэш, чтобы следующий запуск скачал свежий).
+ *
+ * @param context - Контекст расширения
+ * @param root - Корень проекта, для которого читаются настройки компонентов
+ */
+export function checkOnecDebugAdapterUpdateInBackground(
+	context: vscode.ExtensionContext,
+	root: string | undefined = currentRoot()
+): void {
+	const cfg = projectConfiguration(root);
 	if (cfg.get<string>('components.path.adapter', '').trim()) {
 		return;
 	}

@@ -28,7 +28,7 @@ suite('каталоги для md-sparrow', () => {
 		const dirs = await detectedSourceDirs(EDT_WORKSPACE);
 
 		assert.strictEqual(dirs.cf, 'ssl31');
-		assert.deepStrictEqual(dirs.cfeDirs, ['ssl31._ДемоРасширение', 'tests/cfe/yaxunit-test']);
+		assert.deepStrictEqual(dirs.cfeDirs, ['ssl31._ДемоРасширение', 'учёт.РасширениеУчёта', 'tests/cfe/yaxunit-test']);
 		assert.deepStrictEqual(dirs.epfDirs, []);
 		assert.deepStrictEqual(dirs.erfDirs, []);
 	});

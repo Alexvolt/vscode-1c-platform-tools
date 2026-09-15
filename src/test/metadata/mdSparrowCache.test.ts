@@ -6,6 +6,7 @@ import { invalidateProjectLayout, setLayoutExclusions } from '../../shared/proje
 import { directoriesOf } from '../../features/metadata/mdSparrowParams';
 import {
 	cachedByFiles,
+	cacheFilePath,
 	forgetCachedReads,
 	readCachedEntry,
 	runtimeSalt,
@@ -13,6 +14,7 @@ import {
 	sourceRoots,
 	writeCached,
 } from '../../features/metadata/mdSparrowCache';
+import { createMockExtensionContext } from '../fixtures/mocks/vscodeMocks';
 
 /** Рабочие области с исходным кодом в обоих форматах. */
 const FIXTURES = path.resolve(__dirname, '../../../src/test/fixtures/projectLayout');
@@ -151,6 +153,24 @@ suite('кэш ответов md-sparrow', () => {
 			assert.strictEqual(await readCachedEntry(file, isTree), undefined);
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test('файл кэша свой у каждого проекта и у каждой его конфигурации', () => {
+		const context = createMockExtensionContext();
+		const first = path.join(os.tmpdir(), 'проекты', 'учёт');
+		const second = path.join(os.tmpdir(), 'проекты', 'склад');
+
+		const tree = cacheFilePath(context, 'project-metadata-tree', first, 'src/cf');
+		assert.notStrictEqual(cacheFilePath(context, 'project-metadata-tree', second, 'src/cf'), tree);
+		assert.notStrictEqual(cacheFilePath(context, 'project-metadata-tree', first, 'ssl31'), tree);
+		assert.strictEqual(
+			cacheFilePath(context, 'project-metadata-tree', first, path.join(first, 'src', 'cf')),
+			tree,
+			'каталог конфигурации относительно проекта и абсолютный дают один файл'
+		);
+		if (process.platform === 'win32') {
+			assert.strictEqual(cacheFilePath(context, 'project-metadata-tree', first.toUpperCase(), 'SRC/CF'), tree);
 		}
 	});
 

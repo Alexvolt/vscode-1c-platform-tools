@@ -1,113 +1,61 @@
 import * as assert from 'node:assert';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import { configurationScope, initActiveConfiguration, setActiveConfiguration } from '../../shared/activeConfiguration';
-import { invalidateProjectLayout } from '../../shared/projectLayout';
+import { configurationScope } from '../../shared/activeConfiguration';
+import { invalidateProjectLayout, setLayoutExclusions } from '../../shared/projectLayout';
 
-/** Рабочая область с двумя конфигурациями в формате EDT. */
-const EDT_WORKSPACE = path.resolve(__dirname, '../../../src/test/fixtures/projectLayout/edt-workspace');
+const FIXTURES = path.resolve(__dirname, '../../../src/test/fixtures');
 
-/** Хранилище выбора, как workspaceState. */
-function memoryState(): { context: { workspaceState: unknown } } {
-	const values = new Map<string, unknown>();
-	return {
-		context: {
-			workspaceState: {
-				get: (key: string) => values.get(key),
-				update: async (key: string, value: unknown) => {
-					if (value === undefined) {
-						values.delete(key);
-					} else {
-						values.set(key, value);
-					}
-				},
-				keys: () => [...values.keys()],
-			},
-		},
-	};
-}
+/** Две конфигурации в формате EDT в одном корне. */
+const EDT_WORKSPACE = path.join(FIXTURES, 'projectLayout', 'edt-workspace');
 
-suite('активная конфигурация', () => {
-	setup(async () => {
+/** Проекты с подпроектом и лишними конфигурациями. */
+const PROJECTS = path.join(FIXTURES, 'workspaceProjects');
+
+suite('область проекта', () => {
+	setup(() => {
+		setLayoutExclusions(() => []);
 		invalidateProjectLayout();
-		initActiveConfiguration(memoryState().context as never);
-		await setActiveConfiguration(undefined);
 	});
 
-	test('без выбора активна первая найденная конфигурация', async () => {
+	test('конфигурация проекта первая найденная, расширения все, остальные конфигурации лишние', async () => {
 		const scope = await configurationScope(EDT_WORKSPACE);
 
 		assert.strictEqual(scope.configuration?.name, 'БиблиотекаСтандартныхПодсистемДемо');
-		assert.deepStrictEqual(
-			scope.others.map((root) => root.name),
-			['УчётДемо']
-		);
+		assert.deepStrictEqual(scope.extensions.map((root) => root.name), ['_ДемоРасширение', 'РасширениеУчёта']);
+		assert.deepStrictEqual(scope.testExtensions.map((root) => root.name), ['Тесты']);
+		assert.deepStrictEqual(scope.extraConfigurations.map((root) => root.name), ['УчётДемо']);
 	});
 
-	test('выбор задаёт конфигурацию и переносит прежнюю в остальные', async () => {
-		await setActiveConfiguration(path.join(EDT_WORKSPACE, 'учёт'));
+	test('из подпроекта в область родителя входят только расширения', async () => {
+		const parent = await configurationScope(path.join(PROJECTS, 'проект'));
+		const child = await configurationScope(path.join(PROJECTS, 'проект', 'src', 'cfe', 'подпроект'));
 
-		const scope = await configurationScope(EDT_WORKSPACE);
-
-		assert.strictEqual(scope.configuration?.name, 'УчётДемо');
-		assert.deepStrictEqual(
-			scope.others.map((root) => root.name),
-			['БиблиотекаСтандартныхПодсистемДемо']
-		);
+		assert.strictEqual(parent.configuration?.name, 'Основная');
+		assert.deepStrictEqual(parent.extensions.map((root) => root.name), ['РасширениеПодпроекта']);
+		assert.deepStrictEqual(parent.extraConfigurations, []);
+		assert.strictEqual(child.configuration?.name, 'Подпроект');
+		assert.deepStrictEqual(child.extensions.map((root) => root.name), ['РасширениеПодпроекта']);
 	});
 
-	test('расширения берутся от активной конфигурации', async () => {
-		const ssl = await configurationScope(EDT_WORKSPACE);
-		assert.deepStrictEqual(
-			ssl.extensions.map((root) => root.name),
-			['_ДемоРасширение']
-		);
+	test('репозиторий расширения с packagedef принадлежит проекту, тестовые расширения подпроекта нет', async () => {
+		const retail = await configurationScope(path.join(PROJECTS, 'розница'));
 
-		await setActiveConfiguration(path.join(EDT_WORKSPACE, 'учёт'));
-		const accounting = await configurationScope(EDT_WORKSPACE);
-
-		assert.deepStrictEqual(
-			accounting.extensions.map((root) => root.name),
-			['РасширениеУчёта']
-		);
+		assert.strictEqual(retail.configuration?.name, 'Розница');
+		assert.deepStrictEqual(retail.extensions.map((root) => root.name), [
+			'Адаптер',
+			'Доработки',
+			'МенеджерПакетов',
+			'КлиентМетрик',
+			'ЭкспортМетрик',
+		]);
+		assert.deepStrictEqual(retail.testExtensions, []);
+		assert.deepStrictEqual(retail.extraConfigurations, []);
 	});
 
-	test('выбор несуществующей конфигурации не ломает область работы', async () => {
-		await setActiveConfiguration(path.join(EDT_WORKSPACE, 'которой-нет'));
+	test('без исходного кода конфигурации нет', async () => {
+		const scope = await configurationScope(path.join(PROJECTS, 'пустая'));
 
-		const scope = await configurationScope(EDT_WORKSPACE);
-
-		assert.strictEqual(scope.configuration?.name, 'БиблиотекаСтандартныхПодсистемДемо');
-	});
-});
-
-suite('активная конфигурация: расширения вне конвенции', () => {
-	setup(async () => {
-		invalidateProjectLayout();
-		initActiveConfiguration(memoryState().context as never);
-		await setActiveConfiguration(undefined);
-	});
-
-	test('расширение, не подошедшее ни к одной конфигурации, остаётся видимым', async () => {
-		const workspace = fs.mkdtempSync(path.join(os.tmpdir(), '1cpt-scope-'));
-		const mdo = (name: string, extension: boolean) =>
-			`<?xml version="1.0" encoding="UTF-8"?>\n<mdclass:Configuration xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass">\n  <name>${name}</name>\n${extension ? '  <namePrefix>x</namePrefix>\n' : ''}</mdclass:Configuration>\n`;
-		for (const [dir, name, isExtension] of [
-			['первая', 'Первая', false],
-			['вторая', 'Вторая', false],
-			['ничьё', 'Ничьё', true],
-		] as const) {
-			fs.mkdirSync(path.join(workspace, dir, 'src', 'Configuration'), { recursive: true });
-			fs.writeFileSync(path.join(workspace, dir, 'src', 'Configuration', 'Configuration.mdo'), mdo(name, isExtension));
-		}
-
-		const scope = await configurationScope(workspace);
-
-		assert.strictEqual(scope.others.length, 1, 'вторая конфигурация должна быть в остальных');
-		assert.deepStrictEqual(
-			scope.extensions.map((extension) => extension.name),
-			['Ничьё']
-		);
+		assert.strictEqual(scope.configuration, undefined);
+		assert.deepStrictEqual(scope.extraConfigurations, []);
 	});
 });

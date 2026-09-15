@@ -1,7 +1,10 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { runCancellableCommand } from '../../shared/cancellableProcess';
 import { logger } from '../../shared/logger';
+import { currentRoot, deepestProject, projectOf, workspaceFolderOf } from '../../shared/workspaceProjects';
 import { signalTaskFinished } from './taskFinishSignal';
+import { rememberTaskProject } from './terminalProjects';
 
 const log = logger.scope('vrunner-task');
 
@@ -21,6 +24,38 @@ export const VRUNNER_TASK_SOURCE = '1C: Platform Tools';
 export interface VRunnerTaskDefinition extends vscode.TaskDefinition {
 	command: string;
 	args?: string[];
+	/** Корень проекта: абсолютный путь или путь от папки рабочей области задачи. */
+	project?: string;
+}
+
+/**
+ * Корень проекта задачи из tasks.json.
+ *
+ * Явный `project` берётся от папки задачи. Без него: текущий проект, если он в
+ * папке задачи; иначе проект, в котором лежит папка, или сама папка.
+ *
+ * @param scope - Область задачи
+ * @param project - Значение `project` из определения задачи
+ * @returns Корень или undefined, когда проекта нет
+ */
+export function taskProjectRoot(scope: vscode.Task['scope'], project: unknown): string | undefined {
+	const folder = typeof scope === 'object' && scope !== null ? scope.uri.fsPath : undefined;
+	const current = currentRoot();
+	if (typeof project === 'string' && project.trim() !== '') {
+		const value = project.trim();
+		if (path.isAbsolute(value)) {
+			return value;
+		}
+		const base = folder ?? current;
+		return base === undefined ? undefined : path.resolve(base, value);
+	}
+	if (folder === undefined) {
+		return current;
+	}
+	if (current !== undefined && deepestProject([{ root: folder }], current) !== undefined) {
+		return current;
+	}
+	return projectOf(folder) ?? folder;
 }
 
 /**
@@ -45,6 +80,10 @@ export interface VRunnerTaskParams {
 	onCancel?: () => void;
 	/** Дописать вывод к прошлой задаче в терминале, а не очистить его: шаги одной команды читаются подряд. */
 	appendOutput?: boolean;
+	/** Получает вывод процесса по мере появления. */
+	onOutput?: (chunk: string) => void;
+	/** Корень проекта: папка рабочей области задачи, её определение и ссылки в выводе; по умолчанию текущий проект. */
+	root?: string;
 }
 
 /**
@@ -83,12 +122,17 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 		private readonly cwd: string,
 		private readonly env?: NodeJS.ProcessEnv,
 		private readonly exitCallback?: (exitCode: number) => void,
-		private readonly onCancel?: () => void
+		private readonly onCancel?: () => void,
+		private readonly onOutput?: (chunk: string) => void,
+		private readonly root?: string
 	) {}
 
 	public open(): void {
 		log.debug(`запуск задачи: ${this.command}`);
 		this.startedAt = Date.now();
+		if (this.root !== undefined) {
+			rememberTaskProject({ name: this.name, source: VRUNNER_TASK_SOURCE }, this.root);
+		}
 		// Эхо исходной команды в начале вывода (как у штатных задач VS Code),
 		// чтобы было видно, что именно запущено. Служебный префикс кодировки прячем.
 		const displayCommand = this.command.replaceAll('chcp 65001 >nul && ', '');
@@ -99,7 +143,10 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 			token: this.cts.token,
 			onCancel: this.onCancel,
 			// Псевдотерминалу нужны переводы строки в формате \r\n.
-			onOutput: (chunk) => this.writeEmitter.fire(chunk.replace(/\r?\n/g, '\r\n')),
+			onOutput: (chunk) => {
+				this.onOutput?.(chunk);
+				this.writeEmitter.fire(chunk.replace(/\r?\n/g, '\r\n'));
+			},
 		}).then((result) => {
 			if (result.cancelled) {
 				this.writeEmitter.fire('\r\n[33mЗадача остановлена[0m\r\n');
@@ -127,7 +174,16 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
  * @returns Псевдотерминал для {@link vscode.CustomExecution}
  */
 export function createVRunnerTaskTerminal(params: VRunnerTaskParams): vscode.Pseudoterminal {
-	return new VRunnerPseudoterminal(params.name, params.command, params.cwd, params.env, params.exitCallback, params.onCancel);
+	return new VRunnerPseudoterminal(
+		params.name,
+		params.command,
+		params.cwd,
+		params.env,
+		params.exitCallback,
+		params.onCancel,
+		params.onOutput,
+		params.root ?? currentRoot()
+	);
 }
 
 /**
@@ -141,11 +197,12 @@ export function createVRunnerTaskTerminal(params: VRunnerTaskParams): vscode.Pse
  * @returns Готовая к выполнению задача VS Code
  */
 export function createVRunnerTask(params: VRunnerTaskParams): vscode.Task {
-	const scope = vscode.workspace.workspaceFolders?.[0] ?? vscode.TaskScope.Workspace;
+	const root = params.root ?? currentRoot();
+	const scope = (root === undefined ? undefined : workspaceFolderOf(root)) ?? vscode.TaskScope.Workspace;
 	const definition: vscode.TaskDefinition =
-		params.definition ?? { type: VRUNNER_TASK_TYPE, command: params.name };
+		params.definition ?? { type: VRUNNER_TASK_TYPE, command: params.name, ...(root === undefined ? {} : { project: root }) };
 
-	const execution = new vscode.CustomExecution(async () => createVRunnerTaskTerminal(params));
+	const execution = new vscode.CustomExecution(async () => createVRunnerTaskTerminal({ ...params, root }));
 
 	const task = new vscode.Task(
 		definition,

@@ -5,9 +5,15 @@ description: Операции с платформой 1С в этом проек
 
 # Команды 1C: Platform Tools для агента
 
-**Если пользователь называет команду или MCP-инструмент по имени** (например «через run_designer», «вызови 1c-platform-tools.run.designer») — сразу вызови именно её, передай projectPath. Не заходи сначала в скилл и не перебирай все инструменты; таблицы ниже — когда задача сформулирована без имени команды.
+**Если пользователь называет команду или MCP-инструмент по имени** (например «через run_designer», «вызови 1c-platform-tools.run.designer») — сразу вызови именно её. Не заходи сначала в скилл и не перебирай все инструменты; таблицы ниже — когда задача сформулирована без имени команды.
 
 Выполняй операции 1С через команды расширения. **Ты должен сам выполнять команду**, а не просить пользователя: при запросе «Запусти Конфигуратор» — вызови `1c-platform-tools.run.designer`, при «Запусти Предприятие» — `1c-platform-tools.run.enterprise` и т.д. по таблице ниже. Используй инструмент выполнения команд редактора (Execute Command / runCommand / выполнить команду VS Code). **Не пиши пользователю «из чата вызвать нельзя» или «нажмите Ctrl+Shift+P»** — выполни команду сам. Только если в твоём наборе инструментов нет выполнения команд — тогда предложи пользователю палитру или панель «1С: Инструменты».
+
+Исходный код конфигурации и расширений расширение находит в проекте само: выгрузку конфигуратора или проекты 1С:EDT. Каталоги в команды не передаются.
+
+## Проекты окна
+
+Проект 1С это каталог с `packagedef`; в окне их может быть несколько. Команды выполняются в текущем проекте. Список проектов и текущий проект возвращает `1c-platform-tools.project.list` с аргументом `{ "wait": true }` (MCP `project_list`); без аргумента команда открывает окно выбора у пользователя. Сделать проект текущим можно командой `1c-platform-tools.project.select` с `{ "root": "<корень>" }` (MCP `project_select`): выбор меняется и у пользователя. Каталог без `packagedef`, в том числе из `candidates` списка проектов, делает проектом `1c-platform-tools.project.initialize` с `{ "root": "<каталог>", "wait": true }` (MCP `project_init` с каталогом в `projectPath`). `projectPath` в вызове MCP выполняет одну команду в указанном проекте и текущий не меняет.
 
 ## Информационные базы
 
@@ -25,30 +31,30 @@ description: Операции с платформой 1С в этом проек
 
 | Задача                                | Command ID                                             |
 |---------------------------------------|--------------------------------------------------------|
-| Загрузить конфигурацию из src/cf      | `1c-platform-tools.cf.load`          |
+| Загрузить конфигурацию из исходного кода | `1c-platform-tools.cf.load`          |
 | Загрузить только изменения (git diff) | `1c-platform-tools.cf.loadIncrement` |
 | Загрузить из objlist.txt              | `1c-platform-tools.cf.loadByList`  |
 | Загрузить из 1Cv8.cf                  | `1c-platform-tools.cf.loadFile`           |
-| Выгрузить конфигурацию в src/cf       | `1c-platform-tools.cf.dump`            |
-| Выгрузить изменения в src/cf          | `1c-platform-tools.cf.dumpIncrement`   |
+| Выгрузить конфигурацию в исходный код | `1c-platform-tools.cf.dump`            |
+| Выгрузить изменения в исходный код    | `1c-platform-tools.cf.dumpIncrement`   |
 | Выгрузить в 1Cv8.cf                   | `1c-platform-tools.cf.unload`             |
-| Собрать 1Cv8.cf из src/cf             | `1c-platform-tools.cf.compile`                |
-| Разобрать 1Cv8.cf в src/cf            | `1c-platform-tools.cf.decompile`            |
+| Собрать 1Cv8.cf из исходного кода     | `1c-platform-tools.cf.compile`                |
+| Разобрать 1Cv8.cf в исходный код      | `1c-platform-tools.cf.decompile`            |
 
 ## Расширения
 
 | Задача                          | Command ID                                         |
 |---------------------------------|----------------------------------------------------|
-| Загрузить расширение из src/cfe | `1c-platform-tools.cfe.load`         |
+| Загрузить расширение из исходного кода | `1c-platform-tools.cfe.load`         |
 | Загрузить из objlist.txt        | `1c-platform-tools.cfe.loadByList` |
 | Загрузить из *.cfe              | `1c-platform-tools.cfe.loadFile`         |
-| Выгрузить расширение в src/cfe  | `1c-platform-tools.cfe.dump`           |
+| Выгрузить расширение в исходный код | `1c-platform-tools.cfe.dump`           |
 | Выгрузить в *.cfe               | `1c-platform-tools.cfe.unload`           |
-| Собрать *.cfe из src/cfe        | `1c-platform-tools.cfe.compile`               |
-| Разобрать *.cfe в src/cfe       | `1c-platform-tools.cfe.decompile`           |
+| Собрать *.cfe из исходного кода | `1c-platform-tools.cfe.compile`               |
+| Разобрать *.cfe в исходный код  | `1c-platform-tools.cfe.decompile`           |
 
-Тестовые расширения (YAxUnit и расширение с тестами) лежат отдельно, в `tests/cfe`
-(подкаталог корня тестов `path.tests`), и обслуживаются своими командами: `1c-platform-tools.test.loadExtensions`,
+Тестовые расширения (YAxUnit и расширение с тестами) лежат под каталогом тестов (`tests`, имя задаёт
+настройка `test.directoryName`) и обслуживаются своими командами: `1c-platform-tools.test.loadExtensions`,
 `test.dumpExtensions`, `test.compileExtensions`, `test.decompileExtensions`.
 
 ## Внешние обработки и отчёты
@@ -141,7 +147,7 @@ description: Операции с платформой 1С в этом проек
 
 ## MCP
 
-Если у тебя есть инструменты MCP **mcp-1c-platform-tools**, используй их для тех же операций: загрузка конфигурации — `cf_load`, выгрузка — `cf_dump`, расширения — `cfe_load` / `cfe_dump`, сборка/разбор обработок и отчётов — `epf_compileProc`, `epf_compileReport`, `epf_decompileProc`, `epf_decompileReport` и т.д. **Для зависимостей** — в первую очередь вызывай **deps_install** и **deps_installOscript**; не переходи в терминал с `opm install add`, пока не убедился, что MCP недоступен. В каждый вызов передавай `projectPath` — корень проекта 1С (каталог с `packagedef`). Имена формируются из command ID: убирается префикс, точки → `_`, длинные слова сокращаются (`dependencies` → `deps`, `Processors` → `Procs`). Полный список возвращается сервером при подключении.
+Если у тебя есть инструменты MCP **mcp-1c-platform-tools**, используй их для тех же операций: загрузка конфигурации — `cf_load`, выгрузка — `cf_dump`, расширения — `cfe_load` / `cfe_dump`, сборка/разбор обработок и отчётов — `epf_compileProc`, `epf_compileReport`, `epf_decompileProc`, `epf_decompileReport` и т.д. **Для зависимостей** — в первую очередь вызывай **deps_install** и **deps_installOscript**; не переходи в терминал с `opm install add`, пока не убедился, что MCP недоступен. Без `projectPath` вызов выполняется в текущем проекте. Имена формируются из command ID: убирается префикс, точки → `_`, длинные слова сокращаются (`dependencies` → `deps`, `Processors` → `Procs`). Полный список возвращается сервером при подключении.
 
 ## Дополнительные навыки (Claude Code)
 

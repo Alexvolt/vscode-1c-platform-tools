@@ -9,39 +9,44 @@
 import * as vscode from 'vscode';
 import { readPipelines } from '../../shared/pipelines/pipelineFile';
 import { stepsWord } from '../../shared/pipelines/pipelineTypes';
+import { currentRoot, runWithProject, workspaceFolderOf } from '../../shared/workspaceProjects';
+import { taskProjectRoot } from '../tasks/vrunnerTask';
 
 /** Тип задачи в `tasks.json` */
 export const PIPELINE_TASK_TYPE = '1c-pipeline';
 
 /** Описание задачи пайплайна */
-interface PipelineTaskDefinition extends vscode.TaskDefinition {
+export interface PipelineTaskDefinition extends vscode.TaskDefinition {
 	type: typeof PIPELINE_TASK_TYPE;
 	/** Идентификатор или название цепочки */
 	pipeline: string;
+	/** Корень проекта: абсолютный путь или путь от папки рабочей области задачи */
+	project?: string;
 }
 
 /**
  * Строит задачу для цепочки.
  *
- * @param folder - Папка рабочей области
+ * @param root - Корень проекта, в котором идёт цепочка
  * @param pipelineId - Идентификатор цепочки
  * @param label - Подпись задачи
  * @param detail - Пояснение в списке задач
+ * @param definition - Определение из tasks.json; без него строится своё
  * @returns Задача VS Code
  */
-function buildTask(
-	folder: vscode.WorkspaceFolder,
+export function buildPipelineTask(
+	root: string,
 	pipelineId: string,
 	label: string,
-	detail?: string
+	detail?: string,
+	definition?: PipelineTaskDefinition
 ): vscode.Task {
-	const definition: PipelineTaskDefinition = { type: PIPELINE_TASK_TYPE, pipeline: pipelineId };
 	const task = new vscode.Task(
-		definition,
-		folder,
+		definition ?? { type: PIPELINE_TASK_TYPE, pipeline: pipelineId, project: root },
+		workspaceFolderOf(root) ?? vscode.TaskScope.Workspace,
 		label,
 		'1C: Platform Tools',
-		new vscode.CustomExecution(async () => new PipelineTaskTerminal(pipelineId))
+		new vscode.CustomExecution(async () => new PipelineTaskTerminal(pipelineId, root))
 	);
 	task.detail = detail;
 	return task;
@@ -60,17 +65,22 @@ class PipelineTaskTerminal implements vscode.Pseudoterminal {
 	readonly onDidWrite = this.writeEmitter.event;
 	readonly onDidClose = this.closeEmitter.event;
 
-	constructor(private readonly pipelineId: string) {}
+	constructor(
+		private readonly pipelineId: string,
+		private readonly root: string
+	) {}
 
 	/**
 	 * Запускает цепочку и закрывает задачу по её итогу.
 	 */
 	async open(): Promise<void> {
 		this.writeEmitter.fire(`Пайплайн «${this.pipelineId}»\r\n`);
-		const result = (await vscode.commands.executeCommand('1c-platform-tools.pipelines.run', {
-			pipeline: this.pipelineId,
-			wait: true,
-		})) as { success?: boolean; stdout?: string; stderr?: string } | undefined;
+		const result = (await runWithProject(this.root, () =>
+			vscode.commands.executeCommand('1c-platform-tools.pipelines.run', {
+				pipeline: this.pipelineId,
+				wait: true,
+			})
+		)) as { success?: boolean; stdout?: string; stderr?: string } | undefined;
 
 		const report = (result?.stdout ?? '').split('\n').join('\r\n');
 		if (report !== '') {
@@ -99,19 +109,19 @@ export class PipelineTaskProvider implements vscode.TaskProvider {
 	}
 
 	/**
-	 * Отдаёт задачу на каждую сохранённую цепочку.
+	 * Отдаёт задачу на каждую сохранённую цепочку текущего проекта.
 	 *
 	 * @returns Список задач
 	 */
 	async provideTasks(): Promise<vscode.Task[]> {
-		const folder = vscode.workspace.workspaceFolders?.[0];
-		if (!folder) {
+		const root = currentRoot();
+		if (root === undefined) {
 			return [];
 		}
-		const pipelines = await readPipelines(folder.uri.fsPath);
+		const pipelines = await readPipelines(root);
 		return pipelines.map((pipeline) =>
-			buildTask(
-				folder,
+			buildPipelineTask(
+				root,
 				pipeline.id,
 				pipeline.name,
 				pipeline.description ?? `${pipeline.nodes.length} ${stepsWord(pipeline.nodes.length)}`
@@ -127,10 +137,10 @@ export class PipelineTaskProvider implements vscode.TaskProvider {
 	 */
 	resolveTask(task: vscode.Task): vscode.Task | undefined {
 		const definition = task.definition as PipelineTaskDefinition;
-		const folder = vscode.workspace.workspaceFolders?.[0];
-		if (!folder || typeof definition.pipeline !== 'string' || definition.pipeline === '') {
+		const root = taskProjectRoot(task.scope, definition.project);
+		if (root === undefined || typeof definition.pipeline !== 'string' || definition.pipeline === '') {
 			return undefined;
 		}
-		return buildTask(folder, definition.pipeline, task.name, task.detail);
+		return buildPipelineTask(root, definition.pipeline, task.name, task.detail, definition);
 	}
 }

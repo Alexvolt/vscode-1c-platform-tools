@@ -9,6 +9,7 @@ import { parseBslTestModule } from '../parsers/bslTestParser';
 import { resolveConfigPath } from '../projectTestConfig';
 import { normalizeGlobBase, directorySegments } from './adapterUtils';
 import { resolveOnescriptTestsPath } from '../onescriptTestsPath';
+import { projectConfiguration } from '../../../shared/projectConfiguration';
 
 /** Раннер тестов OneScript */
 type OneScriptRunner = '1testrunner' | 'oneunit';
@@ -48,12 +49,12 @@ export class OneScriptAdapter implements TestFrameworkAdapter {
 	public async isEnabled(): Promise<boolean> {
 		// Конфликта с xUnit нет: .os-файлы всегда OneScript,
 		// тесты xUnit для 1С это внешние обработки
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(this.vrunner.getWorkspaceRoot());
 		return config.get<boolean>('test.frameworks.onescript', true);
 	}
 
 	public getIncludeGlobs(): string[] {
-		const base = normalizeGlobBase(resolveOnescriptTestsPath());
+		const base = normalizeGlobBase(resolveOnescriptTestsPath(this.vrunner.getWorkspaceRoot()));
 		return [`${base}/**/*.os`];
 	}
 
@@ -71,7 +72,7 @@ export class OneScriptAdapter implements TestFrameworkAdapter {
 	}
 
 	public describeFileLocation(fileUri: vscode.Uri, workspaceRoot: string) {
-		return { segments: directorySegments(fileUri.fsPath, resolveOnescriptTestsPath(), workspaceRoot) };
+		return { segments: directorySegments(fileUri.fsPath, resolveOnescriptTestsPath(workspaceRoot), workspaceRoot) };
 	}
 
 	public async buildRunPlan(unit: RunUnit, _reportDir: string): Promise<AdapterRunPlan> {
@@ -224,8 +225,8 @@ export class OneScriptAdapter implements TestFrameworkAdapter {
 	 * проекта) → локальная установка в oscript_modules/bin → PATH.
 	 */
 	private resolveRunner(): { kind: OneScriptRunner; command: string } {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
 		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+		const config = projectConfiguration(workspaceRoot);
 		const runnerSetting = config.get<string>('test.onescriptRunner', 'auto');
 		const customPath = config.get<string>('test.path.onescriptRunner', '').trim();
 

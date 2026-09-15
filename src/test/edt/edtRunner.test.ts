@@ -1,7 +1,13 @@
 import * as assert from 'node:assert';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { buildEdtArgs, edtStagingRoot, edtWorkspaceDir, type EdtSettings } from '../../features/edt/edtRunner';
+import {
+	buildEdtArgs,
+	edtStagingRoot,
+	edtWorkspaceDir,
+	explainEdtFailure,
+	type EdtSettings,
+} from '../../features/edt/edtRunner';
 
 /** Настройки по умолчанию для сборки вызова. */
 function settings(overrides: Partial<EdtSettings> = {}): EdtSettings {
@@ -80,5 +86,35 @@ suite('запуск команд EDT', () => {
 			path.join('C:/проект', 'едт')
 		);
 		assert.strictEqual(edtWorkspaceDir('C:/проект', 'build', settings({ workspace: absolute })), absolute);
+	});
+});
+
+suite('причина неудачной команды 1cedtcli', () => {
+	// Строки вывода 1С:EDT 2026.1
+	test('занятая рабочая область', () => {
+		const output =
+			"Не удалось запустить 1C:EDT CLI по причине того, что рабочая область 'C:\\проект\\build\\edt-workspace' уже используется другим приложением.";
+
+		assert.ok(explainEdtFailure(output)?.includes('Рабочая область 1С:EDT занята'));
+		assert.ok(
+			explainEdtFailure(
+				"Could not launch 1C:EDT CLI because the associated workspace 'C:\\ws' is currently in use by another application."
+			)?.includes('занята')
+		);
+	});
+
+	test('проект уже подключён или его нет', () => {
+		assert.strictEqual(
+			explainEdtFailure('edtsh: Проект с именем ext-edt уже существует в рабочей области'),
+			'Проект ext-edt уже подключён к рабочей области 1С:EDT.'
+		);
+		assert.strictEqual(
+			explainEdtFailure('Project not found: НетТакогоПроекта\n'),
+			'Проекта НетТакогоПроекта нет в рабочей области 1С:EDT.'
+		);
+	});
+
+	test('нераспознанный вывод не объясняется', () => {
+		assert.strictEqual(explainEdtFailure('java.lang.OutOfMemoryError: Java heap space'), undefined);
 	});
 });

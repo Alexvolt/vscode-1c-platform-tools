@@ -17,6 +17,8 @@ import type { SourceFormat } from '../../shared/projectLayout';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { logger } from '../../shared/logger';
 import {
+	EDT_NOT_FOUND_MESSAGE,
+	edtEditorTaskDefinition,
 	edtProjectName,
 	edtWorkspaceDir,
 	ensureProjectRegistered,
@@ -186,7 +188,7 @@ export async function createEdtProject(context: vscode.ExtensionContext): Promis
 	const emptyDump = path.join(os.tmpdir(), `edt-empty-${Date.now()}`);
 	try {
 		await fs.mkdir(emptyDump, { recursive: true });
-		const runtime = await ensureMdSparrowRuntime(context);
+		const runtime = await ensureMdSparrowRuntime(context, workspaceRoot);
 		const created = await runMdSparrowParamsMutation(
 			runtime,
 			// Версию формата задаёт выгрузка-заготовка: 1С:EDT берёт из неё версию платформы
@@ -401,7 +403,11 @@ export async function openInEdt(): Promise<void> {
 	}
 
 	const installation = resolveEdt(readEdtSettings());
-	if (!installation?.gui) {
+	if (!installation) {
+		void vscode.window.showErrorMessage(EDT_NOT_FOUND_MESSAGE);
+		return;
+	}
+	if (!installation.gui) {
 		void vscode.window.showErrorMessage(
 			'Графический клиент 1С:EDT не найден рядом с 1cedtcli: проверьте настройку каталога установки.'
 		);
@@ -413,7 +419,7 @@ export async function openInEdt(): Promise<void> {
 		name: `EDT ${installation.version}`,
 		command: buildProcessCommand(installation.gui, ['-data', target.workspaceDir]),
 		cwd: target.workspaceRoot,
-		definition: { type: '1c-edt', command: 'open' },
+		definition: edtEditorTaskDefinition(target.workspaceDir),
 	});
 	await vscode.tasks.executeTask(task);
 	log.info(`Открываю EDT ${installation.version}: ${target.workspaceDir}`);

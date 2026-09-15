@@ -18,13 +18,13 @@ import { cfeStem, findExtension, type ExtensionScope } from '../features/extensi
 import { BUILD_SUBDIRS } from '../shared/pathDefaults';
 import { isTestPath } from '../shared/projectLayout';
 import type { VRunnerIntent } from '../shared/vrunnerCli';
+import { currentRoot } from '../shared/workspaceProjects';
+import { projectRelativePath } from './projectScope';
 
+/** Путь артефакта относительно проекта, в котором выполняется команда. */
 function getRelativePath(uri: vscode.Uri): string {
-	const folders = vscode.workspace.workspaceFolders;
-	if (!folders?.length) {
-		return uri.fsPath;
-	}
-	return vscode.workspace.asRelativePath(uri, false).replaceAll('\\', '/');
+	const root = currentRoot();
+	return root === undefined ? uri.fsPath : projectRelativePath(root, uri.fsPath);
 }
 
 /**
@@ -45,7 +45,7 @@ export class ArtifactCommands extends BaseCommand {
 		const builtTests = path.join(this.vrunner.getOutPath(), BUILD_SUBDIRS.testsCfe)
 			.replaceAll('\\', '/')
 			.replace(/^\.?\//, '');
-		const workspaceRoot = vscode.workspace.getWorkspaceFolder(artifactUri)?.uri.fsPath;
+		const workspaceRoot = currentRoot();
 		return (
 			rel === builtTests ||
 			rel.startsWith(`${builtTests}/`) ||
@@ -86,9 +86,7 @@ export class ArtifactCommands extends BaseCommand {
 			title,
 			filters,
 		});
-		return fileUri
-			? vscode.workspace.asRelativePath(fileUri, false).replaceAll('\\', '/')
-			: undefined;
+		return fileUri ? projectRelativePath(workspaceRoot, fileUri.fsPath) : undefined;
 	}
 
 	/** Собрать конфигурацию из исходников. */

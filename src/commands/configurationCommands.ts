@@ -13,13 +13,11 @@ import {
 	getBuildConfigurationCommandName,
 	getDecompileConfigurationCommandName,
 	getLoadConfigurationIncrementFromSrcCommandName,
-	getLoadConfigurationFromFilesByListCommandName,
-	getConvertSourcesCommandName
+	getLoadConfigurationFromFilesByListCommandName
 } from '../features/tools/commandNames';
 import { configurationScope } from '../shared/activeConfiguration';
-import { convertSourcesWithEdt } from '../features/edt/edtConvert';
-import { resolveEdt } from '../features/edt/edtRunner';
-import { VRUNNER_FEATURES, isAtLeast } from '../shared/vrunnerVersion';
+import { CONVERTED_CONFIGURATION_DIR, convertSourcesWithEdt } from '../features/edt/edtConvert';
+import { EDT_NOT_FOUND_MESSAGE, readEdtSettings, resolveEdt } from '../features/edt/edtRunner';
 import {
 	checkVersionFileExists,
 	handleMissingVersionFile
@@ -267,56 +265,42 @@ export class ConfigurationCommands extends BaseCommand {
 	}
 
 	/**
-	 * Конвертирует исходники конфигурации между форматами EDT и конфигуратора.
+	 * Конвертирует исходный код конфигурации между форматами EDT и конфигуратора.
 	 *
-	 * Формат источника определяет сам vanessa-runner по маркерам каталога,
-	 * результат пишется в противоположном формате.
+	 * Конвертирует сама 1С:EDT: формат источника известен из раскладки, результат
+	 * пишется в другом формате.
 	 *
 	 * @param opts - Опции выполнения
 	 */
 	async convertSources(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
-		// Раннер 3 конвертирует сам, а до него это делает установленная EDT:
-		// внутри раннер всё равно вызывает 1cedtcli
-		const version = await this.vrunner.getVRunnerVersion();
-		const runnerConverts = version === undefined || isAtLeast(version, VRUNNER_FEATURES.edtSources);
-		if (!runnerConverts && !resolveEdt()) {
-			return this.reportUnavailable(
-				'Конвертация исходников требует vanessa-runner 3.0.0-rc8 или установленной 1С:EDT.',
-				opts
-			);
-		}
-
 		const workspaceRoot = this.ensureWorkspace();
 		if (!workspaceRoot) {
 			return;
 		}
-
-		const scope = await configurationScope(workspaceRoot);
-		const source = scope.configuration;
-		if (!source) {
-			return this.reportUnavailable('В рабочей области нет исходников конфигурации.', opts);
+		if (!resolveEdt(readEdtSettings(workspaceRoot))) {
+			return this.reportUnavailable(EDT_NOT_FOUND_MESSAGE, opts);
 		}
 
-		const relativeSource = path.relative(workspaceRoot, source.dir).split(path.sep).join('/');
-		const suffix = source.format === 'edt' ? 'cf-designer' : 'cf-edt';
+		const source = (await configurationScope(workspaceRoot)).configuration;
+		if (!source) {
+			return this.reportUnavailable('В рабочей области нет исходного кода конфигурации.', opts);
+		}
+
+		const suffix = source.format === 'edt' ? 'cf-designer' : CONVERTED_CONFIGURATION_DIR;
 		const defaultOut = path.join(this.vrunner.getOutPath(), suffix);
 		const outputPath = opts?.wait === true
 			? defaultOut
-			: await this.pickOutputPath(defaultOut, 'Каталог для конвертированных исходников');
+			: await this.pickOutputPath(defaultOut, 'Каталог для конвертированного исходного кода');
 		if (!outputPath) {
 			return;
 		}
 
-		const commandName = getConvertSourcesCommandName();
-		if (!runnerConverts) {
-			await convertSourcesWithEdt(workspaceRoot, source, path.resolve(workspaceRoot, outputPath));
-			return;
-		}
-
-		return this.runIntent(
-			{ kind: 'cf.convert', src: relativeSource || undefined, out: outputPath },
-			opts, commandName.title, outputPath, commandName.id
-		);
+		const exitCode = await convertSourcesWithEdt(workspaceRoot, {
+			sourceDir: source.dir,
+			format: source.format,
+			outputPath: path.resolve(workspaceRoot, outputPath),
+		});
+		return this.edtCommandResult(exitCode, outputPath, opts);
 	}
 
 	async decompile(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {

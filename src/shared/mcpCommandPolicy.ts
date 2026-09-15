@@ -80,6 +80,11 @@ const WITHOUT_SYNC_RESULT_PREFIXES = [
 	`${COMMAND_PREFIX}tasks.`,
 ];
 
+/** Команды, которые исход операции возвращают, хотя их префикс в списке выше. */
+const WITH_SYNC_RESULT_EXACT = [
+	`${COMMAND_PREFIX}dependencies.initializePackagedef`,
+];
+
 /**
  * Команды, которые VS Code заводит сам для представлений и их контейнера:
  * к работе с 1С отношения не имеют, а в списке инструментов выглядят как
@@ -104,6 +109,32 @@ const HIDDEN_EXACT = [
 	// Обновление внешних компонентов: спрашивает список галочками и загружает
 	// выбранное. Ответить на такой вопрос агент не может
 	`${COMMAND_PREFIX}components.update`,
+	// Действия над строкой вида проектов; packagedef агент создаёт командой project.initialize
+	`${COMMAND_PREFIX}project.makeCurrent`,
+	`${COMMAND_PREFIX}project.separateConfiguration`,
+	`${COMMAND_PREFIX}project.refresh`,
+	`${COMMAND_PREFIX}project.openInNewWindow`,
+	`${COMMAND_PREFIX}project.revealInExplorer`,
+	`${COMMAND_PREFIX}project.openTerminal`,
+	`${COMMAND_PREFIX}project.copyPath`,
+];
+
+/**
+ * Команды окна: список проектов и выбор текущего. Выполняются без корня вызова,
+ * projectPath к ним не применяется.
+ */
+const WINDOW_COMMANDS = [
+	`${COMMAND_PREFIX}project.list`,
+	`${COMMAND_PREFIX}project.select`,
+];
+
+/**
+ * Команды инициализации проекта: projectPath у них каталог, в котором создаётся
+ * packagedef, а не проект вызова.
+ */
+const DIRECTORY_COMMANDS = [
+	`${COMMAND_PREFIX}project.initialize`,
+	`${COMMAND_PREFIX}dependencies.initializePackagedef`,
 ];
 
 /**
@@ -127,5 +158,28 @@ export function isCommandExposedToMcp(commandId: string): boolean {
  * @returns true, если команда выполняется синхронно и возвращает результат
  */
 export function commandSupportsWait(commandId: string): boolean {
-	return !WITHOUT_SYNC_RESULT_PREFIXES.some((prefix) => commandId.startsWith(prefix));
+	return (
+		WITH_SYNC_RESULT_EXACT.includes(commandId) ||
+		!WITHOUT_SYNC_RESULT_PREFIXES.some((prefix) => commandId.startsWith(prefix))
+	);
+}
+
+/**
+ * Определяет, выполняется ли команда в проекте вызова.
+ *
+ * @param commandId - Идентификатор команды расширения
+ * @returns false у команд окна: им не нужны ни текущий проект, ни projectPath
+ */
+export function commandRunsInProject(commandId: string): boolean {
+	return !WINDOW_COMMANDS.includes(commandId);
+}
+
+/**
+ * Определяет, указывает ли projectPath команды каталог, с которым она работает.
+ *
+ * @param commandId - Идентификатор команды расширения
+ * @returns true у команд инициализации проекта
+ */
+export function commandTargetsDirectory(commandId: string): boolean {
+	return DIRECTORY_COMMANDS.includes(commandId);
 }

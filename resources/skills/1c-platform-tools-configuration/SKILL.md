@@ -11,16 +11,18 @@ description: Загрузка и выгрузка конфигурации 1С. 
 
 | Задача                                | Command ID                                             |
 |---------------------------------------|--------------------------------------------------------|
-| Загрузить конфигурацию из src/cf      | `1c-platform-tools.cf.load`          |
+| Загрузить конфигурацию из исходного кода | `1c-platform-tools.cf.load`          |
 | Обновить конфигурацию в ИБ            | `1c-platform-tools.infobase.updateDb`            |
 | Загрузить только изменения (git diff) | `1c-platform-tools.cf.loadIncrement` |
 | Загрузить из objlist.txt              | `1c-platform-tools.cf.loadByList`  |
 | Загрузить из 1Cv8.cf                  | `1c-platform-tools.cf.loadFile`           |
-| Выгрузить конфигурацию в src/cf       | `1c-platform-tools.cf.dump`            |
-| Выгрузить изменения в src/cf          | `1c-platform-tools.cf.dumpIncrement`   |
+| Выгрузить конфигурацию в исходный код | `1c-platform-tools.cf.dump`            |
+| Выгрузить изменения в исходный код    | `1c-platform-tools.cf.dumpIncrement`   |
 | Выгрузить в 1Cv8.cf                   | `1c-platform-tools.cf.unload`             |
-| Собрать 1Cv8.cf из src/cf             | `1c-platform-tools.cf.compile`                |
-| Разобрать 1Cv8.cf в src/cf            | `1c-platform-tools.cf.decompile`            |
+| Собрать 1Cv8.cf из исходного кода     | `1c-platform-tools.cf.compile`                |
+| Разобрать 1Cv8.cf в исходный код      | `1c-platform-tools.cf.decompile`            |
+
+Исходный код конфигурации расширение находит в проекте само: выгрузку конфигуратора или проект 1С:EDT. Загрузка изменений, выгрузка изменений и загрузка по objlist.txt есть только у выгрузки конфигуратора.
 
 ## Загрузка изменений (git diff) без интерактива
 
@@ -28,11 +30,11 @@ description: Загрузка и выгрузка конфигурации 1С. 
 
 - MCP: `cf_loadInc` с параметром `sha` (пустая строка — полная загрузка), либо Execute Command `1c-platform-tools.cf.loadIncrement` с тем же аргументом.
 
-SHA — коммит последней загрузки: изменения возьмутся от него до текущего состояния. Текущее значение хранится в `src/cf/lastUploadedCommit.txt`. Обычно нужен SHA HEAD на момент прошлой загрузки; получить текущий — `git rev-parse HEAD`.
+SHA — коммит последней загрузки: изменения возьмутся от него до текущего состояния. Текущее значение хранится в `lastUploadedCommit.txt` в каталоге исходного кода конфигурации. Обычно нужен SHA HEAD на момент прошлой загрузки; получить текущий — `git rev-parse HEAD`.
 
 ## MCP (mcp-1c-platform-tools)
 
-Если доступны инструменты MCP, используй их для тех же операций: `cf_load`, `infobase_updateDb` (только обновление БД), `cf_dump`, `cf_loadInc`, `cf_dumpInc`, `cf_loadByList`, `cf_loadFile`, `cf_unload`, `cf_compile`, `cf_decompile` и т.д. **Всегда передавай параметр `projectPath`** — корень проекта 1С (каталог с `packagedef`).
+Если доступны инструменты MCP, используй их для тех же операций: `cf_load`, `infobase_updateDb` (только обновление БД), `cf_dump`, `cf_loadInc`, `cf_dumpInc`, `cf_loadByList`, `cf_loadFile`, `cf_unload`, `cf_compile`, `cf_decompile` и т.д. Без `projectPath` команды выполняются в текущем проекте.
 
 ## Правило
 

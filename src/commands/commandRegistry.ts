@@ -22,8 +22,14 @@ import type { CommandExecutionOptions, StructuredCommandResult } from '../shared
 import { isAgentOptions, agentInteractiveError, uiOnlyHandler } from '../shared/agentGate';
 import { askGithubToken, forgetGithubToken } from '../shared/githubToken';
 import { ensureWorkspaceTrusted } from '../shared/workspaceTrust';
+import { inCurrentProject, inProjectOf } from './projectScope';
 
 const log = logger.scope('commands');
+
+/** Команда, которая выполняется в проекте, текущем на момент вызова. */
+function registerProjectCommand<A extends unknown[], R>(id: string, handler: (...args: A) => R): vscode.Disposable {
+	return vscode.commands.registerCommand(id, inCurrentProject(handler));
+}
 
 /**
  * Объект со всеми командами расширения
@@ -61,7 +67,7 @@ function registerFromEditor(
 	return vscode.commands.registerCommand(id, async () => {
 		const uri = getActiveEditorResourceUri();
 		if (uri) {
-			await handler(uri);
+			await inProjectOf(uri, () => handler(uri));
 		}
 	});
 }
@@ -73,7 +79,7 @@ function registerVRunnerCommand(
 	id: string,
 	handler: (opts?: CommandExecutionOptions) => Promise<StructuredCommandResult | void>
 ): vscode.Disposable {
-	return vscode.commands.registerCommand(id, async (opts?: CommandExecutionOptions) => {
+	return registerProjectCommand(id, async (opts?: CommandExecutionOptions) => {
 		if (!ensureWorkspaceTrusted('команды 1С')) {
 			return;
 		}
@@ -96,7 +102,7 @@ export function registerCommands(
 
 	// Команды навыков для AI
 	const skillsCommands = [
-		vscode.commands.registerCommand('1c-platform-tools.mcp.configureCursor', async () => {
+		registerProjectCommand('1c-platform-tools.mcp.configureCursor', async () => {
 			// Команда живёт в расширении 1C: Platform Tools MCP: оно пишет
 			// .cursor/mcp.json с актуальным путём к своему серверу
 			const mcpExtension = vscode.extensions.getExtension('yellow-hammer.mcp-1c-platform-tools');
@@ -117,13 +123,13 @@ export function registerCommands(
 			await mcpExtension.activate();
 			await vscode.commands.executeCommand('mcp-1c-platform-tools.configureCursor');
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.skills.addDevSkills', (destination?: unknown) => {
+		registerProjectCommand('1c-platform-tools.skills.addDevSkills', (destination?: unknown) => {
 			if (isAgentOptions(destination)) {
 				return agentInteractiveError('Передайте назначение строкой: claude, cursor, copilot или путь к папке.');
 			}
 			void commands.skills.addDevSkills(context, typeof destination === 'string' ? destination : undefined);
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.skills.add1cpt', (destination?: unknown) => {
+		registerProjectCommand('1c-platform-tools.skills.add1cpt', (destination?: unknown) => {
 			if (isAgentOptions(destination)) {
 				return agentInteractiveError('Передайте назначение строкой: claude, cursor, copilot или путь к папке.');
 			}
@@ -134,11 +140,11 @@ export function registerCommands(
 
 	// Команды служебных файлов
 	const serviceFilesCommands = [
-		vscode.commands.registerCommand('1c-platform-tools.serviceFiles.create', uiOnlyHandler(
+		registerProjectCommand('1c-platform-tools.serviceFiles.create', uiOnlyHandler(
 			'Используйте serviceFiles.createRecommendedSet, createGitignore, createGitattributes, createEnvJson или serviceFiles.ensure с id файла.',
 			() => commands.serviceFiles.pickAndCreate()
 		)),
-		vscode.commands.registerCommand('1c-platform-tools.serviceFiles.ensure', (specId?: unknown, opts?: unknown) => {
+		registerProjectCommand('1c-platform-tools.serviceFiles.ensure', (specId?: unknown, opts?: unknown) => {
 			if (typeof specId === 'string') {
 				// второй аргумент-объект — агентный вызов: без окна выбора секций
 				return commands.serviceFiles.ensure(specId, isAgentOptions(opts));
@@ -148,16 +154,16 @@ export function registerCommands(
 			}
 			return commands.serviceFiles.pickAndCreate();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.serviceFiles.createGitignore', () =>
+		registerProjectCommand('1c-platform-tools.serviceFiles.createGitignore', () =>
 			commands.serviceFiles.createGitignore()
 		),
-		vscode.commands.registerCommand('1c-platform-tools.serviceFiles.createGitattributes', () =>
+		registerProjectCommand('1c-platform-tools.serviceFiles.createGitattributes', () =>
 			commands.serviceFiles.createGitattributes()
 		),
-		vscode.commands.registerCommand('1c-platform-tools.serviceFiles.createEnvJson', () =>
+		registerProjectCommand('1c-platform-tools.serviceFiles.createEnvJson', () =>
 			commands.serviceFiles.createEnvJson()
 		),
-		vscode.commands.registerCommand('1c-platform-tools.serviceFiles.createRecommendedSet', () =>
+		registerProjectCommand('1c-platform-tools.serviceFiles.createRecommendedSet', () =>
 			commands.serviceFiles.createRecommendedSet()
 		),
 	];
@@ -218,13 +224,13 @@ export function registerCommands(
 		registerVRunnerCommand('1c-platform-tools.pipelines.run', (opts) =>
 			commands.pipelines.run(opts)
 		),
-		vscode.commands.registerCommand('1c-platform-tools.pipelines.openEditor', (pipelineId?: string) =>
+		registerProjectCommand('1c-platform-tools.pipelines.openEditor', (pipelineId?: string) =>
 			commands.pipelines.openEditor(typeof pipelineId === 'string' ? pipelineId : undefined)
 		),
-		vscode.commands.registerCommand('1c-platform-tools.pipelines.addTemplates', () =>
+		registerProjectCommand('1c-platform-tools.pipelines.addTemplates', () =>
 			commands.pipelines.addTemplates()
 		),
-		vscode.commands.registerCommand('1c-platform-tools.hooks.openEditor', (commandId?: string) =>
+		registerProjectCommand('1c-platform-tools.hooks.openEditor', (commandId?: string) =>
 			commands.hooks.openEditor(typeof commandId === 'string' ? commandId : undefined)
 		),
 	];
@@ -323,57 +329,58 @@ export function registerCommands(
 	// агентный вызов отклоняется гейтом до открытия окон
 	const supportUiHint = 'Мастер поддержки/поставки выполняется пользователем в VS Code.';
 	const supportCommands = [
-		vscode.commands.registerCommand('1c-platform-tools.support.updateCfg', uiOnlyHandler(supportUiHint, () => {
+		registerProjectCommand('1c-platform-tools.support.updateCfg', uiOnlyHandler(supportUiHint, () => {
 			commands.support.updateCfg();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.support.disableCfgSupport', uiOnlyHandler(supportUiHint, () => {
+		registerProjectCommand('1c-platform-tools.support.disableCfgSupport', uiOnlyHandler(supportUiHint, () => {
 			commands.support.disableCfgSupport();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.support.createDeliveryDescriptionFile', uiOnlyHandler(supportUiHint, () => {
+		registerProjectCommand('1c-platform-tools.support.createDeliveryDescriptionFile', uiOnlyHandler(supportUiHint, () => {
 			commands.support.createDeliveryDescriptionFile();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.support.createTemplateListFile', uiOnlyHandler(supportUiHint, () => {
+		registerProjectCommand('1c-platform-tools.support.createTemplateListFile', uiOnlyHandler(supportUiHint, () => {
 			commands.support.createTemplateListFile();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.support.createDistributivePackage', uiOnlyHandler(supportUiHint, () => {
+		registerProjectCommand('1c-platform-tools.support.createDistributivePackage', uiOnlyHandler(supportUiHint, () => {
 			commands.support.createDistributivePackage();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.support.createDistributionFiles', uiOnlyHandler(supportUiHint, () => {
+		registerProjectCommand('1c-platform-tools.support.createDistributionFiles', uiOnlyHandler(supportUiHint, () => {
 			commands.support.createDistributionFiles();
 		}))
 	];
 
 	// Команды зависимостей
 	const dependenciesCommands = [
+		// Создают проект и делают его текущим: корень вызова не закрепляется
 		vscode.commands.registerCommand('1c-platform-tools.dependencies.initializeProjectStructure', () => {
 			commands.dependencies.initializeProjectStructure();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.dependencies.initializePackagedef', () => {
-			commands.dependencies.initializePackagedef();
-		}),
+		vscode.commands.registerCommand('1c-platform-tools.dependencies.initializePackagedef', (arg?: unknown, opts?: unknown) =>
+			commands.dependencies.initializePackagedef(arg, opts)
+		),
 		vscode.commands.registerCommand('1c-platform-tools.projects.create', () => {
 			commands.dependencies.createProjectFromWelcome(context);
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.dependencies.setupGit', uiOnlyHandler('Мастер настройки git выполняется пользователем; для агента настройте git командами git config.', () => {
+		registerProjectCommand('1c-platform-tools.dependencies.setupGit', uiOnlyHandler('Мастер настройки git выполняется пользователем; для агента настройте git командами git config.', () => {
 			commands.dependencies.setupGit();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.dependencies.installOscript', () => {
+		registerProjectCommand('1c-platform-tools.dependencies.installOscript', () => {
 			commands.dependencies.installOscript();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.dependencies.updateOpm', () => {
+		registerProjectCommand('1c-platform-tools.dependencies.updateOpm', () => {
 			commands.dependencies.updateOpm();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.dependencies.install', () => {
+		registerProjectCommand('1c-platform-tools.dependencies.install', () => {
 			commands.dependencies.installDependencies();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.dependencies.remove', () => {
+		registerProjectCommand('1c-platform-tools.dependencies.remove', () => {
 			commands.dependencies.removeDependencies();
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.components.setGithubToken', uiOnlyHandler(
+		registerProjectCommand('1c-platform-tools.components.setGithubToken', uiOnlyHandler(
 			'Токен вводит пользователь в поле с маскировкой; агенту секрет не передаётся.',
 			() => askGithubToken()
 		)),
-		vscode.commands.registerCommand('1c-platform-tools.components.forgetGithubToken', () => {
+		registerProjectCommand('1c-platform-tools.components.forgetGithubToken', () => {
 			void forgetGithubToken();
 		})
 	];
@@ -433,75 +440,47 @@ export function registerCommands(
 	// агентный вызов отклоняется гейтом
 	const setVersionUiHint = 'Версия запрашивается в окне VS Code; выполняется пользователем.';
 	const setVersionCommands = [
-		vscode.commands.registerCommand('1c-platform-tools.cf.setVersion', uiOnlyHandler(setVersionUiHint, () => {
+		registerProjectCommand('1c-platform-tools.cf.setVersion', uiOnlyHandler(setVersionUiHint, () => {
 			commands.setVersion.setVersionConfiguration();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.cfe.setVersion', uiOnlyHandler(setVersionUiHint, () => {
+		registerProjectCommand('1c-platform-tools.cfe.setVersion', uiOnlyHandler(setVersionUiHint, () => {
 			commands.setVersion.setVersionExtension();
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.epf.setVersionReport', uiOnlyHandler(setVersionUiHint, (reportName?: unknown) => {
+		registerProjectCommand('1c-platform-tools.epf.setVersionReport', uiOnlyHandler(setVersionUiHint, (reportName?: unknown) => {
 			commands.setVersion.setVersionReport(typeof reportName === 'string' ? reportName : undefined);
 		})),
-		vscode.commands.registerCommand('1c-platform-tools.epf.setVersionProcessor', uiOnlyHandler(setVersionUiHint, (processorName?: unknown) => {
+		registerProjectCommand('1c-platform-tools.epf.setVersionProcessor', uiOnlyHandler(setVersionUiHint, (processorName?: unknown) => {
 			commands.setVersion.setVersionProcessor(typeof processorName === 'string' ? processorName : undefined);
 		}))
 	];
 
 
+	// Узел артефакта выполняется в проекте своего файла, выбор проекта не меняется
+	const registerArtifactCommand = (id: string, handler: (uri: vscode.Uri) => Promise<void>): vscode.Disposable =>
+		vscode.commands.registerCommand(id, (element: vscode.TreeItem) => {
+			const uri = element.resourceUri;
+			if (uri) {
+				void inProjectOf(uri, () => handler(uri));
+			}
+		});
 	const artifactCommands = [
 		vscode.commands.registerCommand('1c-platform-tools.artifacts.open', (element: vscode.TreeItem) => {
 			const openUri =
 				(element as vscode.TreeItem & { openTargetUri?: vscode.Uri }).openTargetUri ??
 				element.resourceUri;
 			if (openUri) {
-				void commands.artifact.open(openUri);
+				void inProjectOf(openUri, () => commands.artifact.open(openUri));
 			}
 		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.compileConfiguration', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.buildConfiguration(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.decompileConfiguration', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.decompileConfiguration(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.compileExtension', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.buildExtension(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.decompileExtension', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.decompileExtension(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.compileProcessor', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.buildProcessor(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.decompileProcessor', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.decompileProcessor(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.compileReport', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.buildReport(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.decompileReport', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.decompileReport(element.resourceUri);
-			}
-		}),
-		vscode.commands.registerCommand('1c-platform-tools.artifacts.delete', (element: vscode.TreeItem) => {
-			if (element.resourceUri) {
-				void commands.artifact.delete(element.resourceUri);
-			}
-		}),
+		registerArtifactCommand('1c-platform-tools.artifacts.compileConfiguration', (uri) => commands.artifact.buildConfiguration(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.decompileConfiguration', (uri) => commands.artifact.decompileConfiguration(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.compileExtension', (uri) => commands.artifact.buildExtension(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.decompileExtension', (uri) => commands.artifact.decompileExtension(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.compileProcessor', (uri) => commands.artifact.buildProcessor(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.decompileProcessor', (uri) => commands.artifact.decompileProcessor(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.compileReport', (uri) => commands.artifact.buildReport(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.decompileReport', (uri) => commands.artifact.decompileReport(uri)),
+		registerArtifactCommand('1c-platform-tools.artifacts.delete', (uri) => commands.artifact.delete(uri)),
 		registerFromEditor('1c-platform-tools.artifacts.decompileConfigurationFromEditor', (u) =>
 			commands.artifact.decompileConfiguration(u)
 		),
@@ -518,7 +497,7 @@ export function registerCommands(
 
 	// Команда редактирования env.json
 	const vrunnerManager = VRunnerManager.getInstance();
-	const envEditCommand = vscode.commands.registerCommand('1c-platform-tools.env.editSettingsFile', async () => {
+	const envEditCommand = registerProjectCommand('1c-platform-tools.env.editSettingsFile', async () => {
 		const workspaceRoot = vrunnerManager.getWorkspaceRoot();
 		if (!workspaceRoot) {
 			log.warn('Команда env.edit вызвана без открытой рабочей области');

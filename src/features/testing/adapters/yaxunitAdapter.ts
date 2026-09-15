@@ -11,6 +11,7 @@ import { DiscoveredFile } from '../parsers/parserTypes';
 import { parseBslTestModule } from '../parsers/bslTestParser';
 import { resolveConfigPath, yaxunitSectionFromEnv, type YaxunitProfileSection } from '../projectTestConfig';
 import { DEFAULT_TESTING } from '../../../shared/pathDefaults';
+import { projectConfiguration } from '../../../shared/projectConfiguration';
 import type { SettingsSchema } from '../../../shared/envProfiles';
 import type { YaxunitFilter } from '../../../shared/vrunnerCli';
 
@@ -46,7 +47,7 @@ export class YaxunitAdapter implements TestFrameworkAdapter {
 	private roots: SourceRoot[] = [];
 
 	public async isEnabled(): Promise<boolean> {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		const config = projectConfiguration(this.vrunner.getWorkspaceRoot());
 		return config.get<boolean>('test.frameworks.yaxunit', true);
 	}
 
@@ -257,8 +258,7 @@ export class YaxunitAdapter implements TestFrameworkAdapter {
 		if (!workspaceRoot) {
 			return schema === 'v3' ? undefined : {};
 		}
-		const configured = vscode.workspace
-			.getConfiguration('1c-platform-tools')
+		const configured = projectConfiguration(workspaceRoot)
 			.get<string>('test.path.yaxunitConfig', DEFAULT_TESTING.yaxunitConfigPath);
 		const configPath = resolveConfigPath(profile.configPath ?? configured, workspaceRoot);
 		try {

@@ -11,7 +11,8 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { VRunnerManager, type SettingsFileState } from '../../shared/vrunnerManager';
 import { activeProfileLabel, LOCAL_OVERRIDES_FILE } from '../../shared/envProfiles';
-import { configurationScope, onDidChangeActiveConfiguration } from '../../shared/activeConfiguration';
+import { configurationScope } from '../../shared/activeConfiguration';
+import { onDidChangeCurrentProject } from '../../shared/workspaceProjects';
 import { edtProjectName, readEdtSettings, resolveEdt } from '../edt/edtRunner';
 
 /** Элемент плашки профиля. */
@@ -45,31 +46,45 @@ export class LaunchProfileViewProvider implements vscode.TreeDataProvider<vscode
 	private readonly disposables: vscode.Disposable[] = [];
 	/** Проект активной конфигурации, если она в формате 1С:EDT. */
 	private edtProject: string | undefined;
+	/** Наблюдатель за файлами настроек текущего проекта. */
+	private projectWatcher: vscode.Disposable | undefined;
 
 	constructor(private readonly vrunner: VRunnerManager) {
-		// Плашка живая: обновляется при смене профиля и при изменении файлов
-		// настроек в корне проекта (создание, правка, удаление).
+		// Плашка живая: обновляется при смене профиля, проекта и при изменении
+		// файлов настроек в корне проекта (создание, правка, удаление).
 		this.disposables.push(
 			this.vrunner.onDidChangeActiveEnvProfile(() => this.refresh()),
 			this.vrunner.onDidChangeVRunnerVersion(() => this.refresh()),
-			onDidChangeActiveConfiguration(() => void this.refreshEdtProject())
+			onDidChangeCurrentProject((change) => {
+				this.watchProject(change.current);
+				this.refresh();
+				void this.refreshEdtProject();
+				void this.vrunner.getVRunnerVersion().then(() => this.refresh());
+			}),
+			new vscode.Disposable(() => this.projectWatcher?.dispose())
 		);
 		void this.refreshEdtProject();
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
-		if (workspaceRoot) {
-			// .git/HEAD — чтобы строка ИБ с ${gitBranch} обновлялась при смене ветки
-			const watcher = vscode.workspace.createFileSystemWatcher(
-				new vscode.RelativePattern(workspaceRoot, '{env*.json,autumn-properties*.json,.git/HEAD}')
-			);
-			this.disposables.push(
-				watcher,
-				watcher.onDidCreate(() => this.refresh()),
-				watcher.onDidChange(() => this.refresh()),
-				watcher.onDidDelete(() => this.refresh())
-			);
-		}
+		this.watchProject(this.vrunner.getWorkspaceRoot());
 		// Детект версии асинхронный: перерисовать плашку, когда версия определится
 		void this.vrunner.getVRunnerVersion().then(() => this.refresh());
+	}
+
+	/** Следит за файлами настроек проекта; .git/HEAD - за строкой ИБ с ${gitBranch}. */
+	private watchProject(root: string | undefined): void {
+		this.projectWatcher?.dispose();
+		this.projectWatcher = undefined;
+		if (root === undefined) {
+			return;
+		}
+		const watcher = vscode.workspace.createFileSystemWatcher(
+			new vscode.RelativePattern(root, '{env*.json,autumn-properties*.json,.git/HEAD}')
+		);
+		this.projectWatcher = vscode.Disposable.from(
+			watcher,
+			watcher.onDidCreate(() => this.refresh()),
+			watcher.onDidChange(() => this.refresh()),
+			watcher.onDidDelete(() => this.refresh())
+		);
 	}
 
 	/** Формат активной конфигурации: у проекта EDT команды идут через 1cedtcli. */

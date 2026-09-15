@@ -15,6 +15,7 @@ const IS_PROJECT = '1c-platform-tools.is1CProject == true';
  * список баз и кластер нужны и без исходников конфигурации под рукой.
  */
 const ALWAYS_AVAILABLE = new Map<string, string>([
+	['1c-platform-tools-projects-workspace', 'панель проектов работает без открытого проекта'],
 	['1c-platform-tools-projects-favorites', 'панель проектов работает без открытого проекта'],
 	['1c-platform-tools-projects-all', 'панель проектов работает без открытого проекта'],
 	['1c-platform-tools-projects-help', 'панель проектов работает без открытого проекта'],

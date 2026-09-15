@@ -8,6 +8,29 @@ import type { OneCLocator } from './oneCLocator';
 import type { ProjectsStack } from './stack';
 import { sortProjects } from './sorter';
 import { ProjectNode } from './nodes';
+import { currentRoot, outsideProject, projectByRoot, sameProjectRoot } from '../../shared/workspaceProjects';
+
+/**
+ * Описание найденного проекта: открыт ли он в этом окне и различитель одинаковых имён.
+ *
+ * @param projectPath - Каталог проекта
+ * @param selectedRoot - Текущий проект окна
+ * @param duplicateHint - Различитель одинаковых имён
+ */
+export function autodetectDetail(
+	projectPath: string,
+	selectedRoot: string | undefined,
+	duplicateHint: string | undefined
+): string | undefined {
+	const inWindow = projectByRoot(projectPath) !== undefined;
+	const marker = !inWindow
+		? undefined
+		: selectedRoot !== undefined && sameProjectRoot(projectPath, selectedRoot)
+			? 'текущий'
+			: 'в этом окне';
+	const parts = [marker, duplicateHint].filter((part): part is string => part !== undefined);
+	return parts.length > 0 ? parts.join(' · ') : undefined;
+}
 
 function getDuplicateLabels(labels: string[]): Set<string> {
 	const counts = new Map<string, number>();
@@ -53,14 +76,17 @@ export class AutodetectProvider implements vscode.TreeDataProvider<ProjectNode> 
 		});
 		const sorted = sortProjects(items);
 		const duplicateNames = getDuplicateLabels(sorted.map((p) => p.label));
+		const selectedRoot = outsideProject(currentRoot);
 		return sorted.map(
 			(prj) =>
 				new ProjectNode(prj.label, vscode.TreeItemCollapsibleState.None, {
 					name: prj.label,
 					path: prj.description,
-					detail: duplicateNames.has(prj.label.toLowerCase())
-						? path.basename(path.dirname(prj.description))
-						: undefined,
+					detail: autodetectDetail(
+						prj.description,
+						selectedRoot,
+						duplicateNames.has(prj.label.toLowerCase()) ? path.basename(path.dirname(prj.description)) : undefined
+					),
 				}, {
 					command: '1c-platform-tools.projects.open',
 					title: '',

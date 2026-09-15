@@ -1,10 +1,15 @@
 import * as assert from 'node:assert';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { handleExecuteCommand } from '../../shared/ipcServer';
 
 /** Ответ канала с отказом. */
 function errorOf(response: { error?: { code?: string } }): string | undefined {
 	return response.error?.code;
 }
+
+/** Каталог, который не лежит ни в одной папке рабочей области хоста тестов. */
+const OUTSIDE_WORKSPACE = path.join(path.parse(os.tmpdir()).root, '__1cpt-outside-workspace__', 'erp');
 
 suite('канал исполняет только опубликованные агенту команды', () => {
 	test('чужая команда редактора отклоняется', async () => {
@@ -32,5 +37,28 @@ suite('канал исполняет только опубликованные �
 		);
 
 		assert.strictEqual(errorOf(response), 'INVALID_COMMAND_ID');
+	});
+});
+
+suite('канал: проект вызова', () => {
+	test('путь вне папок рабочей области отклоняется до выполнения', async function () {
+		this.timeout(60_000);
+		const response = await handleExecuteCommand(
+			{ id: '4', method: 'executeCommand' },
+			{ commandId: '1c-platform-tools.cf.load', args: [{ wait: true }], projectPath: OUTSIDE_WORKSPACE }
+		);
+
+		assert.strictEqual(errorOf(response), 'WORKSPACE_MISMATCH');
+	});
+
+	test('команде окна projectPath не мешает', async function () {
+		this.timeout(60_000);
+		const response = await handleExecuteCommand(
+			{ id: '5', method: 'executeCommand' },
+			{ commandId: '1c-platform-tools.project.list', args: [{ wait: true }], projectPath: OUTSIDE_WORKSPACE }
+		);
+
+		assert.notStrictEqual(errorOf(response), 'WORKSPACE_MISMATCH');
+		assert.notStrictEqual(errorOf(response), 'PROJECT_NOT_FOUND');
 	});
 });

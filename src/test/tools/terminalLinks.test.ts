@@ -1,6 +1,16 @@
 import * as assert from 'node:assert';
 import * as path from 'node:path';
-import { findTerminalLinkMatches, resolveMetadataInRoots } from '../../features/tools/terminalLinks';
+import * as vscode from 'vscode';
+import { rememberTaskProject } from '../../features/tasks/terminalProjects';
+import { VRUNNER_TASK_SOURCE } from '../../features/tasks/vrunnerTask';
+import {
+	SourceTerminalLinkProvider,
+	findTerminalLinkMatches,
+	resolveMetadataInRoots,
+	resolveTerminalLinkTarget,
+} from '../../features/tools/terminalLinks';
+import { VRunnerManager } from '../../shared/vrunnerManager';
+import { runWithProject, sameProjectRoot } from '../../shared/workspaceProjects';
 
 suite('terminalLinks', () => {
 	test('OneScript: путь модуля и номер строки из одного сообщения', () => {
@@ -138,5 +148,38 @@ suite('terminalLinks: поиск модуля по метаданным', () => 
 
 	test('несуществующий объект не даёт пути', async () => {
 		assert.strictEqual(await resolveMetadataInRoots('ОбщийМодуль.НетТакого.Модуль', [designer, edt]), undefined);
+	});
+});
+
+suite('terminalLinks: проект команды', () => {
+	const designer = path.resolve(__dirname, '../../../src/test/fixtures/projectLayout/designer');
+
+	test('ссылка открывает модуль проекта задачи, напечатавшей строку, а не текущего проекта', async () => {
+		const provider = new SourceTerminalLinkProvider(VRunnerManager.getInstance());
+		const terminal = { name: 'Синтаксический контроль проекта' } as vscode.Terminal;
+		rememberTaskProject({ name: terminal.name, source: VRUNNER_TASK_SOURCE }, designer);
+
+		const links = runWithProject(path.resolve('/w/другой'), () =>
+			provider.provideTerminalLinks({ line: 'ОбщийМодуль.ОбщийТест.Модуль(3)', terminal })
+		);
+
+		assert.strictEqual(links.length, 1);
+		assert.strictEqual(links[0].root, designer);
+		assert.strictEqual(
+			await resolveTerminalLinkTarget(links[0].target, links[0].root),
+			path.join(designer, 'src', 'cf', 'CommonModules', 'ОбщийТест', 'Ext', 'Module.bsl')
+		);
+	});
+
+	test('в терминале без команд расширения ссылка берёт текущий проект', () => {
+		const provider = new SourceTerminalLinkProvider(VRunnerManager.getInstance());
+		const root = path.resolve('/w/текущий');
+
+		const links = runWithProject(root, () =>
+			provider.provideTerminalLinks({ line: 'src/cf/Module.bsl:3', terminal: { name: 'оболочка пользователя' } as vscode.Terminal })
+		);
+
+		assert.strictEqual(links.length, 1);
+		assert.ok(links[0].root !== undefined && sameProjectRoot(links[0].root, root));
 	});
 });

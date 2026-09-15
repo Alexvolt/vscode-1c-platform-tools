@@ -1,4 +1,5 @@
 import type * as vscode from 'vscode';
+import { EXTENSION_SELECTION_STATE, TEST_EXTENSION_SELECTION_STATE } from '../../shared/projectState';
 
 /**
  * Выбор расширений проекта, с которыми работают команды расширений: своя запись
@@ -9,7 +10,7 @@ import type * as vscode from 'vscode';
  * расширение живёт под именем из метаданных, а пользователь, настройка и агент
  * называют его как удобно, поэтому выбор принимает любое из трёх без учёта регистра.
  *
- * Хранится локально в workspaceState (не коммитится). Значение:
+ * Хранится в состоянии проекта (`projectMemento`), не коммитится. Значение:
  *  - `undefined` — выбор не задан: команды работают со всеми расширениями
  *    своей области (включая добавленные позже);
  *  - `string[]` — явно выбранное подмножество ключей выбора. Команды работают
@@ -18,9 +19,6 @@ import type * as vscode from 'vscode';
  * Если отмечены все доступные расширения, выбор сбрасывается в `undefined`,
  * чтобы новые расширения подхватывались автоматически.
  */
-
-/** Ключ хранения выбора расширений в workspaceState. */
-const EXTENSION_SELECTION_KEY = '1c-platform-tools.extensions.selection';
 
 /**
  * Область выбора: расширения решения и тестовые лежат в разных каталогах, и
@@ -35,13 +33,13 @@ export interface ExtensionNames {
 	folder: string;
 	/** Имя из метаданных: под ним расширение живёт в базе. */
 	name: string;
-	/** Каталог относительно рабочей области, прямые разделители; его нет у расширения, которого в исходниках ещё нет. */
+	/** Каталог от корня проекта, прямые разделители; его нет у расширения, которого в исходниках ещё нет. */
 	dir?: string;
 }
 
-/** Ключ хранения по области выбора. */
+/** Ключ состояния проекта по области выбора. */
 function storageKey(scope: ExtensionScope): string {
-	return scope === 'tests' ? `${EXTENSION_SELECTION_KEY}.tests` : EXTENSION_SELECTION_KEY;
+	return scope === 'tests' ? TEST_EXTENSION_SELECTION_STATE : EXTENSION_SELECTION_STATE;
 }
 
 function equalsIgnoreCase(left: string, right: string): boolean {
@@ -98,7 +96,7 @@ export function selectionKey(extension: ExtensionNames, all: readonly ExtensionN
 /**
  * Возвращает сохранённый выбор расширений.
  *
- * @param memento - workspaceState (undefined вне контекста VS Code)
+ * @param memento - Состояние проекта (undefined вне контекста VS Code)
  * @returns Массив ключей выбора или undefined, если выбор не задан
  */
 export function getStoredExtensionSelection(
@@ -115,7 +113,7 @@ export function getStoredExtensionSelection(
 /**
  * Сохраняет выбор расширений (локально, не коммитится).
  *
- * @param memento - workspaceState
+ * @param memento - Состояние проекта
  * @param selection - Подмножество ключей выбора или undefined для сброса
  * @returns Промис завершения записи
  */
