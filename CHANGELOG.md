@@ -5,6 +5,24 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и этот проект придерживается [Semantic Versioning](https://semver.org/lang/ru/).
 
+## [0.9.1] - 2026-09-16
+
+
+### Новые возможности
+
+- **build:** Добавили агенту и цепочкам выбор каталога и имени собранных файлов
+
+
+### Исправления
+
+- **vrunner:** Перевели проверки vrunner в Docker на запуск docker без оболочки
+
+
+### Обслуживание
+
+- **ci:** Update Node.js version in release workflow from 20 to 22
+
+
 ## [0.9.0] - 2026-09-15
 
 
