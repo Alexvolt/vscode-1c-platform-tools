@@ -8,6 +8,7 @@ import {
 	buildDockerCommand,
 	buildDockerCommandSequence,
 	buildProcessCommand,
+	dockerRunArgs,
 	joinCommands,
 	quoteExecutable,
 	type ShellType
@@ -176,6 +177,13 @@ suite('commandUtils', () => {
 	test('buildDockerCommand без имени контейнера остаётся прежним', () => {
 		const result = buildDockerCommand('vrunner:8.3.27', ['vanessa'], '/home/ws', 'sh');
 		assert.strictEqual(result, 'docker run --rm -v /home/ws:/workspace -w /workspace vrunner:8.3.27 vanessa');
+	});
+
+	test('dockerRunArgs отдаёт путь проекта одним аргументом без кавычек', () => {
+		assert.deepStrictEqual(
+			dockerRunArgs('vrunner:8.3.27', ['vanessa', '--settings', 'env one.json'], String.raw`C:\ws & dir`, '1cpt-run-test'),
+			['run', '--rm', '--name', '1cpt-run-test', '-v', String.raw`C:\ws & dir:/workspace`, '-w', '/workspace', 'vrunner:8.3.27', 'vanessa', '--settings', 'env one.json']
+		);
 	});
 
 	test('buildDockerCommandSequence тоже именует контейнер', () => {

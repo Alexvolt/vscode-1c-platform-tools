@@ -354,8 +354,36 @@ export function joinCommands(commands: string[], shellType?: ShellType): string 
 }
 
 /**
+ * Аргументы `docker run` для запуска vrunner в контейнере: проект монтируется в `/workspace`.
+ *
+ * @param dockerImage - Docker-образ с ENTRYPOINT vrunner
+ * @param vrunnerArgs - Аргументы команды vrunner
+ * @param workspaceRoot - Каталог проекта на хосте
+ * @param containerName - Имя контейнера, чтобы остановить его при отмене
+ * @returns Аргументы программы `docker`
+ */
+export function dockerRunArgs(
+	dockerImage: string,
+	vrunnerArgs: string[],
+	workspaceRoot: string,
+	containerName?: string
+): string[] {
+	return [
+		'run',
+		'--rm',
+		...(containerName ? ['--name', containerName] : []),
+		'-v',
+		`${workspaceRoot}:/workspace`,
+		'-w',
+		'/workspace',
+		dockerImage,
+		...vrunnerArgs,
+	];
+}
+
+/**
  * Формирует команду Docker для выполнения vrunner в контейнере
- * 
+ *
  * Создает команду `docker run` с монтированием workspace и выполнением vrunner внутри контейнера.
  * Автоматически нормализует пути для указанной оболочки. В контейнере всегда используется bash (Linux),
  * поэтому аргументы экранируются для bash, а не для оболочки хоста.
@@ -381,17 +409,7 @@ export function buildDockerCommand(
 	const shell = shellType || detectShellType();
 	// ENTRYPOINT задан exec-формой: оболочки в контейнере нет, аргументы docker
 	// получает как argv, поэтому экранируем их для оболочки хоста.
-	const dockerArgs = [
-		'run',
-		'--rm',
-		...(containerName ? ['--name', containerName] : []),
-		'-v',
-		`${normalizePathForShell(workspaceRoot, shell)}:/workspace`,
-		'-w',
-		'/workspace',
-		dockerImage,
-		...vrunnerArgs,
-	];
+	const dockerArgs = dockerRunArgs(dockerImage, vrunnerArgs, normalizePathForShell(workspaceRoot, shell), containerName);
 
 	return `docker ${escapeCommandArgs(dockerArgs, shell)}`;
 }
