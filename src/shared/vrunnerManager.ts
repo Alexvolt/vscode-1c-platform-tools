@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { exec } from 'node:child_process';
+import { exec, execFile, type ExecException } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
@@ -14,6 +14,7 @@ import {
 	normalizeArgForShell,
 	buildDockerCommand,
 	buildDockerCommandSequence,
+	dockerRunArgs,
 	normalizeIbPathForDocker,
 } from '../utils/commandUtils';
 import { logger } from './logger';
@@ -1791,24 +1792,40 @@ export class VRunnerManager {
 			args = this.toCliArgs(args);
 		}
 		if (useDocker) {
-			if (!this.getEffectiveRoot()) {
-				return { error: 'Для использования Docker необходимо открыть рабочую область' };
+			const docker = this.dockerRunParts(args);
+			if ('error' in docker) {
+				return docker;
 			}
-
-			try {
-				const dockerImage = this.getDockerImage();
-				const processedArgs = this.processCommandArgsForDocker(args);
-				const containerName = dockerContainerName();
-				return {
-					command: buildDockerCommand(dockerImage, processedArgs, this.getEffectiveRoot() ?? '', PROCESS_HOST_SHELL, containerName),
-					containerName,
-				};
-			} catch (error) {
-				return { error: (error as Error).message };
-			}
+			return {
+				command: buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, docker.containerName),
+				containerName: docker.containerName,
+			};
 		}
 
 		return { command: buildProcessCommand(this.getVRunnerPath(), args) };
+	}
+
+	/**
+	 * Части запуска vrunner в Docker: образ, аргументы с путями контейнера, корень проекта и имя контейнера.
+	 *
+	 * @param args - Аргументы команды vrunner
+	 * @returns Части запуска либо текст ошибки подготовки
+	 */
+	private dockerRunParts(args: string[]): { image: string; args: string[]; root: string; containerName: string } | { error: string } {
+		const root = this.getEffectiveRoot();
+		if (!root) {
+			return { error: 'Для использования Docker необходимо открыть рабочую область' };
+		}
+		try {
+			return {
+				image: this.getDockerImage(),
+				args: this.processCommandArgsForDocker(args),
+				root,
+				containerName: dockerContainerName(),
+			};
+		} catch (error) {
+			return { error: (error as Error).message };
+		}
 	}
 
 	/**
@@ -1830,9 +1847,8 @@ export class VRunnerManager {
 		args: string[],
 		options?: { cwd?: string; env?: NodeJS.ProcessEnv }
 	): Promise<VRunnerExecutionResult> {
-		// Прогреваем версию: синхронная адаптация «сырых» аргументов в
-		// buildExecCommand должна знать про 3.x. Детект версии зовёт
-		// executeVRunnerRaw (минуя прогрев), поэтому рекурсии нет.
+		// Прогреваем версию: синхронные адаптации аргументов должны знать про 3.x.
+		// Детект версии зовёт executeVRunnerRaw (минуя прогрев), поэтому рекурсии нет.
 		await this.getVRunnerVersion();
 		return this.executeVRunnerRaw(args, options);
 	}
@@ -1851,38 +1867,43 @@ export class VRunnerManager {
 		const cwd = options?.cwd || this.getEffectiveRoot();
 
 		return new Promise((resolve) => {
-			const built = this.buildExecCommand(args, useDocker);
-			if ('error' in built) {
-				resolve({
-					success: false,
-					stdout: '',
-					stderr: built.error,
-					exitCode: 1
-				});
-				return;
-			}
-			const command = built.command;
-			// фактическая команда и cwd в логе: без этого не разобрать, какой
-			// vrunner исполнился (локальный из oscript_modules или из PATH)
-			log.info(`exec: ${command} (cwd: ${cwd ?? 'не задан'})`);
-
 			const execOptions = {
 				cwd: cwd,
 				env: this.childEnv(options?.env),
 				maxBuffer: MAX_EXEC_BUFFER_SIZE,
 				encoding: 'buffer' as const
 			};
-
-			exec(command, execOptions, (error, stdout, stderr) => {
-				const result: VRunnerExecutionResult = {
+			const finish = (error: ExecException | null, stdout: Buffer, stderr: Buffer): void => {
+				const errorOutput = decodeProcessOutput(stderr);
+				// процесс, который не удалось запустить, ничего не пишет в stderr: причина только в ошибке
+				const notStarted = error !== null && typeof error.code !== 'number';
+				resolve({
 					success: !error,
 					stdout: decodeProcessOutput(stdout),
-					stderr: decodeProcessOutput(stderr),
+					stderr: notStarted && errorOutput === '' ? error.message : errorOutput,
 					exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0
-				};
+				});
+			};
+			// фактическая команда и cwd в логе: без этого не разобрать, какой
+			// vrunner исполнился (локальный из oscript_modules или из PATH)
+			const logCommand = (command: string): void => log.info(`exec: ${command} (cwd: ${cwd ?? 'не задан'})`);
 
-				resolve(result);
-			});
+			if (useDocker) {
+				const docker = this.dockerRunParts(args);
+				if ('error' in docker) {
+					resolve({ success: false, stdout: '', stderr: docker.error, exitCode: 1 });
+					return;
+				}
+				logCommand(buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, docker.containerName));
+				// docker получает аргументы списком, без оболочки
+				execFile('docker', dockerRunArgs(docker.image, docker.args, docker.root, docker.containerName), execOptions, finish);
+				return;
+			}
+
+			// vrunner.bat запускается только через cmd, и oscript нужен chcp 65001 для кириллицы
+			const command = buildProcessCommand(this.getVRunnerPath(), args);
+			logCommand(command);
+			exec(command, execOptions, finish);
 		});
 	}
 
