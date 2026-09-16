@@ -59,7 +59,7 @@ export interface ExternalRoot {
 	dir: string;
 	format: SourceFormat;
 	kind: ExternalKind;
-	/** Имя объекта: у выгрузки конфигуратора имя каталога, им же названы собранные файлы. */
+	/** Имя объекта: у выгрузки конфигуратора имя каталога. */
 	name: string;
 	/** Имя описания без расширения: в выгрузке конфигуратора оно бывает названо не как каталог. */
 	file: string;
@@ -96,7 +96,7 @@ const DESIGNER_MARKER = 'Configuration.xml';
 const EDT_MARKER = path.join('src', 'Configuration', 'Configuration.mdo');
 
 /** Каталоги внешних обработок и отчётов в проекте EDT. */
-const EDT_EXTERNAL_DIRECTORIES: Readonly<Record<ExternalKind, string>> = {
+export const EDT_EXTERNAL_DIRECTORIES: Readonly<Record<ExternalKind, string>> = {
 	processor: 'ExternalDataProcessors',
 	report: 'ExternalReports',
 };

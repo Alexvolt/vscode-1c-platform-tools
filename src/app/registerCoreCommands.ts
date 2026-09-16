@@ -38,10 +38,10 @@ export function registerCoreCommands(
 ): CoreCommandsRegistration {
 	const commandObjects = {
 		infobase: new InfobaseCommands(),
-		configuration: new ConfigurationCommands(),
-		extensions: new ExtensionsCommands(),
+		configuration: new ConfigurationCommands(context),
+		extensions: new ExtensionsCommands(context),
 		artifact: new ArtifactCommands(),
-		externalFiles: new ExternalFilesCommands(),
+		externalFiles: new ExternalFilesCommands(context),
 		support: new SupportCommands(),
 		dependencies: new DependenciesCommands(context),
 		run: new RunCommands(),

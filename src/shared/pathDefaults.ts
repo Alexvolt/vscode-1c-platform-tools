@@ -79,7 +79,9 @@ export const BUILD_SUBDIRS = {
 	/** Тестовые расширения: build/out/tests/cfe */
 	testsCfe: 'tests/cfe',
 	/** Тестовые обработки: build/out/tests/epf */
-	testsEpf: 'tests/epf'
+	testsEpf: 'tests/epf',
+	/** Промежуточный каталог: собранное здесь получает имена, заданные вызовом */
+	staging: 'staging'
 } as const;
 
 /** Дефолты путей группы 1c-platform-tools.test.* */

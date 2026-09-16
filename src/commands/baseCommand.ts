@@ -32,6 +32,12 @@ import { TaskOutputChain } from '../features/tasks/vrunnerTask';
 import { edtProjectName, edtStagingRoot } from '../features/edt/edtRunner';
 import { notifyQuiet } from '../shared/notify';
 import type { CommandExecutionOptions, StructuredCommandResult } from '../shared/commandExecutionTypes';
+import {
+	buildOutputVariables,
+	resolveBuildOutputs,
+	type BuildOutputTarget,
+	type BuildOutputVariable,
+} from '../shared/buildOutput';
 
 /** Ответ команд, которым нужен исходный код конфигурации, а его в рабочей области нет. */
 export const NO_CONFIGURATION_SOURCES =
@@ -45,6 +51,27 @@ const DESIGNER_ONLY_COMMAND =
 
 /** Команда не начинается, пока базу держит чужой процесс. */
 export const INFOBASE_BUSY = 'Информационная база занята: команда не запущена.';
+
+/**
+ * Шаг после раннера, часть самой команды: хуки `post` и вызывающий видят уже его итог.
+ *
+ * @param succeeded - Раннер завершился успешно
+ * @returns Собранные файлы и ошибка шага
+ */
+export type FinishStep = (succeeded: boolean) => Promise<{ artifacts?: string[]; error?: string }>;
+
+/** Что добавить к запуску раннера. */
+export interface RunExtras {
+	/** Файлы результата для ответа вызывающему. */
+	artifacts?: string[];
+	finish?: FinishStep;
+}
+
+/** Собираемый объект. */
+export interface OutputTarget extends BuildOutputTarget {
+	/** Значения, которые дорого читать: читаются, только если нужны шаблону. */
+	lazy?: Partial<Record<BuildOutputVariable, () => Promise<{ value: string } | { error: string }>>>;
+}
 
 /**
  * Сводит завершения в одно: сначала база возвращается держателю, затем результат
@@ -61,6 +88,60 @@ function composeCompletion(
 		await restore?.();
 		await after?.();
 	};
+}
+
+/**
+ * Добавляет к ответу собранные файлы; список шага после раннера точнее и остаётся.
+ */
+function withArtifacts(
+	result: StructuredCommandResult | void,
+	artifacts: string[] | undefined
+): StructuredCommandResult | void {
+	if (result === undefined || artifacts === undefined || result.artifacts !== undefined) {
+		return result;
+	}
+	return { ...result, artifacts, artifact: result.artifact ?? (artifacts.length === 1 ? artifacts[0] : undefined) };
+}
+
+/**
+ * Итог шага после раннера в ответе: его ошибка делает команду неуспешной.
+ */
+async function applyFinish(result: StructuredCommandResult, finish: FinishStep | undefined): Promise<StructuredCommandResult> {
+	if (!finish) {
+		return result;
+	}
+	const outcome = await finish(result.success);
+	const artifacts = outcome.artifacts ?? result.artifacts;
+	const merged: StructuredCommandResult = {
+		...result,
+		artifacts,
+		artifact: artifacts?.length === 1 ? artifacts[0] : result.artifact,
+	};
+	if (outcome.error === undefined) {
+		return merged;
+	}
+	return {
+		...merged,
+		success: false,
+		exitCode: result.exitCode === 0 ? 1 : result.exitCode,
+		stderr: [result.stderr, outcome.error].filter(Boolean).join('\n'),
+	};
+}
+
+/**
+ * Код возврата задачи с учётом шага после раннера; об ошибке шага говорит окно.
+ */
+async function finishTracked(exitCode: number, finish: FinishStep | undefined): Promise<number> {
+	if (!finish) {
+		return exitCode;
+	}
+	const outcome = await finish(exitCode === 0);
+	if (outcome.error === undefined) {
+		return exitCode;
+	}
+	log.error(outcome.error);
+	void vscode.window.showErrorMessage(outcome.error);
+	return exitCode === 0 ? 1 : exitCode;
 }
 
 /**
@@ -334,6 +415,72 @@ export abstract class BaseCommand {
 	}
 
 	/**
+	 * Пути собранных файлов по параметрам вызова, с созданными каталогами.
+	 *
+	 * @param targets - Собираемые объекты
+	 * @param opts - Опции выполнения с outputDirectory и outputName
+	 * @param runnerWrites - Файл пишет раннер, а не расширение: в Docker ему виден только проект
+	 * @returns Пути в порядке объектов, результат-ошибка агенту либо undefined после сообщения в UI
+	 */
+	protected async resolveOutputs(
+		targets: readonly OutputTarget[],
+		opts: CommandExecutionOptions | undefined,
+		runnerWrites: boolean
+	): Promise<string[] | StructuredCommandResult | undefined> {
+		const fail = async (message: string) => (await this.reportUnavailable(message, opts)) ?? undefined;
+		const cwd = this.getExecutionCwd(opts);
+		if (!cwd) {
+			return fail('Откройте рабочую область с проектом 1С');
+		}
+		const options = opts ?? {};
+		const used = buildOutputVariables(options);
+		if ('error' in used) {
+			return fail(used.error);
+		}
+
+		const branch = used.variables.has('gitBranch') ? this.vrunner.getGitBranchDirName() : undefined;
+		const withValues: BuildOutputTarget[] = [];
+		for (const target of targets) {
+			const variables = { ...target.variables, gitBranch: branch };
+			const unavailable = { gitBranch: 'проект не в репозитории git', ...target.unavailable };
+			for (const variable of used.variables) {
+				const read = target.lazy?.[variable];
+				if (!read) {
+					continue;
+				}
+				const result = await read();
+				if ('error' in result) {
+					return fail(`Не удалось прочитать \${${variable}} для ${target.label}: ${result.error}`);
+				}
+				variables[variable] = result.value;
+				unavailable[variable] ??= 'в свойствах значение не задано';
+			}
+			withValues.push({ ...target, variables, unavailable });
+		}
+
+		const resolved = resolveBuildOutputs(withValues, options);
+		if ('error' in resolved) {
+			return fail(resolved.error);
+		}
+
+		const docker = runnerWrites && (await this.vrunner.shouldUseDocker());
+		const files: string[] = [];
+		for (const file of resolved.files) {
+			const absolute = path.resolve(cwd, file);
+			const target = projectRelativePath(cwd, absolute);
+			if (docker && path.isAbsolute(target)) {
+				return fail(`В Docker раннеру виден только каталог проекта, а ${target} лежит вне его`);
+			}
+			const directory = path.dirname(absolute);
+			if (!(await this.ensureDirectoryForExecution(directory, opts, `Ошибка при создании каталога ${directory}`))) {
+				return opts?.wait === true ? this.executionError(`Не удалось создать каталог ${directory}`) : undefined;
+			}
+			files.push(target);
+		}
+		return files;
+	}
+
+	/**
 	 * Гейт файла настроек vanessa-runner: без пригодного файла команды не
 	 * выполняются (настройки — единственный источник параметров подключения,
 	 * расширение их в CLI не дублирует).
@@ -364,7 +511,8 @@ export abstract class BaseCommand {
 		opts: CommandExecutionOptions | undefined,
 		terminalName: string,
 		artifact?: string,
-		commandId?: string
+		commandId?: string,
+		extras?: RunExtras
 	): Promise<StructuredCommandResult | void> {
 		const gate = await this.settingsGate(opts);
 		if (gate) {
@@ -385,16 +533,10 @@ export abstract class BaseCommand {
 		const onComplete = composeCompletion(window.restore, bridged.after);
 		const steps = await this.vrunner.planIntent(effective, opts?.settingsFile, opts?.ibConnection);
 		const notices = this.vrunner.consumePlanNotices();
-		if (steps.length === 1) {
-			return this.appendNotices(
-				await this.runVRunner(steps[0], opts, terminalName, artifact, commandId, true, onComplete, bridged.output),
-				notices
-			);
-		}
-		return this.appendNotices(
-			await this.runVRunnerSequential(steps, opts, terminalName, commandId, true, onComplete, bridged.output),
-			notices
-		);
+		const result = steps.length === 1
+			? await this.runVRunner(steps[0], opts, terminalName, artifact, commandId, true, onComplete, bridged.output, extras?.finish)
+			: await this.runVRunnerSequential(steps, opts, terminalName, commandId, true, onComplete, bridged.output, extras?.finish);
+		return this.appendNotices(withArtifacts(result, extras?.artifacts), notices);
 	}
 
 	/**
@@ -818,7 +960,8 @@ export abstract class BaseCommand {
 		intents: VRunnerIntent[],
 		opts: CommandExecutionOptions | undefined,
 		terminalName: string,
-		commandId?: string
+		commandId?: string,
+		extras?: RunExtras
 	): Promise<StructuredCommandResult | void> {
 		const gate = await this.settingsGate(opts);
 		if (gate) {
@@ -838,10 +981,10 @@ export abstract class BaseCommand {
 		const onComplete = composeCompletion(window.restore, bridged.after);
 		const steps = await this.vrunner.planIntents(bridged.intents, opts?.settingsFile, opts?.ibConnection);
 		const notices = this.vrunner.consumePlanNotices();
-		return this.appendNotices(
-			await this.runVRunnerSequential(steps, opts, terminalName, commandId, true, onComplete, bridged.output),
-			notices
+		const result = await this.runVRunnerSequential(
+			steps, opts, terminalName, commandId, true, onComplete, bridged.output, extras?.finish
 		);
+		return this.appendNotices(withArtifacts(result, extras?.artifacts), notices);
 	}
 
 	/**
@@ -878,7 +1021,8 @@ export abstract class BaseCommand {
 		commandId?: string,
 		planned = false,
 		onComplete?: () => Promise<void>,
-		output?: TaskOutputChain
+		output?: TaskOutputChain,
+		finish?: FinishStep
 	): Promise<StructuredCommandResult | void> {
 		const cwd = this.getExecutionCwd(opts);
 		if (!cwd) {
@@ -905,7 +1049,7 @@ export abstract class BaseCommand {
 		if (opts?.wait === true) {
 			const execute = (): Promise<StructuredCommandResult> => inRoot(async () => {
 				const result = await this.vrunner.executeVRunner(args, { cwd });
-				return this.vrunnerResultToStructured(result, artifact) as StructuredCommandResult;
+				return applyFinish(this.vrunnerResultToStructured(result, artifact), finish);
 			});
 			try {
 				if (!commandId) {
@@ -918,19 +1062,22 @@ export abstract class BaseCommand {
 		}
 
 		const runOptions = { cwd, name: terminalName, appendOverrides, output };
+		const runTracked = () => inRoot(async () =>
+			finishTracked(await this.vrunner.executeVRunnerTaskAndWait(args, runOptions), finish)
+		);
 		if (commandId) {
 			void runHooksAroundTerminalTask({
 				commandId, cwd, args, workspaceRoot,
-				trackCompletion: onComplete !== undefined,
-				runTracked: () => inRoot(() => this.vrunner.executeVRunnerTaskAndWait(args, runOptions)),
+				trackCompletion: onComplete !== undefined || finish !== undefined,
+				runTracked,
 				runUntracked: () => inRoot(() => this.vrunner.executeVRunnerInTerminal(args, runOptions)),
 			})
 				.catch((err) => log.error(`Ошибка хуков команды: ${(err as Error).message}`))
 				.finally(() => void inRoot(() => onComplete?.()));
-		} else if (onComplete) {
-			void this.vrunner.executeVRunnerTaskAndWait(args, runOptions)
+		} else if (onComplete || finish) {
+			void runTracked()
 				.catch((err) => log.error(`Ошибка запуска команды: ${(err as Error).message}`))
-				.finally(() => void inRoot(() => onComplete()));
+				.finally(() => void inRoot(() => onComplete?.()));
 		} else {
 			this.vrunner.executeVRunnerInTerminal(args, runOptions);
 		}
@@ -947,7 +1094,8 @@ export abstract class BaseCommand {
 		commandId?: string,
 		planned = false,
 		onComplete?: () => Promise<void>,
-		output?: TaskOutputChain
+		output?: TaskOutputChain,
+		finish?: FinishStep
 	): Promise<StructuredCommandResult | void> {
 		const cwd = this.getExecutionCwd(opts);
 		if (!cwd) {
@@ -988,7 +1136,7 @@ export abstract class BaseCommand {
 						break;
 					}
 				}
-				return { success, exitCode, stdout, stderr };
+				return applyFinish({ success, exitCode, stdout, stderr }, finish);
 			});
 			try {
 				if (!commandId) {
@@ -1004,19 +1152,22 @@ export abstract class BaseCommand {
 		// чтобы каждая следующая команда стартовала после реального завершения
 		// предыдущей, а не по факту попадания в input-буфер терминала.
 		const runOptions = { cwd, name: terminalName, appendOverrides, output };
+		const runTracked = () => inRoot(async () =>
+			finishTracked(await this.vrunner.executeVRunnerTaskSequenceAndWait(argsList, runOptions), finish)
+		);
 		if (commandId) {
 			void runHooksAroundTerminalTask({
 				commandId, cwd, args: flatArgs, workspaceRoot,
-				trackCompletion: onComplete !== undefined,
-				runTracked: () => inRoot(() => this.vrunner.executeVRunnerTaskSequenceAndWait(argsList, runOptions)),
+				trackCompletion: onComplete !== undefined || finish !== undefined,
+				runTracked,
 				runUntracked: () => inRoot(() => this.vrunner.executeVRunnerCommandsInSequence(argsList, runOptions)),
 			})
 				.catch((err) => log.error(`Ошибка хуков команды: ${(err as Error).message}`))
 				.finally(() => void inRoot(() => onComplete?.()));
-		} else if (onComplete) {
-			void this.vrunner.executeVRunnerTaskSequenceAndWait(argsList, runOptions)
+		} else if (onComplete || finish) {
+			void runTracked()
 				.catch((err) => log.error(`Ошибка запуска команды: ${(err as Error).message}`))
-				.finally(() => void inRoot(() => onComplete()));
+				.finally(() => void inRoot(() => onComplete?.()));
 		} else {
 			await this.vrunner.executeVRunnerCommandsInSequence(argsList, runOptions);
 		}
