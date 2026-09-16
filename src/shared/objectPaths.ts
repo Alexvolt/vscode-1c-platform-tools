@@ -11,7 +11,7 @@
  */
 
 import * as path from 'node:path';
-import type { SourceFormat, SourceRoot } from './projectLayout';
+import { EDT_EXTERNAL_DIRECTORIES, type ExternalKind, type SourceFormat, type SourceRoot } from './projectLayout';
 
 /** Русский тип метаданных - английский каталог в исходниках. */
 const TYPE_DIRECTORIES: Record<string, string> = {
@@ -395,6 +395,22 @@ export function nestedSubsystemFileOf(subsystemFile: string, name: string): stri
 	return formatOfFile(subsystemFile) === 'edt'
 		? path.join(directory, name, `${name}.mdo`)
 		: path.join(directory, `${name}.xml`);
+}
+
+/**
+ * Файл описания внешней обработки или отчёта.
+ *
+ * @param root - Каталог объекта, у проекта EDT каталог проекта
+ */
+export function externalDescriptorFile(root: {
+	dir: string;
+	format: SourceFormat;
+	kind: ExternalKind;
+	file: string;
+}): string {
+	return root.format === 'edt'
+		? path.join(root.dir, 'src', EDT_EXTERNAL_DIRECTORIES[root.kind], root.file, `${root.file}.mdo`)
+		: path.join(root.dir, `${root.file}.xml`);
 }
 
 /**

@@ -58,6 +58,10 @@ export interface CommandExecutionOptions {
 	sessionConnections?: boolean;
 	/** Идентификатор или название пайплайна для запуска (pipelines.run). */
 	pipeline?: string;
+	/** Каталог собранных файлов: относительно projectPath или абсолютный, с переменными. */
+	outputDirectory?: string;
+	/** Имя собранного файла без расширения, с переменными `${name}`, `${folder}`, `${version}`, `${gitBranch}`. */
+	outputName?: string;
 }
 
 /**
@@ -95,6 +99,8 @@ export interface StructuredCommandResult {
 	stderr: string;
 	/** Путь к итоговому артефакту (.epf, .cf, .cfe и т.п.), если применимо. */
 	artifact?: string;
+	/** Собранные файлы, когда команда собирает несколько объектов. */
+	artifacts?: string[];
 	/** Сводка прогона тестов по jUnit-отчёту (только тестовые команды). */
 	tests?: TestRunStats;
 	/** Ошибки синтаксического контроля по jUnit-отчёту (только syntax-check). */

@@ -2,7 +2,7 @@ import { CONVENTIONAL_PATHS } from '../shared/projectPaths';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
-import { BaseCommand } from './baseCommand';
+import { BaseCommand, type OutputTarget } from './baseCommand';
 import {
 	getLoadConfigurationFromSrcCommandName,
 	getLoadConfigurationFromCfCommandName,
@@ -25,13 +25,61 @@ import {
 import { logger } from '../shared/logger';
 import { decideUpdateDb } from '../features/configuration/updateDbDecision';
 import type { CommandExecutionOptions, StructuredCommandResult } from '../shared/commandExecutionTypes';
+import { readSourceProperty } from '../features/metadata/sourceProperties';
 
 const log = logger.scope('commands');
+
+/** Почему у файла из базы нет имени и версии. */
+const INFOBASE_PROPERTIES_UNKNOWN = 'имя и версию конфигурации из базы прочитать нельзя';
 
 /**
  * Команды для работы с конфигурацией
  */
 export class ConfigurationCommands extends BaseCommand {
+	constructor(private readonly context: vscode.ExtensionContext) {
+		super();
+	}
+
+	/**
+	 * Файл конфигурации, собранной из исходного кода.
+	 *
+	 * @param name - Имя файла по умолчанию
+	 */
+	private async sourceConfigurationTarget(name: string): Promise<OutputTarget> {
+		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+		const root = (await this.paths())?.configuration;
+		return {
+			label: 'конфигурации',
+			type: 'cf',
+			directory: this.vrunner.getOutPath(),
+			name,
+			variables: {
+				folder: root && workspaceRoot ? path.basename(path.resolve(workspaceRoot, root.dir)) : undefined,
+			},
+			lazy: root && workspaceRoot
+				? {
+						name: () => readSourceProperty(this.context, workspaceRoot, root, 'name'),
+						version: () => readSourceProperty(this.context, workspaceRoot, root, 'version'),
+					}
+				: undefined,
+		};
+	}
+
+	/**
+	 * Файл конфигурации, выгруженной из базы.
+	 *
+	 * @param name - Имя файла по умолчанию
+	 */
+	private infobaseConfigurationTarget(name: string): OutputTarget {
+		return {
+			label: 'конфигурации из информационной базы',
+			type: 'cf',
+			directory: this.vrunner.getOutPath(),
+			name,
+			variables: {},
+			unavailable: { name: INFOBASE_PROPERTIES_UNKNOWN, version: INFOBASE_PROPERTIES_UNKNOWN },
+		};
+	}
 
 	/**
 	 * Загрузить конфигурацию из исходников.
@@ -165,20 +213,11 @@ export class ConfigurationCommands extends BaseCommand {
 			return;
 		}
 
-		const buildPath = this.vrunner.getOutPath();
-		const buildFullPath = path.join(cwd, buildPath);
-		if (!(await this.ensureDirectoryForExecution(
-			buildFullPath,
-			opts,
-			`Ошибка при создании папки ${buildPath}`
-		))) {
-			if (opts?.wait === true) {
-				return this.executionError(`Не удалось создать каталог ${buildPath}`);
-			}
-			return;
+		const outputs = await this.resolveOutputs([this.infobaseConfigurationTarget('1Cv8')], opts, true);
+		if (!Array.isArray(outputs)) {
+			return outputs;
 		}
-
-		const outputPath = path.join(buildPath, '1Cv8.cf');
+		const [outputPath] = outputs;
 		const ibConnectionParam = await this.vrunner.getIbConnectionParam();
 		const dumpToCfCmd = getDumpConfigurationToCfCommandName();
 		return this.runIntent(
@@ -202,20 +241,11 @@ export class ConfigurationCommands extends BaseCommand {
 			return;
 		}
 
-		const buildPath = this.vrunner.getOutPath();
-		const buildFullPath = path.join(cwd, buildPath);
-		if (!(await this.ensureDirectoryForExecution(
-			buildFullPath,
-			opts,
-			`Ошибка при создании папки ${buildPath}`
-		))) {
-			if (opts?.wait === true) {
-				return this.executionError(`Не удалось создать каталог ${buildPath}`);
-			}
-			return;
+		const outputs = await this.resolveOutputs([this.infobaseConfigurationTarget('1Cv8dist')], opts, true);
+		if (!Array.isArray(outputs)) {
+			return outputs;
 		}
-
-		const outputPath = path.join(buildPath, '1Cv8dist.cf');
+		const [outputPath] = outputs;
 		const ibConnectionParam = await this.vrunner.getIbConnectionParam();
 		const dumpToDistCmd = getDumpConfigurationToDistCommandName();
 		return this.runIntent(
@@ -243,20 +273,11 @@ export class ConfigurationCommands extends BaseCommand {
 		if (typeof srcPath !== 'string') {
 			return srcPath;
 		}
-		const buildPath = this.vrunner.getOutPath();
-		const buildFullPath = path.join(cwd, buildPath);
-		if (!(await this.ensureDirectoryForExecution(
-			buildFullPath,
-			opts,
-			`Ошибка при создании папки ${buildPath}`
-		))) {
-			if (opts?.wait === true) {
-				return this.executionError(`Не удалось создать каталог ${buildPath}`);
-			}
-			return;
+		const outputs = await this.resolveOutputs([await this.sourceConfigurationTarget('1Cv8')], opts, true);
+		if (!Array.isArray(outputs)) {
+			return outputs;
 		}
-
-		const outputPath = path.join(buildPath, '1Cv8.cf');
+		const [outputPath] = outputs;
 		const buildCmd = getBuildConfigurationCommandName();
 		return this.runIntent(
 			{ kind: 'cf.build', src: srcPath, out: outputPath },

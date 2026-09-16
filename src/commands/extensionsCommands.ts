@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import { BaseCommand, INFOBASE_BUSY } from './baseCommand';
+import { BaseCommand, INFOBASE_BUSY, type OutputTarget } from './baseCommand';
 import type { VRunnerExecutionResult } from '../shared/vrunnerManager';
 import {
 	getLoadExtensionFromSrcCommandName,
@@ -53,6 +53,7 @@ import { VRUNNER_FEATURES, isAtLeast } from '../shared/vrunnerVersion';
 import { resolveProjectLayout } from '../shared/projectLayout';
 import { CONVERTED_CONFIGURATION_DIR, convertSourcesWithEdt, designerExtensionBase } from '../features/edt/edtConvert';
 import { EDT_NOT_FOUND_MESSAGE, readEdtSettings, resolveEdt } from '../features/edt/edtRunner';
+import { readSourceProperty } from '../features/metadata/sourceProperties';
 
 /** Цель выгрузки, у которой каталог уже известен. */
 type PlacedDumpTarget = ExtensionDumpTarget & { dir: string };
@@ -65,6 +66,9 @@ const log = logger.scope('commands');
  * Предоставляет методы для загрузки, выгрузки, сборки и разбора расширений конфигурации 1С
  */
 export class ExtensionsCommands extends BaseCommand {
+	constructor(private readonly context: vscode.ExtensionContext) {
+		super();
+	}
 
 	/**
 	 * Выполняет команду vrunner для всех расширений
@@ -84,6 +88,25 @@ export class ExtensionsCommands extends BaseCommand {
 		commandId?: string,
 		scope: ExtensionScope = 'solution'
 	): Promise<StructuredCommandResult | void> {
+		const selected = await this.chooseExtensions(opts, scope);
+		if (!Array.isArray(selected)) {
+			return selected;
+		}
+		// Через общий путь, а не своим планированием: он же освобождает базу
+		// на время команд конфигуратора и возвращает её после
+		return this.runIntentsSequential(selected.map(buildIntent), opts, commandName, commandId);
+	}
+
+	/**
+	 * Расширения, с которыми выполнить команду: проверки окружения и выбор.
+	 *
+	 * @param scope - Расширения решения или тестовые
+	 * @returns Выбранные расширения, результат агенту либо undefined после сообщения или отмены
+	 */
+	private async chooseExtensions(
+		opts: CommandExecutionOptions | undefined,
+		scope: ExtensionScope
+	): Promise<ExtensionEntry[] | StructuredCommandResult | undefined> {
 		const workspaceRoot = this.getExecutionCwd(opts);
 		if (!workspaceRoot) {
 			if (opts?.wait === true) {
@@ -124,10 +147,7 @@ export class ExtensionsCommands extends BaseCommand {
 			vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
 			return;
 		}
-
-		// Через общий путь, а не своим планированием: он же освобождает базу
-		// на время команд конфигуратора и возвращает её после
-		return this.runIntentsSequential(selected.map(buildIntent), opts, commandName, commandId);
+		return selected;
 	}
 
 	/**
@@ -949,32 +969,37 @@ export class ExtensionsCommands extends BaseCommand {
 			return prepared;
 		}
 
-		const buildPath = this.vrunner.getOutPath();
-		const cfeBuildPath = path.join(started, buildPath, BUILD_SUBDIRS.cfe);
-		if (!(await this.ensureDirectoryForExecution(
-			cfeBuildPath,
+		// Файл зовётся по каталогу, как и у сборки: одно расширение, один файл
+		const directory = path.posix.join(this.vrunner.getOutPath(), BUILD_SUBDIRS.cfe);
+		const outputs = await this.resolveOutputs(
+			prepared.map((target): OutputTarget => ({
+				label: `расширения «${target.extensionName}»`,
+				type: 'cfe',
+				directory,
+				name: target.folder,
+				variables: { name: target.extensionName, folder: target.folder },
+				unavailable: { version: 'версию расширения из базы прочитать нельзя' },
+			})),
 			opts,
-			`Ошибка при создании папки ${buildPath}/cfe`
-		))) {
-			if (opts?.wait === true) {
-				return this.executionError(`Не удалось создать каталог ${buildPath}/cfe`);
-			}
-			return;
+			true
+		);
+		if (!Array.isArray(outputs)) {
+			return outputs;
 		}
 
 		const ibConnectionParam = await this.vrunner.getIbConnectionParam();
 		const commandName = getDumpExtensionToCfeCommandName();
 		return this.runIntentsSequential(
-			// Файл зовётся по каталогу, как и у сборки: одно расширение, один файл
-			prepared.map((target) => ({
+			prepared.map((target, index) => ({
 				kind: 'cfe.unloadIbToCfe' as const,
 				extensionName: target.extensionName,
-				out: path.join(buildPath, BUILD_SUBDIRS.cfe, `${target.folder}.cfe`),
+				out: outputs[index],
 				common: ibConnectionParam
 			})),
 			opts,
 			commandName.title,
-			commandName.id
+			commandName.id,
+			{ artifacts: outputs }
 		);
 	}
 
@@ -988,42 +1013,45 @@ export class ExtensionsCommands extends BaseCommand {
 	 * @returns Промис, который разрешается после запуска команд
 	 */
 	async compile(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
-		const cwd = this.getExecutionCwd(opts);
-		if (!cwd) {
-			if (opts?.wait === true) {
-				return this.executionError(
-					'Укажите projectPath или откройте рабочую область с проектом 1С'
-				);
-			}
-			this.ensureWorkspace();
-			return;
+		const selected = await this.chooseExtensions(opts, 'solution');
+		if (!Array.isArray(selected)) {
+			return selected;
 		}
-
-		const buildPath = this.vrunner.getOutPath();
-		const cfeBuildPath = path.join(cwd, buildPath, BUILD_SUBDIRS.cfe);
-		if (!(await this.ensureDirectoryForExecution(
-			cfeBuildPath,
+		const workspaceRoot = this.vrunner.getWorkspaceRoot();
+		const directory = path.posix.join(this.vrunner.getOutPath(), BUILD_SUBDIRS.cfe);
+		const outputs = await this.resolveOutputs(
+			selected.map((extension): OutputTarget => ({
+				label: `расширения «${extension.name}»`,
+				type: 'cfe',
+				directory,
+				name: extension.folder,
+				variables: { folder: extension.folder },
+				lazy: workspaceRoot
+					? {
+							name: () => readSourceProperty(this.context, workspaceRoot, extension, 'name'),
+							version: () => readSourceProperty(this.context, workspaceRoot, extension, 'version'),
+						}
+					: undefined,
+			})),
 			opts,
-			`Ошибка при создании папки ${buildPath}/cfe`
-		))) {
-			if (opts?.wait === true) {
-				return this.executionError(`Не удалось создать каталог ${buildPath}/cfe`);
-			}
-			return;
+			true
+		);
+		if (!Array.isArray(outputs)) {
+			return outputs;
 		}
 
 		const commandName = getBuildExtensionCommandName();
-
-		return this.executeForAllExtensions(
-			(extension) => ({
-				kind: 'cfe.buildCfe',
+		return this.runIntentsSequential(
+			selected.map((extension, index) => ({
+				kind: 'cfe.buildCfe' as const,
 				src: extension.dir,
-				out: path.join(buildPath, BUILD_SUBDIRS.cfe, `${extension.folder}.cfe`),
+				out: outputs[index],
 				extensionName: extension.name,
-			}),
-			commandName.title,
+			})),
 			opts,
-			commandName.id
+			commandName.title,
+			commandName.id,
+			{ artifacts: outputs }
 		);
 	}
 

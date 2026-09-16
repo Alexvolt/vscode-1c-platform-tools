@@ -55,6 +55,8 @@ export interface RelativeRoot {
 /** Внешняя обработка или отчёт относительно рабочей области. */
 export interface RelativeExternal extends RelativeRoot {
 	kind: ExternalKind;
+	/** Имя описания без расширения: им раннер называет собранный файл. */
+	file: string;
 }
 
 /** Пути конфигурации проекта, её расширений и внешних объектов. */
@@ -146,7 +148,7 @@ export async function projectPaths(workspaceRoot: string): Promise<ProjectPaths>
 	const roots = (items: ReadonlyArray<{ name: string; dir: string; format: SourceFormat }>): RelativeRoot[] =>
 		items.map((root) => relative({ name: root.name, dir: root.dir, format: root.format }));
 	const externals = (items: typeof layout.processors): RelativeExternal[] =>
-		items.map((root) => relative({ name: root.name, dir: root.dir, format: root.format, kind: root.kind }));
+		items.map((root) => relative({ name: root.name, dir: root.dir, format: root.format, kind: root.kind, file: root.file }));
 
 	return {
 		configuration: scope.configuration
