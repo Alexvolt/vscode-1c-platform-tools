@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { runCancellableCommand, CancellableProcessResult } from '../../shared/cancellableProcess';
 import { logger } from '../../shared/logger';
+import { EdtCommandError } from '../edt/edtRunner';
 import { TestFrameworkAdapter, RunUnit, AdapterRunPlan, AdapterRunStep, FileTreeLocation } from './frameworkAdapter';
 import { DiscoveredFile } from './parsers/parserTypes';
 import { frameworkRootId, fileItemId } from './testItemIds';
@@ -156,7 +157,13 @@ async function runActionStep(step: AdapterRunStep): Promise<CancellableProcessRe
 		await step.run?.();
 		return { success: true, stdout: '', stderr: '', exitCode: 0, cancelled: false };
 	} catch (error) {
-		return { success: false, stdout: '', stderr: String(error), exitCode: 1, cancelled: false };
+		return {
+			success: false,
+			stdout: '',
+			stderr: error instanceof Error ? error.message : String(error),
+			exitCode: error instanceof EdtCommandError ? error.exitCode : 1,
+			cancelled: false,
+		};
 	}
 }
 

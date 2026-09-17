@@ -129,7 +129,7 @@ export async function importToEdt(): Promise<void> {
 		cwd: target.workspaceRoot,
 		output,
 	});
-	if (configurationImport !== 0) {
+	if (configurationImport.exitCode !== 0) {
 		return;
 	}
 
@@ -200,14 +200,14 @@ export async function createEdtProject(context: vscode.ExtensionContext): Promis
 			return undefined;
 		}
 
-		const code = await runEdtCommand({
+		const imported = await runEdtCommand({
 			command: 'import',
 			args: ['--configuration-files', emptyDump, '--project', projectDir],
 			title: `EDT: новая конфигурация ${projectName}`,
 			workspaceDir: edtWorkspaceDir(workspaceRoot, vrunner.getOutPath()),
 			cwd: workspaceRoot,
 		});
-		if (code !== 0) {
+		if (imported.exitCode !== 0) {
 			return undefined;
 		}
 		notifyQuiet(`Пустая конфигурация создана в формате 1С:EDT: ${projectName}`);
@@ -260,7 +260,7 @@ export async function exportFromEdt(): Promise<void> {
 	}
 
 	const output = new TaskOutputChain();
-	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot, output)) !== 0) {
+	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot, output)).exitCode !== 0) {
 		return;
 	}
 
@@ -293,10 +293,10 @@ export async function validateEdtProject(projectDir?: unknown): Promise<void> {
 	// Расширение проверяется вместе с расширяемой конфигурацией: без неё EDT его не разберёт
 	const output = new TaskOutputChain();
 	if (target.projectPath !== base.projectPath
-		&& (await ensureProjectRegistered(base.projectPath, base.workspaceDir, base.workspaceRoot, output)) !== 0) {
+		&& (await ensureProjectRegistered(base.projectPath, base.workspaceDir, base.workspaceRoot, output)).exitCode !== 0) {
 		return;
 	}
-	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot, output)) !== 0) {
+	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot, output)).exitCode !== 0) {
 		return;
 	}
 
@@ -336,7 +336,7 @@ export async function formatEdtModules(): Promise<void> {
 		return;
 	}
 
-	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot)) !== 0) {
+	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot)).exitCode !== 0) {
 		return;
 	}
 
@@ -358,7 +358,7 @@ export async function sortEdtProject(): Promise<void> {
 		return;
 	}
 
-	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot)) !== 0) {
+	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot)).exitCode !== 0) {
 		return;
 	}
 
@@ -380,7 +380,7 @@ export async function showEdtProjectInfo(): Promise<void> {
 		return;
 	}
 
-	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot)) !== 0) {
+	if ((await ensureProjectRegistered(target.projectPath, target.workspaceDir, target.workspaceRoot)).exitCode !== 0) {
 		return;
 	}
 

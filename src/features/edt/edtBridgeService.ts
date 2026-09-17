@@ -16,7 +16,7 @@ import { runnerPath } from '../../shared/projectPaths';
 import type { VRunnerIntent } from '../../shared/vrunnerCli/intents';
 import { TaskOutputChain } from '../tasks/vrunnerTask';
 import { runEdtExports, type EdtBridgeContext } from './edtBridgeRunner';
-import { edtProjectName, edtStagingRoot } from './edtRunner';
+import { EdtCommandError, edtFailureMessage, edtProjectName, edtStagingRoot } from './edtRunner';
 import {
 	edtBaseProjectOf,
 	edtExternalProjectsOf,
@@ -104,7 +104,11 @@ export async function runEdtBuildExports(bridges: readonly EdtBuildBridge[]): Pr
 		exports.set(JSON.stringify(step), step);
 	}
 	const context = { ...bridges[0].context, output: new TaskOutputChain() };
-	if (!(await runEdtExports([...exports.values()], context))) {
-		throw new Error('Выгрузка проекта 1С:EDT не удалась, сборка не запущена.');
+	const exported = await runEdtExports([...exports.values()], context);
+	if (exported.exitCode !== 0) {
+		throw new EdtCommandError(
+			edtFailureMessage('Выгрузка проекта 1С:EDT не удалась, сборка не запущена.', exported),
+			exported.exitCode
+		);
 	}
 }

@@ -3,11 +3,17 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
 	buildEdtArgs,
+	describeEdtFailure,
+	edtErrorLine,
+	edtFailureMessage,
+	edtRunResult,
 	edtStagingRoot,
 	edtWorkspaceDir,
 	explainEdtFailure,
+	outputTail,
 	type EdtSettings,
 } from '../../features/edt/edtRunner';
+import { decodeProcessOutput } from '../../shared/processOutput';
 
 /** Настройки по умолчанию для сборки вызова. */
 function settings(overrides: Partial<EdtSettings> = {}): EdtSettings {
@@ -116,5 +122,160 @@ suite('причина неудачной команды 1cedtcli', () => {
 
 	test('нераспознанный вывод не объясняется', () => {
 		assert.strictEqual(explainEdtFailure('java.lang.OutOfMemoryError: Java heap space'), undefined);
+	});
+
+	test('распознанный отказ объясняется и в сообщении', () => {
+		assert.strictEqual(
+			describeEdtFailure('edtsh: Не найдено проекта с именем НетТакогоПроекта в рабочей области\r\n', 204),
+			'Проекта НетТакогоПроекта нет в рабочей области 1С:EDT.'
+		);
+	});
+});
+
+suite('нераспознанный отказ 1cedtcli', () => {
+	// Вывод 1С:EDT 2026.1 целиком, код возврата 204; английский текст с -nl en
+	const UNKNOWN_COMMAND = "Команда не найдена. Введите 'help' для получения списка доступных команд.\r\n";
+	const UNKNOWN_COMMAND_EN = "Command not found. Run 'help' for the list of available commands.\r\n";
+	const NO_CALL_VARIANT = [
+		'Не найден вариант вызова команды, подходящий под переданные аргументы.',
+		'Варианты вызова:',
+		'1. export --project "строка" --configuration-files "строка"',
+		'2. export --project-name "строка" --configuration-files "строка"',
+		'',
+	].join('\r\n');
+	const NO_CALL_VARIANT_EN = [
+		'No command call variant was found that matched the passed arguments.',
+		'Call variants:',
+		'1. export --project "string" --configuration-files "string"',
+		'2. export --project-name "string" --configuration-files "string"',
+		'',
+	].join('\r\n');
+
+	test('неизвестная команда показывается строкой 1cedtcli с кодом возврата', () => {
+		assert.strictEqual(
+			describeEdtFailure(UNKNOWN_COMMAND, 204),
+			"Команда 1С:EDT завершилась с кодом 204: Команда не найдена. Введите 'help' для получения списка доступных команд."
+		);
+		assert.strictEqual(
+			describeEdtFailure(UNKNOWN_COMMAND_EN, 204),
+			"Команда 1С:EDT завершилась с кодом 204: Command not found. Run 'help' for the list of available commands."
+		);
+	});
+
+	test('неподходящие аргументы показываются первой строкой отказа', () => {
+		assert.strictEqual(
+			describeEdtFailure(NO_CALL_VARIANT, 204),
+			'Команда 1С:EDT завершилась с кодом 204: Не найден вариант вызова команды, подходящий под переданные аргументы.'
+		);
+		assert.strictEqual(
+			describeEdtFailure(NO_CALL_VARIANT_EN, 204),
+			'Команда 1С:EDT завершилась с кодом 204: No command call variant was found that matched the passed arguments.'
+		);
+	});
+
+	test('причиной берётся первая строка, а не подробность со словом «Ошибка»', () => {
+		const output = [
+			'edtsh: Возникли ошибки при экспорте проекта в формат платформы',
+			'Ошибка экспорта во внешний поток для Languages\\Русский.xml',
+			'Ошибка экспорта во внешний поток для Configuration.xml',
+			'',
+		].join('\r\n');
+
+		assert.strictEqual(edtErrorLine(output), 'edtsh: Возникли ошибки при экспорте проекта в формат платформы');
+	});
+
+	test('шум EDT и стек Java причиной не становятся', () => {
+		const output = [
+			'[Fatal Error] :1:1: Premature end of file.',
+			'',
+			'org.osgi.framework.BundleException: Could not resolve module: com.e1c.edt.ai.ui',
+			'  Unresolved requirement: Require-Bundle: com.e1c.edt.ai.core',
+			'java.lang.IllegalArgumentException: Unsupported class file major version 65',
+			'\tat org.objectweb.asm.ClassReader.<init>(ClassReader.java:199)',
+			'\t... 12 more',
+			'Caused by: java.lang.IllegalStateException: weaving hook failed',
+			'\tat org.eclipse.equinox.weaving.hooks.WeavingHook.processClass(WeavingHook.java:120)',
+			'',
+			NO_CALL_VARIANT,
+		].join('\r\n');
+
+		assert.strictEqual(
+			edtErrorLine(output),
+			'Не найден вариант вызова команды, подходящий под переданные аргументы.'
+		);
+		assert.strictEqual(
+			describeEdtFailure('[Fatal Error] :1:1: Premature end of file.\r\n', 204),
+			'Команда 1С:EDT завершилась с кодом 204.'
+		);
+	});
+
+	test('стек Java без строк шума перед ним причиной не становится', () => {
+		const output = [
+			'\tat a.b.C.d(C.java:1)',
+			'\t... 3 more',
+			'Caused by: java.lang.IllegalStateException: x',
+			'\tat a.b.C.e(C.java:2)',
+			'',
+			NO_CALL_VARIANT,
+		].join('\r\n');
+
+		assert.strictEqual(edtErrorLine(output), 'Не найден вариант вызова команды, подходящий под переданные аргументы.');
+	});
+
+	test('пустая строка заканчивает блок шума', () => {
+		const output = [
+			'[Fatal Error] :1:1: Premature end of file.',
+			'',
+			'  edtsh: Не найдено файлов платформенной XML выгрузки в C:\\dump',
+			'',
+		].join('\r\n');
+
+		assert.strictEqual(edtErrorLine(output), 'edtsh: Не найдено файлов платформенной XML выгрузки в C:\\dump');
+	});
+
+	test('без вывода остаётся код возврата', () => {
+		assert.strictEqual(edtErrorLine(''), undefined);
+		assert.strictEqual(edtErrorLine('\r\n  \r\n'), undefined);
+		assert.strictEqual(describeEdtFailure('', 1), 'Команда 1С:EDT завершилась с кодом 1.');
+	});
+
+	test('отказ лаунчера в UTF-16LE читается', () => {
+		const stderr = Buffer.from(
+			'Failed to copy file C:\\edt\\1cedtcli-startup.txt to C:\\Temp\\1cedtcli-startup.txt: Процесс не может получить доступ к файлу\r\n',
+			'utf16le'
+		);
+
+		assert.strictEqual(
+			describeEdtFailure(decodeProcessOutput(stderr), 1),
+			'Команда 1С:EDT завершилась с кодом 1: Failed to copy file C:\\edt\\1cedtcli-startup.txt to C:\\Temp\\1cedtcli-startup.txt: Процесс не может получить доступ к файлу'
+		);
+	});
+
+	test('причина есть только у неудачи, которую не останавливали', () => {
+		assert.deepStrictEqual(edtRunResult(0, UNKNOWN_COMMAND, false), { exitCode: 0 });
+		assert.deepStrictEqual(edtRunResult(204, UNKNOWN_COMMAND, true), { exitCode: 204 });
+		assert.deepStrictEqual(edtRunResult(204, UNKNOWN_COMMAND, false), {
+			exitCode: 204,
+			error: "Команда 1С:EDT завершилась с кодом 204: Команда не найдена. Введите 'help' для получения списка доступных команд.",
+		});
+	});
+
+	test('сообщение шага дополняется причиной, если она есть', () => {
+		const summary = 'Выгрузка проекта 1С:EDT не удалась, команда не запущена.';
+
+		assert.strictEqual(
+			edtFailureMessage(summary, { exitCode: 204, error: describeEdtFailure(UNKNOWN_COMMAND, 204) }),
+			`${summary} Команда 1С:EDT завершилась с кодом 204: Команда не найдена. Введите 'help' для получения списка доступных команд.`
+		);
+		assert.strictEqual(edtFailureMessage(summary, { exitCode: 1 }), summary);
+	});
+
+	test('хвост длинного вывода начинается с целой строки', () => {
+		const output = `${'прогресс\n'.repeat(10)}${UNKNOWN_COMMAND}`;
+
+		assert.strictEqual(outputTail(output, UNKNOWN_COMMAND.length + 3), UNKNOWN_COMMAND);
+		assert.strictEqual(outputTail(output, UNKNOWN_COMMAND.length + 9), `прогресс\n${UNKNOWN_COMMAND}`);
+		assert.strictEqual(outputTail(output, output.length), output);
+		assert.strictEqual(edtErrorLine(outputTail(output, UNKNOWN_COMMAND.length + 3)), UNKNOWN_COMMAND.trim());
 	});
 });

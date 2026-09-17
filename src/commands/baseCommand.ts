@@ -29,7 +29,13 @@ import {
 } from '../features/edt/edtSourceBridge';
 import { runEdtExports, runEdtImports, type EdtBridgeContext } from '../features/edt/edtBridgeRunner';
 import { TaskOutputChain } from '../features/tasks/vrunnerTask';
-import { edtProjectName, edtStagingRoot } from '../features/edt/edtRunner';
+import {
+	edtExitMessage,
+	edtFailureMessage,
+	edtProjectName,
+	edtStagingRoot,
+	type EdtRunResult,
+} from '../features/edt/edtRunner';
 import { notifyQuiet } from '../shared/notify';
 import type { CommandExecutionOptions, StructuredCommandResult } from '../shared/commandExecutionTypes';
 import {
@@ -670,8 +676,12 @@ export abstract class BaseCommand {
 		const withBase = exports.map((step) =>
 			'projectDir' in step ? { ...step, baseProjectDir: baseOf(step.projectDir) } : step
 		);
-		if (!(await runEdtExports(withBase, context))) {
-			const reported = await this.reportUnavailable('Выгрузка проекта 1С:EDT не удалась, команда не запущена.', opts);
+		const exported = await runEdtExports(withBase, context);
+		if (exported.exitCode !== 0) {
+			const reported = await this.reportUnavailable(
+				edtFailureMessage('Выгрузка проекта 1С:EDT не удалась, команда не запущена.', exported),
+				opts
+			);
 			return reported ?? 'blocked';
 		}
 		const owned = imports.map((step) => ({ ...step, baseProjectDir: baseOf(step.projectDir) }));
@@ -684,21 +694,23 @@ export abstract class BaseCommand {
 
 	/**
 	 * Ответ команды, которую выполняет 1С:EDT: вызывающему с ожиданием код
-	 * возврата и результат, ход и причина ошибки видны в терминале задачи.
+	 * возврата, причина неудачи и результат; остальным ход и отказ видны в
+	 * терминале задачи.
 	 */
 	protected edtCommandResult(
-		exitCode: number,
+		result: EdtRunResult,
 		artifact: string,
 		opts: CommandExecutionOptions | undefined
 	): StructuredCommandResult | void {
 		if (opts?.wait !== true) {
 			return;
 		}
+		const failed = result.exitCode !== 0;
 		return {
-			success: exitCode === 0,
-			exitCode,
+			success: !failed,
+			exitCode: result.exitCode,
 			stdout: '',
-			stderr: exitCode === 0 ? '' : `Команда 1С:EDT завершилась с кодом ${exitCode}.`,
+			stderr: failed ? (result.error ?? edtExitMessage(result.exitCode)) : '',
 			artifact,
 		};
 	}

@@ -43,6 +43,28 @@ export const EDT_NOT_FOUND_MESSAGE =
 /** Сколько последнего вывода команды хранится для объяснения ошибки. */
 const OUTPUT_TAIL_LIMIT = 64_000;
 
+/** Итог команды EDT. */
+export interface EdtRunResult {
+	/** Код возврата процесса. */
+	exitCode: number;
+	/** Причина неудачи для пользователя; у успешной и остановленной команды её нет. */
+	error?: string;
+}
+
+/**
+ * Строки, которые 1cedtcli печатает и при успешной команде. Строки с отступом
+ * сразу после них относятся к ним же.
+ */
+const EDT_NOISE = [
+	/^\[Fatal Error\] :1:1: Premature end of file\./,
+	/com\.e1c\.edt\.ai\.ui/,
+	/weaving hook/i,
+	/class file major version/i,
+];
+
+/** Строки стека Java. */
+const JAVA_STACK_LINE = /^(?:at \S|\.\.\. \d+ more|Caused by: |Suppressed: )/;
+
 /** Известные ответы 1cedtcli: русский и английский текст одного и того же отказа. */
 const EDT_FAILURES: { pattern: RegExp; explain: (match: RegExpMatchArray) => string }[] = [
 	{
@@ -74,6 +96,100 @@ export function explainEdtFailure(output: string): string | undefined {
 		}
 	}
 	return undefined;
+}
+
+/**
+ * Строка вывода, которой 1cedtcli сообщает об отказе.
+ *
+ * Причина идёт первой строкой отказа, за ней подробности: варианты вызова,
+ * ошибки по отдельным файлам. Подробности могут начинаться со слова «Ошибка».
+ *
+ * @param output - Вывод команды
+ * @returns Строка как есть либо undefined, если в выводе нет ничего, кроме шума
+ */
+export function edtErrorLine(output: string): string | undefined {
+	let noiseBlock = false;
+	for (const line of output.split(/\r?\n/)) {
+		const text = line.trim();
+		if (text === '') {
+			noiseBlock = false;
+		} else if (EDT_NOISE.some((noise) => noise.test(text))) {
+			noiseBlock = true;
+		} else if (!JAVA_STACK_LINE.test(text) && !(noiseBlock && /^\s/.test(line))) {
+			return text;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Сообщение о коде возврата 1cedtcli.
+ *
+ * @param exitCode - Код возврата
+ * @param line - Строка отказа из вывода
+ */
+export function edtExitMessage(exitCode: number, line?: string): string {
+	return line === undefined
+		? `Команда 1С:EDT завершилась с кодом ${exitCode}.`
+		: `Команда 1С:EDT завершилась с кодом ${exitCode}: ${line}`;
+}
+
+/**
+ * Причина неудачной команды 1cedtcli для ответа вызывающему: известный отказ
+ * объясняется, остальные идут строкой из вывода как есть.
+ *
+ * @param output - Вывод команды
+ * @param exitCode - Код возврата
+ */
+export function describeEdtFailure(output: string, exitCode: number): string {
+	return explainEdtFailure(output) ?? edtExitMessage(exitCode, edtErrorLine(output));
+}
+
+/**
+ * Итог завершившейся команды: у успешной и остановленной причины нет.
+ *
+ * @param exitCode - Код возврата
+ * @param output - Вывод команды
+ * @param cancelled - Остановил ли задачу пользователь
+ */
+export function edtRunResult(exitCode: number, output: string, cancelled: boolean): EdtRunResult {
+	return exitCode === 0 || cancelled ? { exitCode } : { exitCode, error: describeEdtFailure(output, exitCode) };
+}
+
+/** Ошибка шага, за которым стоит команда 1cedtcli: несёт её код возврата. */
+export class EdtCommandError extends Error {
+	constructor(
+		message: string,
+		public readonly exitCode: number
+	) {
+		super(message);
+		this.name = 'EdtCommandError';
+	}
+}
+
+/**
+ * Сообщение о неудавшемся шаге вместе с причиной от 1cedtcli.
+ *
+ * @param summary - Что не получилось, законченной фразой
+ * @param result - Итог команды EDT
+ */
+export function edtFailureMessage(summary: string, result: EdtRunResult): string {
+	return result.error === undefined ? summary : `${summary} ${result.error}`;
+}
+
+/**
+ * Хвост вывода не длиннее предела, начиная с целой строки.
+ *
+ * @param output - Накопленный вывод
+ * @param limit - Предел длины
+ */
+export function outputTail(output: string, limit = OUTPUT_TAIL_LIMIT): string {
+	if (output.length <= limit) {
+		return output;
+	}
+	const start = output.length - limit;
+	const lineEnd = output.indexOf('\n', start - 1);
+	return lineEnd < 0 ? output.slice(start) : output.slice(lineEnd + 1);
 }
 
 /**
@@ -258,20 +374,20 @@ export function isProjectRegistered(workspaceDir: string, projectName: string): 
  * @param workspaceDir - Каталог рабочей области
  * @param cwd - Каталог запуска
  * @param output - Общий терминал шагов команды
- * @returns Код возврата; ноль, если проекта в рабочей области не было
+ * @returns Итог отключения; успех, если проекта в рабочей области не было
  */
 export async function detachProject(
 	projectDir: string,
 	workspaceDir: string,
 	cwd: string,
 	output?: TaskOutputChain
-): Promise<number> {
+): Promise<EdtRunResult> {
 	if (!fs.existsSync(path.join(projectDir, '.project'))) {
-		return 0;
+		return { exitCode: 0 };
 	}
 	const projectName = edtProjectName(projectDir);
 	if (!isProjectRegistered(workspaceDir, projectName)) {
-		return 0;
+		return { exitCode: 0 };
 	}
 	return runEdtCommand({
 		command: 'delete',
@@ -293,17 +409,17 @@ export async function detachProject(
  * @param workspaceDir - Каталог рабочей области
  * @param cwd - Каталог запуска
  * @param output - Общий терминал шагов команды
- * @returns Код возврата подключения; ноль, если проект уже был подключён
+ * @returns Итог подключения; успех, если проект уже был подключён
  */
 export async function ensureProjectRegistered(
 	projectDir: string,
 	workspaceDir: string,
 	cwd: string,
 	output?: TaskOutputChain
-): Promise<number> {
+): Promise<EdtRunResult> {
 	const projectName = edtProjectName(projectDir);
 	if (isProjectRegistered(workspaceDir, projectName)) {
-		return 0;
+		return { exitCode: 0 };
 	}
 
 	return runEdtCommand({
@@ -320,16 +436,17 @@ export async function ensureProjectRegistered(
  * Выполняет команду EDT задачей VS Code.
  *
  * Пока идёт одна команда, вторая ждёт: `1cedtcli` не делит рабочую область.
+ * Отказ запущенной команды виден в терминале задачи, сообщением показывается
+ * только причина, по которой задача не запустилась.
  *
  * @param request - Команда и её аргументы
- * @returns Код возврата процесса
+ * @returns Код возврата процесса и причина неудачи
  */
-export async function runEdtCommand(request: EdtCommand): Promise<number> {
+export async function runEdtCommand(request: EdtCommand): Promise<EdtRunResult> {
 	const settings = readEdtSettings();
 	const installation = resolveEdt(settings);
 	if (!installation) {
-		void vscode.window.showErrorMessage(EDT_NOT_FOUND_MESSAGE);
-		return 1;
+		return notStarted(EDT_NOT_FOUND_MESSAGE);
 	}
 
 	// Рабочую область 1cedtcli не делит: следующая команда ждёт, пока закончится текущая
@@ -338,10 +455,9 @@ export async function runEdtCommand(request: EdtCommand): Promise<number> {
 	}
 
 	if (editorHoldsWorkspace(request.workspaceDir)) {
-		void vscode.window.showErrorMessage(
+		return notStarted(
 			'1С:EDT открыта на рабочей области проекта, а 1cedtcli с занятой рабочей областью не работает. Закройте EDT и повторите команду.'
 		);
-		return 1;
 	}
 
 	const args = buildEdtArgs(request, settings);
@@ -350,16 +466,22 @@ export async function runEdtCommand(request: EdtCommand): Promise<number> {
 	log.info(`EDT ${installation.version}: ${request.command}`);
 
 	let output = '';
+	let cancelled = false;
 	running = new Promise<number>((resolve) => {
 		const task = createVRunnerTask({
 			name: request.title,
-			command,
+			command: () => ({
+				command,
+				onCancel: () => {
+					cancelled = true;
+				},
+			}),
 			cwd: request.cwd,
 			definition: { type: EDT_TASK_TYPE, command: request.command },
 			exitCallback: resolve,
 			appendOutput: request.output?.append(),
 			onOutput: (chunk) => {
-				output = (output + chunk).slice(-OUTPUT_TAIL_LIMIT);
+				output = outputTail(output + chunk);
 			},
 		});
 		void vscode.tasks.executeTask(task);
@@ -368,14 +490,20 @@ export async function runEdtCommand(request: EdtCommand): Promise<number> {
 	try {
 		const exitCode = await running;
 		if (exitCode !== 0) {
-			const reason = explainEdtFailure(output);
-			log.warn(`EDT ${request.command}: код возврата ${exitCode}${reason ? `: ${reason}` : ''}`);
-			if (reason) {
-				void vscode.window.showErrorMessage(reason);
-			}
+			const line = edtErrorLine(output);
+			log.warn(`EDT ${request.command}: код возврата ${exitCode}${line === undefined ? '' : `: ${line}`}`);
 		}
-		return exitCode;
+		return edtRunResult(exitCode, output, cancelled);
 	} finally {
 		running = undefined;
 	}
+}
+
+/**
+ * Итог команды, для которой задача не запускалась: терминала нет, причина
+ * показывается сообщением.
+ */
+function notStarted(error: string): EdtRunResult {
+	void vscode.window.showErrorMessage(error);
+	return { exitCode: 1, error };
 }
