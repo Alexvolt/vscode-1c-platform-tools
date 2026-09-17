@@ -61,6 +61,8 @@ export interface ReleaseComponentSpec {
 	 * (старый кэш): например, в каталоге лежат нативные библиотеки чужой ОС.
 	 */
 	isCacheValid?: (assetPath: string) => boolean;
+	/** Освобождает файлы кэша перед заменой и удалением: на Windows живой процесс держит их открытыми. */
+	beforeReplace?: () => Promise<void>;
 }
 
 /** Результат загрузки: путь к файлу (extract=false) или к каталогу распаковки (extract=true). */
@@ -339,6 +341,7 @@ export async function installReleaseAsset(
 	spec: ReleaseComponentSpec,
 	install: { tag: string; assetName: string; sourceFile: string }
 ): Promise<EnsuredComponent> {
+	await spec.beforeReplace?.();
 	const destDir = tagDirOf(baseDir, spec, install.tag);
 	await fs.rm(destDir, { recursive: true, force: true }).catch(() => undefined);
 	await fs.mkdir(destDir, { recursive: true });
@@ -457,6 +460,7 @@ export async function ensureReleaseComponent(
 
 /** Сброс кэша компонента — следующий {@link ensureReleaseComponent} скачает заново. */
 export async function clearReleaseCache(baseDir: string, spec: ReleaseComponentSpec): Promise<void> {
+	await spec.beforeReplace?.();
 	await fs.rm(path.join(baseDir, spec.cacheSubdir), { recursive: true, force: true }).catch(() => undefined);
 }
 

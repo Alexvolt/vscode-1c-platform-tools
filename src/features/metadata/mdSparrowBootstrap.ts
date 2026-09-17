@@ -30,6 +30,7 @@ import {
 	MD_SPARROW_JAR_REGEX,
 	adoptiumBinaryUrl,
 } from './mdSparrowConstants';
+import { stopMdSparrowResidents } from './mdSparrowRunner';
 
 const log = logger.scope('md-sparrow');
 
@@ -40,6 +41,8 @@ export interface MdSparrowRuntime {
 	jarPath: string;
 	/** Тег релиза (если скачан с GitHub) */
 	releaseTag?: string;
+	/** Java не указана в настройках: её путь меняется вместе с portable JRE. */
+	autoJava?: boolean;
 }
 
 const MD_SPARROW_SPEC: ReleaseComponentSpec = {
@@ -49,6 +52,7 @@ const MD_SPARROW_SPEC: ReleaseComponentSpec = {
 	assetRegex: MD_SPARROW_JAR_REGEX,
 	label: 'md-sparrow',
 	extract: false,
+	beforeReplace: () => stopMdSparrowResidents(),
 };
 
 function findJavaUnder(extractRoot: string): string | undefined {
@@ -94,6 +98,7 @@ async function ensurePortableJre(baseDir: string, download: boolean, javaOverrid
 	log.info('загрузка portable JRE 21 (Eclipse Temurin)…');
 	const status = showStatus('md-sparrow: загружаем JRE 21...');
 	try {
+		await stopMdSparrowResidents();
 		await fs.rm(jreRoot, { recursive: true, force: true }).catch(() => undefined);
 		await fs.mkdir(jreRoot, { recursive: true });
 
@@ -181,7 +186,7 @@ export async function ensureMdSparrowRuntime(
 		ensureJar(base, download, jarPathSetting, resolveGithubToken())
 	);
 
-	return { java, jarPath, releaseTag: tag };
+	return { java, jarPath, releaseTag: tag, autoJava: javaPathSetting === '' };
 }
 
 /** Идущие сейчас подготовки по ключу настроек. */
@@ -311,5 +316,6 @@ export function portableJreJavaPath(context: vscode.ExtensionContext): string | 
 
 /** Сброс кэша portable JRE — скачается заново при следующем использовании дерева метаданных. */
 export async function clearPortableJreCache(context: vscode.ExtensionContext): Promise<void> {
+	await stopMdSparrowResidents();
 	await fs.rm(path.join(installBaseDir(context), 'jre-temurin-21'), { recursive: true, force: true }).catch(() => undefined);
 }

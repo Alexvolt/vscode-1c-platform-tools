@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
 	cachedReleaseComponent,
+	clearReleaseCache,
 	installReleaseAsset,
 	type ReleaseComponentSpec,
 } from '../../shared/githubReleaseLoader';
@@ -50,5 +51,23 @@ suite('кэш внешнего компонента', () => {
 			.readdirSync(path.join(baseDir, spec.cacheSubdir))
 			.filter((entry) => entry !== spec.stampName);
 		assert.deepStrictEqual(versions, ['v1.1.0']);
+	});
+
+	test('файлы кэша освобождаются до замены и до очистки', async () => {
+		const versionsSeen: string[][] = [];
+		const cacheDir = path.join(baseDir, spec.cacheSubdir);
+		const holding: ReleaseComponentSpec = {
+			...spec,
+			beforeReplace: async () => {
+				versionsSeen.push(fs.existsSync(cacheDir) ? fs.readdirSync(cacheDir).filter((entry) => entry !== spec.stampName) : []);
+			},
+		};
+
+		await installReleaseAsset(baseDir, holding, { tag: 'v1.0.0', assetName: 'файл.bin', sourceFile });
+		await installReleaseAsset(baseDir, holding, { tag: 'v1.1.0', assetName: 'файл.bin', sourceFile });
+		await clearReleaseCache(baseDir, holding);
+
+		assert.deepStrictEqual(versionsSeen, [[], ['v1.0.0'], ['v1.1.0']]);
+		assert.ok(!fs.existsSync(cacheDir));
 	});
 });
