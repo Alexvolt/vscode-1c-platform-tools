@@ -16,6 +16,8 @@ import {
 	VRUNNER_INIT_DEFAULTS_V3,
 	HOOKS_DEFAULTS,
 	PIPELINES_DEFAULTS,
+	SETTINGS_MIGRATION_SCRIPT,
+	settingsMigrationCommand,
 } from '../features/serviceFiles/envDefaults';
 import { DEFAULT_PROFILE_ID } from '../shared/envProfiles';
 import { notifyQuiet } from '../shared/notify';
@@ -173,9 +175,7 @@ export class ServiceFilesCommands extends BaseCommand {
 	 * vrunner 3 — другой инструмент с другим форматом настроек: env.json он не
 	 * читает, а `autumn-properties.json` подхватывает из корня проекта
 	 * автоматически. Файл создаётся из рукописного v3-дефолта. Перенос настроек
-	 * из env.json — осознанное действие пользователя официальным инструментом
-	 * `tools/migrate26to30.os` из состава vanessa-runner (расширение не тащит
-	 * копию логики миграции).
+	 * из env.json пользователь выполняет сам скриптом из пакета vanessa-runner.
 	 */
 	private async ensureAutumnProperties(nonInteractive = false): Promise<void> {
 		const workspaceRoot = this.ensureWorkspace();
@@ -208,10 +208,19 @@ export class ServiceFilesCommands extends BaseCommand {
 			return false;
 		}
 		await fs.writeFile(fullPath, content, 'utf8');
-		log.info('Создан autumn-properties.json');
-		vscode.window.showInformationMessage(
-			'Создан autumn-properties.json. Перенести настройки из env.json: oscript tools/migrate26to30.os.'
-		);
+		const root = path.dirname(fullPath);
+		if (fsSync.existsSync(path.join(root, 'env.json'))) {
+			log.info('Создан autumn-properties.json');
+			const localPackage = 'oscript_modules/vanessa-runner';
+			const packageDir = fsSync.existsSync(path.join(root, localPackage, SETTINGS_MIGRATION_SCRIPT))
+				? localPackage
+				: undefined;
+			vscode.window.showInformationMessage(
+				`Создан autumn-properties.json. Перенести настройки из env.json: ${settingsMigrationCommand(packageDir)}`
+			);
+		} else {
+			notifyQuiet('Создан autumn-properties.json');
+		}
 		return true;
 	}
 

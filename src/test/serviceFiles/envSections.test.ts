@@ -5,6 +5,7 @@ import {
 	AUTUMN_OPTIONAL_SECTIONS,
 	mergeAutumnSections,
 } from '../../features/serviceFiles/envSections';
+import { settingsMigrationCommand } from '../../features/serviceFiles/envDefaults';
 
 suite('serviceFiles/envSections', () => {
 	const base = { $schema: 'x', default: { '--v8version': '8.3' } };
@@ -41,6 +42,17 @@ suite('serviceFiles/envSections', () => {
 			vrunner: { test: { yaxunit: Record<string, unknown> } };
 		};
 		assert.strictEqual(result.vrunner.test.yaxunit['yaxunit-config'], 'tools/yaxunit.json');
+	});
+
+	test('перенос env.json запускает скрипт из пакета vanessa-runner и читает env.json', () => {
+		assert.strictEqual(
+			settingsMigrationCommand('oscript_modules/vanessa-runner'),
+			'oscript oscript_modules/vanessa-runner/tools/migrate26to30.os --input env.json'
+		);
+		assert.strictEqual(
+			settingsMigrationCommand(),
+			'oscript <каталог vanessa-runner>/tools/migrate26to30.os --input env.json'
+		);
 	});
 
 	suite('autumn (v3)', () => {
