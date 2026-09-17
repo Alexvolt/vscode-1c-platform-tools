@@ -120,6 +120,17 @@ suite('причина неудачной команды 1cedtcli', () => {
 		);
 	});
 
+	test('английский текст отказов о проекте в рабочей области', () => {
+		assert.strictEqual(
+			explainEdtFailure('edtsh: Workspace project with name tiny-edt already exist\r\n'),
+			'Проект tiny-edt уже подключён к рабочей области 1С:EDT.'
+		);
+		assert.strictEqual(
+			explainEdtFailure('edtsh: Workspace project with name NoSuchProject does not exist\r\n'),
+			'Проекта NoSuchProject нет в рабочей области 1С:EDT.'
+		);
+	});
+
 	test('нераспознанный вывод не объясняется', () => {
 		assert.strictEqual(explainEdtFailure('java.lang.OutOfMemoryError: Java heap space'), undefined);
 	});

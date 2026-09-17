@@ -73,12 +73,12 @@ const EDT_FAILURES: { pattern: RegExp; explain: (match: RegExpMatchArray) => str
 			'Рабочая область 1С:EDT занята: её держит открытая EDT или другой процесс 1cedtcli. Закройте EDT на этой рабочей области и повторите команду.',
 	},
 	{
-		pattern: /Проект с именем (.+?) уже существует в рабочей области|project (?:with name )?'?(.+?)'? already exists in the workspace/i,
-		explain: (match) => `Проект ${match[1] ?? match[2]} уже подключён к рабочей области 1С:EDT.`,
+		pattern: /Проект с именем (.+?) уже существует в рабочей области|project (?:with name )?'?(.+?)'? already exists in the workspace|Workspace project with name (.+?) already exist/i,
+		explain: (match) => `Проект ${match[1] ?? match[2] ?? match[3]} уже подключён к рабочей области 1С:EDT.`,
 	},
 	{
-		pattern: /Project not found: (.+)|Не найдено проекта с именем (.+?) в рабочей области/i,
-		explain: (match) => `Проекта ${(match[1] ?? match[2]).trim()} нет в рабочей области 1С:EDT.`,
+		pattern: /Project not found: (.+)|Не найдено проекта с именем (.+?) в рабочей области|Workspace project with name (.+?) does not exist/i,
+		explain: (match) => `Проекта ${(match[1] ?? match[2] ?? match[3]).trim()} нет в рабочей области 1С:EDT.`,
 	},
 ];
 
