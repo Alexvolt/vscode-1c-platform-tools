@@ -9,7 +9,15 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { commandPrefix, escapeCommandArgs, PROCESS_HOST_SHELL, quoteExecutable, type ShellType } from '../../utils/shellEscape';
+import {
+	commandPrefix,
+	escapeCommandArg,
+	escapeCommandArgs,
+	joinShellCommands,
+	PROCESS_HOST_SHELL,
+	quoteExecutable,
+	type ShellType,
+} from '../../utils/shellEscape';
 
 const execFileAsync = promisify(execFile);
 
@@ -160,6 +168,16 @@ async function runViaPosix(binary: string, shell: ShellType, args: string[]): Pr
 	return runShell(binary, ['-c', `${commandPrefix(shell)}${buildLine(args, shell)}`], userShellEnv());
 }
 
+/** POSIX-оболочки терминала пользователя. */
+function collectPosixShells(): { binary: string; shell: ShellType }[] {
+	const shells: { binary: string | undefined; shell: ShellType }[] = [
+		{ binary: resolveBash(), shell: 'bash' },
+		{ binary: process.platform === 'win32' ? undefined : resolveBinary('sh'), shell: 'sh' },
+		{ binary: resolveBinary('zsh'), shell: 'zsh' },
+	];
+	return shells.flatMap(({ binary, shell }) => (binary === undefined ? [] : [{ binary, shell }]));
+}
+
 /**
  * Обёртка формы vrunner.bat (`@call <программа> "<скрипт>" %*`) в каталоге с
  * пробелом, амперсандом и скобками: аргументы проходят второй разбор cmd.
@@ -264,6 +282,28 @@ describe(`круг argv на ${process.platform} (${probes.map((probe) => probe.
 			assert.notDeepEqual(received, args);
 		}
 	);
+
+	for (const { binary, shell } of collectPosixShells()) {
+		test(`${shell}: цепочка команд с префиксами останавливается на ошибке`, { timeout: TEST_TIMEOUT_MS }, async () => {
+			const command = (line: string): string => `${commandPrefix(shell)}${line}`;
+			const failing = command(`node -e ${escapeCommandArg('process.exit(3)', shell)}`);
+			const next = command(buildLine(['следующая'], shell));
+			const options = { encoding: 'utf8' as const, windowsHide: true, cwd: repoRoot, env: userShellEnv() };
+
+			const passed = await execFileAsync(binary, ['-c', joinShellCommands([next, next], shell)], options);
+			assert.deepEqual(parseArgvJson(passed.stdout, passed.stderr), ['следующая']);
+			assert.equal(passed.stdout.trim().split(/\r?\n/).length, 2, 'после успешной команды цепочка идёт дальше');
+
+			await assert.rejects(
+				execFileAsync(binary, ['-c', joinShellCommands([failing, next], shell)], options),
+				(error: { code?: unknown; stdout?: unknown }) => {
+					assert.equal(error.code, 3);
+					assert.equal(error.stdout, '', 'после ошибки следующая команда выполнилась');
+					return true;
+				}
+			);
+		});
+	}
 
 	test(
 		'Git Bash без префикса команды переписывает POSIX-пути',

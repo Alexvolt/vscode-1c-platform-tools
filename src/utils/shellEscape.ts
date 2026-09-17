@@ -237,10 +237,11 @@ function encodingPrefix(shellType: ShellType): string {
 	if (shellType === 'cmd') {
 		return 'chcp 65001 >nul && ';
 	}
-	// Git Bash/MSYS работают поверх той же Windows-консоли: без chcp oscript выводит кириллицу
-	// в OEM-кодировке. Builtin chcp из bash недоступен — только chcp.com; ошибки глушим,
-	// чтобы отсутствие chcp.com в PATH (например, WSL без interop) не ломало команду.
-	return 'chcp.com 65001 >/dev/null 2>&1; ';
+	// Git Bash/MSYS работают поверх той же Windows-консоли, builtin chcp в них нет.
+	// Группа всегда успешна: без chcp.com в PATH (WSL без interop) команда идёт дальше.
+	// Через `&&`, а не `;`: иначе в цепочке joinShellCommands следующая команда
+	// выполнялась бы и после ошибки предыдущей.
+	return '{ chcp.com 65001 >/dev/null 2>&1 || :; } && ';
 }
 
 /**
