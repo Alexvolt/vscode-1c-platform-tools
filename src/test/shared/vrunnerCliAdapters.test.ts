@@ -108,6 +108,47 @@ suite('vrunnerCli: адаптеры v2/v3', () => {
 		assert.throws(() => v2.plan({ kind: 'infobase.listExtensions' }), /каталог выгрузки/);
 	});
 
+	test('infobase.listExtensions: в 3.x файл профиля идёт перед группой', () => {
+		const settings = ['--settings', 'autumn-properties.dev.json'];
+		check(
+			{ kind: 'infobase.listExtensions', json: true, out: 'build/out/cfe-ib-list', common: [...settings, ...conn] },
+			[['designer', '--additional', '/DumpConfigToFiles build/out/cfe-ib-list -AllExtensions', ...settings, ...conn]],
+			[[...settings, 'infobase', 'extensions', 'list', '--json', ...conn]]
+		);
+		assert.deepStrictEqual(
+			v3.plan({ kind: 'infobase.updateDb', common: settings }),
+			[['infobase', 'update', '--target', 'main', ...settings]],
+			'команда со своей опцией --settings получает её на обычном месте'
+		);
+	});
+
+	test('в 3.x перекрытие --additional получают только команды запуска', () => {
+		const common = [...conn, '--additional', '/L ru'];
+		assert.deepStrictEqual(v3.plan({ kind: 'cf.unloadIbToCf', out: 'build/1Cv8.cf', common }), [
+			['cf', 'unload', ...conn, 'build/1Cv8.cf'],
+		]);
+		assert.deepStrictEqual(v3.plan({ kind: 'run.enterprise', common }), [['run', 'enterprise', ...common]]);
+		assert.deepStrictEqual(v3.plan({ kind: 'test.vanessa', common }), [['test', 'vanessa', ...common]]);
+	});
+
+	test('validate.edt в 3.x не получает опций подключения', () => {
+		assert.deepStrictEqual(
+			v3.plan({
+				kind: 'validate.edt',
+				common: [...conn, '--db-user', 'Админ', '--db-pwd', '-x', '--v8version', '8.3.27', '--settings', 'a.json'],
+			}),
+			[['validate', 'edt', '--settings', 'a.json']]
+		);
+	});
+
+	test('значение с дефисом в 3.x передаётся через знак равенства', () => {
+		check(
+			{ kind: 'run.designer', additional: '-debug', common: ['--db-user', 'Админ', '--db-pwd', '-secret'] },
+			[['designer', '--additional', '-debug', '--db-user', 'Админ', '--db-pwd', '-secret']],
+			[['run', 'designer', '--additional=-debug', '--db-user', 'Админ', '--db-pwd=-secret']]
+		);
+	});
+
 	// ---- Конфигурация ----
 	test('cf.build', () => {
 		check(
@@ -229,15 +270,14 @@ suite('vrunnerCli: адаптеры v2/v3', () => {
 		);
 	});
 
-	test('cfe.decompileCfeFile: 2 шага в v2, 1 шаг во временной ИБ в v3', () => {
+	test('cfe.decompileCfeFile: 2 шага в v2, 1 шаг в v3', () => {
 		check(
 			{ kind: 'cfe.decompileCfeFile', file: 'build/out/cfe/Ext1.cfe', extensionName: 'Ext1', out: 'src/cfe/Ext1', common: conn },
 			[
 				['loadext', '--file', 'build/out/cfe/Ext1.cfe', '--extension', 'Ext1', ...conn],
 				['decompileext', 'Ext1', 'src/cfe/Ext1', ...conn],
 			],
-			// v3: сквозные опции не передаются — разборка во временной ИБ
-			[['cfe', 'decompile', '--cfe-file', 'build/out/cfe/Ext1.cfe', '--extension-name', 'Ext1', 'src/cfe/Ext1']]
+			[['cfe', 'decompile', '--cfe-file', 'build/out/cfe/Ext1.cfe', '--extension-name', 'Ext1', ...conn, 'src/cfe/Ext1']]
 		);
 	});
 
@@ -397,26 +437,35 @@ suite('vrunnerCli: сеансы информационной базы', () => {
 	// Подключение к кластеру (адрес RAS, база, администратор, пароль) живёт в
 	// файле настроек проекта: аргумент командной строки перекрыл бы профиль
 
+	const platform = ['--v8version', '8.3.27'] as const;
+
 	test('session.lock: в 3.x команда в группе cluster, сообщение названо иначе', () => {
 		check(
 			{
 				kind: 'session.lock',
 				deniedMessage: 'База закрыта на обслуживание',
 				accessCode: 'code',
-				common: [...conn],
+				common: [...platform],
 			},
 			[[
 				'session', 'lock',
 				'--uccode', 'code',
 				'--lockmessage', 'База закрыта на обслуживание',
-				...conn,
+				...platform,
 			]],
 			[[
 				'cluster', 'session', 'lock',
 				'--uccode', 'code',
 				'--denied-message', 'База закрыта на обслуживание',
-				...conn,
+				...platform,
 			]]
+		);
+	});
+
+	test('session.lock: строка подключения в 3.x не передаётся, у команд кластера её нет', () => {
+		assert.deepStrictEqual(
+			v3.plan({ kind: 'session.lock', common: [...conn, ...platform] }),
+			[['cluster', 'session', 'lock', ...platform]]
 		);
 	});
 
@@ -564,10 +613,11 @@ suite('vrunnerCli: регламентные задания', () => {
 	});
 
 	test('сквозные опции доходят до команды', () => {
+		const common = ['--db-user', 'Админ', '--v8version', '8.3.27'];
 		check(
-			{ kind: 'jobs.lock', common: [...conn] },
-			[['scheduledjobs', 'lock', ...conn]],
-			[['cluster', 'jobs', 'lock', ...conn]]
+			{ kind: 'jobs.lock', common },
+			[['scheduledjobs', 'lock', ...common]],
+			[['cluster', 'jobs', 'lock', ...common]]
 		);
 	});
 });

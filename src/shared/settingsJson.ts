@@ -62,3 +62,42 @@ export function readSettingsJsonSync(filePath: string): unknown {
 export async function readSettingsJson(filePath: string): Promise<unknown> {
 	return parseSettingsJson(await fsPromises.readFile(filePath, 'utf8'));
 }
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function overlayValue(upper: unknown, lower: unknown): unknown {
+	if (upper === undefined || upper === null) {
+		return lower;
+	}
+	if (Array.isArray(upper)) {
+		return Array.isArray(lower) ? [...upper, ...lower] : upper;
+	}
+	if (isJsonObject(upper) && isJsonObject(lower)) {
+		const merged: Record<string, unknown> = { ...upper };
+		for (const [key, value] of Object.entries(lower)) {
+			merged[key] = overlayValue(merged[key], value);
+		}
+		return merged;
+	}
+	return upper;
+}
+
+/**
+ * Накладывает файлы настроек vanessa-runner 3 друг на друга так же, как раннер:
+ * значение более важного файла остаётся, объекты сливаются по ключам, списки
+ * складываются, значение другого вида из менее важного файла отбрасывается.
+ *
+ * @param layers - Разобранные файлы от важного к общему; не объекты пропускаются
+ * @returns Слитые настройки
+ */
+export function overlaySettings(layers: readonly unknown[]): Record<string, unknown> {
+	let merged: Record<string, unknown> = {};
+	for (const layer of layers) {
+		if (isJsonObject(layer)) {
+			merged = overlayValue(merged, layer) as Record<string, unknown>;
+		}
+	}
+	return merged;
+}

@@ -43,14 +43,11 @@ export type VRunnerFeature = keyof typeof VRUNNER_FEATURES;
 /**
  * Разбирает строку версии vrunner.
  *
- * Подходит для вывода `vrunner version` (печатает чистую строку версии,
- * например `2.6.0` или `3.0.0-rc3`). Извлекает первую найденную
- * semver-подобную последовательность, поэтому терпим к лишнему тексту.
+ * Подходит для вывода `vrunner --version` (3.x) и `vrunner version` (2.x):
+ * оба печатают строку версии, например `3.0.0` или `2.6.1`. Извлекает первую
+ * найденную semver-подобную последовательность, поэтому терпим к лишнему тексту.
  *
- * ВАЖНО: использовать команду `vrunner version`, а НЕ `vrunner --version` —
- * последняя в vrunner не поддерживается и завершается ошибкой.
- *
- * @param output - Вывод команды `vrunner version`
+ * @param output - Вывод команды версии vrunner
  * @returns Разобранная версия или undefined, если версию не удалось извлечь
  */
 export function parseVRunnerVersion(output: string): VRunnerVersion | undefined {
@@ -122,7 +119,6 @@ export function compareVRunnerVersions(a: VRunnerVersion, b: VRunnerVersion): nu
 	return 0;
 }
 
-/**
 /**
  * Сравнивает пометки предрелиза: `rc7` < `rc8` < `rc10`.
  *
