@@ -14,7 +14,7 @@ import {
 	type ShellType
 } from '../../utils/commandUtils';
 import { pathConversionPrefix } from '../../utils/shellEscape';
-import { dockerContainerName } from '../../shared/dockerRun';
+import { dockerCommandRun, dockerContainerName } from '../../shared/dockerRun';
 
 suite('commandUtils', () => {
 	// Установка кодировки (chcp/[Console]::OutputEncoding) добавляется только на Windows
@@ -231,6 +231,23 @@ suite('commandUtils', () => {
 		for (const name of names) {
 			assert.match(name, /^1cpt-run-[a-z0-9]+-[a-z0-9]+$/);
 		}
+	});
+
+	test('запуск в контейнере получает новое имя на каждый вызов', () => {
+		const names: string[] = [];
+		const build = (name: string): string => {
+			names.push(name);
+			return `docker run --name ${name}`;
+		};
+
+		const first = dockerCommandRun(build);
+		const second = dockerCommandRun(build);
+
+		assert.strictEqual(names.length, 2);
+		assert.notStrictEqual(names[0], names[1], 'повтор задачи столкнулся бы с именем контейнера, который ещё останавливается');
+		assert.strictEqual(first.command, `docker run --name ${names[0]}`);
+		assert.strictEqual(second.command, `docker run --name ${names[1]}`);
+		assert.strictEqual(typeof first.onCancel, 'function');
 	});
 
 	test('buildDockerCommandSequence отдаёт строку sh одним аргументом хоста', () => {

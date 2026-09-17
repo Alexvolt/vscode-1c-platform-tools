@@ -22,6 +22,18 @@ export interface CancellableProcessResult {
 }
 
 /**
+ * Команда запуска вместе с уборкой при отмене
+ */
+export interface CommandRun {
+	/** Строка команды для оболочки дочернего процесса */
+	command: string;
+	/** Уборка при отмене */
+	onCancel?: () => void;
+	/** Уборка после выхода отменённого процесса */
+	onCancelled?: () => void;
+}
+
+/**
  * Опции выполнения отменяемого процесса
  */
 export interface CancellableProcessOptions {
@@ -35,6 +47,8 @@ export interface CancellableProcessOptions {
 	onOutput?: (chunk: string) => void;
 	/** Уборка при отмене: вызывается до завершения дерева процессов */
 	onCancel?: () => void;
+	/** Уборка после выхода отменённого процесса: то, что он успел запустить снаружи, ещё живо */
+	onCancelled?: () => void;
 }
 
 /**
@@ -87,6 +101,12 @@ export function runCancellableCommand(
 		let cancelled = false;
 		let settled = false;
 
+		// Отменённый заранее запуск не стартует: иначе процесс успел бы создать контейнер или базу
+		if (options?.token?.isCancellationRequested) {
+			resolve({ success: false, stdout, stderr, exitCode: -1, cancelled: true });
+			return;
+		}
+
 		const child = spawn(command, {
 			cwd: options?.cwd,
 			env: options?.env ? { ...process.env, ...options.env } : process.env,
@@ -102,6 +122,9 @@ export function runCancellableCommand(
 			}
 			settled = true;
 			cancellationSubscription?.dispose();
+			if (cancelled) {
+				options?.onCancelled?.();
+			}
 			resolve({
 				success: exitCode === 0 && !cancelled,
 				stdout,
@@ -119,15 +142,6 @@ export function runCancellableCommand(
 				killProcessTree(child.pid);
 			}
 		});
-
-		// Токен мог сработать до запуска
-		if (options?.token?.isCancellationRequested) {
-			cancelled = true;
-			options?.onCancel?.();
-			if (child.pid !== undefined) {
-				killProcessTree(child.pid);
-			}
-		}
 
 		// Кодировку выбирает декодер: на Windows консольные программы пишут не в UTF-8
 		const stdoutDecoder = new ProcessOutputDecoder();

@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { runCancellableCommand } from '../../shared/cancellableProcess';
+import { runCancellableCommand, type CommandRun } from '../../shared/cancellableProcess';
 import { logger } from '../../shared/logger';
 import { currentRoot, deepestProject, projectOf, workspaceFolderOf } from '../../shared/workspaceProjects';
 import { signalTaskFinished } from './taskFinishSignal';
@@ -64,8 +64,11 @@ export function taskProjectRoot(scope: vscode.Task['scope'], project: unknown): 
 export interface VRunnerTaskParams {
 	/** Имя задачи (заголовок панели и метка в списке задач). */
 	name: string;
-	/** Готовая строка команды для выполнения через системную оболочку. */
-	command: string;
+	/**
+	 * Строка команды для системной оболочки. Функция вызывается на каждый запуск
+	 * задачи, включая повтор, и отдаёт команду с уборкой при остановке.
+	 */
+	command: string | (() => CommandRun);
 	/** Рабочая директория выполнения. */
 	cwd: string;
 	/** Дополнительные переменные окружения (поверх process.env). */
@@ -76,8 +79,6 @@ export interface VRunnerTaskParams {
 	definition?: vscode.TaskDefinition;
 	/** Вызывается с exit code при завершении задачи (для отслеживания результата). */
 	exitCallback?: (exitCode: number) => void;
-	/** Уборка при остановке задачи: например, остановка docker-контейнера. */
-	onCancel?: () => void;
 	/** Дописать вывод к прошлой задаче в терминале, а не очистить его: шаги одной команды читаются подряд. */
 	appendOutput?: boolean;
 	/** Получает вывод процесса по мере появления. */
@@ -118,30 +119,30 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 
 	constructor(
 		private readonly name: string,
-		private readonly command: string,
+		private readonly run: CommandRun,
 		private readonly cwd: string,
 		private readonly env?: NodeJS.ProcessEnv,
 		private readonly exitCallback?: (exitCode: number) => void,
-		private readonly onCancel?: () => void,
 		private readonly onOutput?: (chunk: string) => void,
 		private readonly root?: string
 	) {}
 
 	public open(): void {
-		log.debug(`запуск задачи: ${this.command}`);
+		log.debug(`запуск задачи: ${this.run.command}`);
 		this.startedAt = Date.now();
 		if (this.root !== undefined) {
 			rememberTaskProject({ name: this.name, source: VRUNNER_TASK_SOURCE }, this.root);
 		}
 		// Эхо исходной команды в начале вывода (как у штатных задач VS Code),
 		// чтобы было видно, что именно запущено. Служебный префикс кодировки прячем.
-		const displayCommand = this.command.replaceAll('chcp 65001 >nul && ', '');
+		const displayCommand = this.run.command.replaceAll('chcp 65001 >nul && ', '');
 		this.writeEmitter.fire(`[90m> ${displayCommand}[0m\r\n\r\n`);
-		runCancellableCommand(this.command, {
+		runCancellableCommand(this.run.command, {
 			cwd: this.cwd,
 			env: this.env,
 			token: this.cts.token,
-			onCancel: this.onCancel,
+			onCancel: this.run.onCancel,
+			onCancelled: this.run.onCancelled,
 			// Псевдотерминалу нужны переводы строки в формате \r\n.
 			onOutput: (chunk) => {
 				this.onOutput?.(chunk);
@@ -176,11 +177,10 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 export function createVRunnerTaskTerminal(params: VRunnerTaskParams): vscode.Pseudoterminal {
 	return new VRunnerPseudoterminal(
 		params.name,
-		params.command,
+		typeof params.command === 'string' ? { command: params.command } : params.command(),
 		params.cwd,
 		params.env,
 		params.exitCallback,
-		params.onCancel,
 		params.onOutput,
 		params.root ?? currentRoot()
 	);
