@@ -1,5 +1,8 @@
 import * as path from 'node:path';
 
+/** Строка подключения, когда её не задают ни вызов, ни профиль: база, которую vanessa-runner берёт сам. */
+export const DEFAULT_IB_CONNECTION = '/F./build/ib';
+
 const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[/\\]/;
 
 function isWindowsStylePath(p: string): boolean {

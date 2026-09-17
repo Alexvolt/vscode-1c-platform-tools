@@ -40,6 +40,7 @@ import {
 	resolveActiveEnvFileName,
 	detectSettingsFormat,
 } from './envProfiles';
+import { DEFAULT_IB_CONNECTION } from './ibConnectionPath';
 import { containsGitBranchVariable, GIT_BRANCH_VARIABLE, substituteGitBranch } from './launchVariables';
 import { readGitBranchDirName } from './gitHead';
 import {
@@ -2594,11 +2595,7 @@ export class VRunnerManager {
 	 * @returns Строка подключения (например '/F./build/ib')
 	 */
 	public async getActiveIbConnectionValue(): Promise<string> {
-		const override = this.getEffectiveEnvOverrides()?.ibConnection;
-		if (override) {
-			return override;
-		}
-		return (await this.readActiveProfileSetting('ibconnection')) ?? '/F./build/ib';
+		return (await this.getConfiguredIbConnection()) ?? DEFAULT_IB_CONNECTION;
 	}
 
 	/**
@@ -2610,10 +2607,21 @@ export class VRunnerManager {
 	 * @returns Строка подключения (например '/F./build/ib')
 	 */
 	public async getIbConnectionValue(settingsFile?: string): Promise<string> {
-		if (!settingsFile) {
-			return this.getActiveIbConnectionValue();
+		return (await this.getConfiguredIbConnection(settingsFile)) ?? DEFAULT_IB_CONNECTION;
+	}
+
+	/**
+	 * Строка подключения к ИБ, заданная для команды, без значения по умолчанию:
+	 * без неё vanessa-runner собирает и разбирает файлы во временной базе.
+	 *
+	 * @param settingsFile - Файл настроек вызова
+	 * @returns Строка подключения или undefined, если её не задают ни перекрытия, ни файл настроек
+	 */
+	public async getConfiguredIbConnection(settingsFile?: string): Promise<string | undefined> {
+		if (settingsFile) {
+			return this.readSettingsFileOption(settingsFile, 'ibconnection');
 		}
-		return (await this.readSettingsFileOption(settingsFile, 'ibconnection')) ?? '/F./build/ib';
+		return this.getEffectiveEnvOverrides()?.ibConnection || (await this.readActiveProfileSetting('ibconnection'));
 	}
 
 	/**

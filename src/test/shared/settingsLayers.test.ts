@@ -53,4 +53,11 @@ suite('именованный профиль vanessa-runner 3 поверх autum
 			);
 		});
 	});
+
+	test('строка подключения из файла проекта задана и под именованным профилем', async () => {
+		await withDevProfile(async () => {
+			assert.strictEqual(await vrunner.getConfiguredIbConnection(), '/F./build/base');
+			assert.strictEqual(await vrunner.getConfiguredIbConnection('autumn-properties.dev.json'), '/F./build/base');
+		});
+	});
 });

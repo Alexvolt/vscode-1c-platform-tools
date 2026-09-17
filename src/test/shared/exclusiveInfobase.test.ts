@@ -29,20 +29,50 @@ suite('монопольный доступ к информационной ба�
 		}
 	});
 
+	const runs = [
+		{ cli3: false, connectionSet: false },
+		{ cli3: false, connectionSet: true },
+		{ cli3: true, connectionSet: false },
+		{ cli3: true, connectionSet: true },
+	];
+	const cli3 = { cli3: true, connectionSet: true };
+
 	test('база нужна командам, которые её открывают', () => {
 		const kinds = [
 			'cf.loadFromSrc', 'cf.dumpIbToSrc', 'cfe.loadFromSrc', 'infobase.updateDb',
-			'infobase.listExtensions', 'cfe.decompileCfeFile', 'epf.build', 'epf.decompile',
-			'run.designer', 'run.enterprise', 'test.vanessa', 'test.xunit', 'validate.syntaxCheck',
+			'infobase.listExtensions', 'run.designer', 'run.enterprise', 'test.vanessa', 'test.xunit',
+			'validate.syntaxCheck',
 		] as const;
 		for (const kind of kinds) {
-			assert.ok(needsExclusiveInfobase(kind), `${kind} должен требовать базу`);
+			for (const run of runs) {
+				assert.ok(needsExclusiveInfobase(kind, run), `${kind} должен требовать базу: ${JSON.stringify(run)}`);
+			}
 		}
 	});
 
-	test('сборке и разбору файлов база не нужна', () => {
-		for (const kind of ['cf.build', 'cf.decompileFile', 'cfe.buildCfe', 'session.lock'] as const) {
-			assert.ok(!needsExclusiveInfobase(kind), `${kind} обходится без базы`);
+	test('сборка и разборка файлов берут базу, только когда задана строка подключения', () => {
+		const kinds = ['cf.build', 'cf.decompileFile', 'cfe.buildCfe', 'cfe.decompileCfeFile', 'epf.build', 'epf.decompile'] as const;
+		for (const kind of kinds) {
+			assert.ok(needsExclusiveInfobase(kind, { cli3: true, connectionSet: true }), `${kind} в заданной базе`);
+			assert.ok(!needsExclusiveInfobase(kind, { cli3: true, connectionSet: false }), `${kind} во временной базе`);
+		}
+	});
+
+	test('CLI 2.x собирает cf и cfe во временной базе, а cfe-файл разбирает через базу проекта', () => {
+		for (const connectionSet of [false, true]) {
+			for (const kind of ['cf.build', 'cf.decompileFile', 'cfe.buildCfe'] as const) {
+				assert.ok(!needsExclusiveInfobase(kind, { cli3: false, connectionSet }), `${kind} во временной базе`);
+			}
+			assert.ok(needsExclusiveInfobase('cfe.decompileCfeFile', { cli3: false, connectionSet }));
+			assert.strictEqual(needsExclusiveInfobase('epf.build', { cli3: false, connectionSet }), connectionSet);
+		}
+	});
+
+	test('командам кластера файловая база не нужна', () => {
+		for (const kind of ['session.lock', 'session.kill', 'jobs.lock'] as const) {
+			for (const run of runs) {
+				assert.ok(!needsExclusiveInfobase(kind, run), `${kind} обходится без базы`);
+			}
 		}
 	});
 
@@ -53,8 +83,8 @@ suite('монопольный доступ к информационной ба�
 	});
 
 	test('цепочка требует базу, если её требует хоть один шаг', () => {
-		assert.ok(anyNeedsExclusiveInfobase([{ kind: 'cf.build', src: 'src/cf', out: 'build' }, { kind: 'infobase.updateDb' }]));
-		assert.ok(!anyNeedsExclusiveInfobase([{ kind: 'cf.build', src: 'src/cf', out: 'build' }]));
+		assert.ok(anyNeedsExclusiveInfobase([{ kind: 'session.lock' }, { kind: 'infobase.updateDb' }], cli3));
+		assert.ok(!anyNeedsExclusiveInfobase([{ kind: 'session.lock' }, { kind: 'jobs.lock' }], cli3));
 	});
 
 	test('держатель находится по абсолютному пути своей базы', () => {
