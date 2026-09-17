@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { VRunnerManager } from '../../shared/vrunnerManager';
+import { syntaxCheckAllurePathsFromEnv, syntaxCheckJUnitPathFromEnv } from '../../features/testing/projectTestConfig';
 import { writeLocalRunner } from '../fixtures/helpers/vrunnerStub';
 
 const FIXTURE = path.resolve(__dirname, '..', '..', '..', 'src', 'test', 'fixtures', 'settingsLayers');
@@ -58,6 +59,14 @@ suite('именованный профиль vanessa-runner 3 поверх autum
 		await withDevProfile(async () => {
 			assert.strictEqual(await vrunner.getConfiguredIbConnection(), '/F./build/base');
 			assert.strictEqual(await vrunner.getConfiguredIbConnection('autumn-properties.dev.json'), '/F./build/base');
+		});
+	});
+
+	test('отчёт синтаксического контроля ищется там, куда его пишет vanessa-runner', async () => {
+		await withDevProfile(async () => {
+			const { settings, schema } = await vrunner.readActiveSettings();
+			assert.strictEqual(syntaxCheckJUnitPathFromEnv(settings, schema), 'build/out/sc/junit.xml');
+			assert.deepStrictEqual(syntaxCheckAllurePathsFromEnv(settings, schema), ['build/out/sc/allure']);
 		});
 	});
 });

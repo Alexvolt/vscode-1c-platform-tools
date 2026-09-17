@@ -2148,19 +2148,17 @@ export class VRunnerManager {
 	 * @throws {Error} Если рабочая область не открыта
 	 */
 	/**
-	 * Читает файл настроек активного профиля и возвращает его вместе со схемой.
+	 * Настройки активного профиля вместе со схемой.
 	 *
 	 * Схема определяется по установленной версии vrunner: env.json (2.x) или
 	 * autumn-properties.json (3.x). Значения опций внутри читаются с учётом
 	 * схемы (см. settingValue в projectTestConfig).
 	 *
-	 * @returns Разобранное содержимое (пустой объект при ошибке) и схема
+	 * @returns Настройки, как их видит vanessa-runner (см. {@link readSettingsLayers}), и схема
 	 */
 	public async readActiveSettings(): Promise<{ settings: Record<string, unknown>; schema: SettingsSchema }> {
 		await this.getVRunnerVersion();
-		const schema = this.activeSettingsSchema();
-		const settings = (await this.readEnvJson(this.getActiveEnvFile())) as Record<string, unknown>;
-		return { settings, schema };
+		return this.readSettingsLayers(this.getActiveEnvFile(), this.activeSettingsSchema());
 	}
 
 	public async readEnvJson(fileName: string = BASE_ENV_FILE): Promise<any> {

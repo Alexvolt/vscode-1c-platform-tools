@@ -348,7 +348,7 @@ suite('vrunnerCli: адаптеры v2/v3', () => {
 		};
 		assert.deepStrictEqual(v3.plan(intent), [[
 			'test', 'yaxunit', '--ext', 'Тесты', '--modules', 'ОМ_Тест',
-			'--report', 'build/out/testapi/yaxunit/report.xml', '--report-format', 'jUnit', ...conn,
+			'--report-format', 'jUnit', '--report-path', 'build/out/testapi/yaxunit/report.xml', ...conn,
 		]]);
 		assert.throws(() => v2.plan(intent), /готовым конфигом/);
 	});
@@ -421,7 +421,7 @@ suite('vrunnerCli: адаптеры v2/v3', () => {
 		check(
 			{ kind: 'validate.edt', src: 'ssl31', junitPath: 'build/edt.xml' },
 			[['edt-validate', '--junitpath', 'build/edt.xml']],
-			[['validate', 'edt', '--src', 'ssl31', '--junitpath', 'build/edt.xml']]
+			[['validate', 'edt', '--src', 'ssl31', '--report-format', 'junit', '--report-path', 'build/edt.xml']]
 		);
 	});
 

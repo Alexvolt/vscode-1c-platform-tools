@@ -90,14 +90,16 @@ export class SyntaxCheckDiagnostics implements vscode.Disposable {
 		}
 
 		await runWithProject(root, async () => {
-			const envFile = this.vrunner.getActiveEnvFile();
 			const junitAbs = await this.resolveJunitPath(root);
 			if (generation !== this.generation) {
 				return;
 			}
 
-			// Следим за активным env-файлом: правка пути/опции syntax-check → пересборка
-			const envWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, envFile));
+			// Следим за файлами настроек профиля: правка пути/опции syntax-check → пересборка
+			const settingsFiles = this.vrunner.settingsLayerFiles(this.vrunner.getActiveEnvFile());
+			const envWatcher = vscode.workspace.createFileSystemWatcher(
+				new vscode.RelativePattern(root, settingsFiles.length > 1 ? `{${settingsFiles.join(',')}}` : settingsFiles[0])
+			);
 			// Следим за файлом отчёта: перезапись после прогона → обновление диагностики
 			const junitWatcher = vscode.workspace.createFileSystemWatcher(buildWatchPattern(root, junitAbs));
 			this.reconfigurableListeners.push(

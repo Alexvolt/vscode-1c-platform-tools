@@ -2,6 +2,7 @@ import * as assert from 'node:assert';
 import * as path from 'node:path';
 import {
 	resolveConfigPath,
+	settingValue,
 	extractJUnitPathFromReportsXunit,
 	extractAllurePathFromReportsXunit,
 	syntaxCheckAllurePathsFromEnv,
@@ -68,14 +69,63 @@ suite('projectTestConfig', () => {
 			}),
 			['build/out/syntax-check/allure-xml', 'build/out/syntax-check/allure']
 		);
+		assert.deepStrictEqual(syntaxCheckAllurePathsFromEnv({ 'syntax-check': {} }), []);
+	});
+
+	test('syntaxCheckAllurePathsFromEnv: в 3.x каталог из report-path, без allure в паре из allure-results', () => {
+		const section = (values: Record<string, unknown>) => ({ vrunner: { validate: { 'syntax-check': values } } });
 		assert.deepStrictEqual(
 			syntaxCheckAllurePathsFromEnv(
-				{ vrunner: { validate: { 'syntax-check': { 'allure-results2': 'build/out/allure' } } } },
+				section({ 'report-format': ['junit', 'allure'], 'report-path': 'build/out/sc/', 'allure-results': 'build/old' }),
 				'v3'
 			),
-			['build/out/allure']
+			['build/out/sc/allure']
 		);
-		assert.deepStrictEqual(syntaxCheckAllurePathsFromEnv({ 'syntax-check': {} }), []);
+		assert.deepStrictEqual(
+			syntaxCheckAllurePathsFromEnv(section({ 'report-path': 'build/sc.xml', 'allure-results': 'build/old' }), 'v3'),
+			['build/old']
+		);
+		assert.deepStrictEqual(
+			syntaxCheckAllurePathsFromEnv(section({ 'report-format': 'Allure', 'report-path': 'build/allure' }), 'v3'),
+			['build/allure']
+		);
+		assert.deepStrictEqual(
+			syntaxCheckAllurePathsFromEnv(section({ 'report-path': 'build/junit.xml', 'allure-results2': 'build/a2' }), 'v3'),
+			[],
+			'без report-format отчёт junit, allure-results2 в 3.x нет'
+		);
+	});
+
+	test('syntaxCheckJUnitPathFromEnv: в 3.x report-path перекрывает junitpath', () => {
+		const section = (values: Record<string, unknown>) => ({ vrunner: { validate: { 'syntax-check': values } } });
+		assert.strictEqual(
+			syntaxCheckJUnitPathFromEnv(section({ 'report-path': 'build/sc.xml', junitpath: 'build/old.xml' }), 'v3'),
+			'build/sc.xml'
+		);
+		assert.strictEqual(
+			syntaxCheckJUnitPathFromEnv(section({ 'report-format': ['JUnit', 'allure'], 'report-path': 'build/sc' }), 'v3'),
+			'build/sc/junit.xml'
+		);
+		assert.strictEqual(
+			syntaxCheckJUnitPathFromEnv(section({ 'report-format': ['allure'], 'report-path': 'build/a', junitpath: 'build/old.xml' }), 'v3'),
+			'build/old.xml'
+		);
+	});
+
+	test('settingValue: в 3.x опция ищется от секции команды к общему уровню', () => {
+		const settings = {
+			vrunner: {
+				'report-format': ['junit', 'allure'],
+				validate: { 'report-path': 'build/validate', 'syntax-check': { groupbymetadata: true, junitpath: null } },
+				junitpath: 'build/common.xml',
+			},
+		};
+		assert.strictEqual(settingValue(settings, 'v3', 'syntax-check', 'groupbymetadata'), true);
+		assert.strictEqual(settingValue(settings, 'v3', 'syntax-check', 'report-path'), 'build/validate');
+		assert.strictEqual(settingValue(settings, 'v3', 'syntax-check', 'junitpath'), 'build/common.xml');
+		assert.strictEqual(settingValue(settings, 'v3', 'xunit', 'report-path'), undefined);
+		assert.strictEqual(syntaxCheckJUnitPathFromEnv(settings, 'v3'), 'build/validate/junit.xml');
+		assert.deepStrictEqual(syntaxCheckAllurePathsFromEnv(settings, 'v3'), ['build/validate/allure']);
 	});
 
 	test('extractJUnitPathFromReportsXunit: синтаксис vanessa-runner 3', () => {
@@ -212,6 +262,28 @@ suite('projectTestConfig', () => {
 		assert.deepStrictEqual(yaxunitSectionFromEnv(allure, 'v3'), { configPath: undefined, report: undefined });
 		// v2-читатель не находит значения в autumn-структуре
 		assert.strictEqual(yaxunitSectionFromEnv(autumn, 'v2').configPath, undefined);
+	});
+
+	test('yaxunitSectionFromEnv: в 3.x путь отчёта из report-path по каскаду, report запасная', () => {
+		const yaxunit = (values: Record<string, unknown>, common: Record<string, unknown> = {}) =>
+			({ vrunner: { ...common, test: { yaxunit: values } } });
+		assert.strictEqual(
+			yaxunitSectionFromEnv(yaxunit({ 'report-path': 'build/yax.xml', report: 'build/old.xml' }), 'v3').report,
+			'build/yax.xml'
+		);
+		assert.strictEqual(
+			yaxunitSectionFromEnv(yaxunit({ report: 'build/old.xml' }, { 'report-path': 'build/common.xml' }), 'v3').report,
+			'build/common.xml'
+		);
+		assert.strictEqual(
+			yaxunitSectionFromEnv(yaxunit({ 'report-format': ['JUnit'], report: 'build/old.xml' }), 'v3').report,
+			'build/old.xml'
+		);
+		assert.strictEqual(
+			yaxunitSectionFromEnv(yaxunit({ 'report-path': 'build/yax' }, { 'report-format': ['junit', 'allure'] }), 'v3').report,
+			undefined,
+			'YAxUnit пишет один отчёт за прогон'
+		);
 	});
 
 	test('syntaxCheckJUnitPathFromEnv читает --junitpath секции syntax-check', () => {

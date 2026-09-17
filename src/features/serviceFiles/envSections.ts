@@ -137,8 +137,8 @@ export const AUTUMN_OPTIONAL_SECTIONS: AutumnSectionOption[] = [
 		section: {
 			groupbymetadata: true,
 			'exception-file': 'tools/syntax-check-excludes.txt',
-			junitpath: 'build/out/syntax-check/junit/junit.xml',
-			'allure-results2': 'build/out/syntax-check/allure',
+			'report-format': ['junit', 'allure'],
+			'report-path': 'build/out/syntax-check',
 			mode: [
 				'ExtendedModulesCheck',
 				'ThinClient',

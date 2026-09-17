@@ -318,7 +318,9 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 					options.push('--tests', intent.filter.tests.join(','));
 				}
 				if (intent.report !== undefined) {
-					options.push('--report', intent.report, '--report-format', 'jUnit');
+					// Пара опций из командной строки перекрывает пару из настроек,
+					// а устаревшую --report перекрыл бы report-path из настроек
+					options.push('--report-format', 'jUnit', '--report-path', intent.report);
 				}
 				if (intent.ordinaryApp !== undefined) {
 					options.push('--ordinaryapp', intent.ordinaryApp);
@@ -339,7 +341,7 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 			case 'validate.edt': {
 				const options = [
 					...(intent.src !== undefined ? ['--src', intent.src] : []),
-					...(intent.junitPath !== undefined ? ['--junitpath', intent.junitPath] : []),
+					...(intent.junitPath !== undefined ? ['--report-format', 'junit', '--report-path', intent.junitPath] : []),
 				];
 				return [cmd(['validate', 'edt'], [...options, ...common(intent)], [])];
 			}
