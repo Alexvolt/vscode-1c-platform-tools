@@ -16,10 +16,13 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import {
+	commandPrefix,
 	escapeCommandArg,
 	escapeCommandArgs,
 	isBashLikeOnWindows,
+	joinShellCommands,
 	normalizeArgForShell,
+	pathConversionPrefix,
 	PROCESS_HOST_SHELL,
 	quoteExecutable,
 	type ShellType,
@@ -247,44 +250,11 @@ function normalizePathForShell(filePath: string, shellType: ShellType): string {
 }
 
 /**
- * Формирует префикс команды для установки кодировки UTF-8 в зависимости от оболочки
- *
- * Для Windows:
- * - PowerShell: использует [Console]::OutputEncoding
- * - cmd: использует chcp 65001
- * - bash (Git Bash/MSYS): использует chcp.com 65001 — консоль общая с Windows
- *
- * Для Unix-систем: кодировка обычно уже настроена, префикс не нужен
- * 
- * @param shellType - Тип оболочки терминала
- * @returns Префикс команды для установки кодировки или пустая строка
- */
-function getEncodingPrefix(shellType: ShellType): string {
-	if (process.platform !== 'win32') {
-		return '';
-	}
-	
-	if (shellType === 'powershell') {
-		return 'chcp 65001 | Out-Null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; ';
-	}
-	
-	if (shellType === 'cmd') {
-		// В cmd используем chcp для установки кодировки UTF-8
-		return 'chcp 65001 >nul && ';
-	}
-
-	// Git Bash/MSYS работают поверх той же Windows-консоли: без chcp oscript выводит кириллицу
-	// в OEM-кодировке. Builtin chcp из bash недоступен — только chcp.com; ошибки глушим,
-	// чтобы отсутствие chcp.com в PATH (например, WSL без interop) не ломало команду.
-	return 'chcp.com 65001 >/dev/null 2>&1; ';
-}
-
-/**
  * Формирует команду для выполнения в терминале с учетом типа оболочки
- * 
+ *
  * Автоматически:
  * - Нормализует пути для bash оболочек на Windows
- * - Устанавливает кодировку UTF-8 для Windows (chcp для cmd, [Console]::OutputEncoding для PowerShell)
+ * - Ставит префикс команды: кодировку UTF-8 на Windows, отключение конвертации путей MSYS
  * - Экранирует аргументы в соответствии с синтаксисом оболочки
  * 
  * @param executablePath - Путь к исполняемому файлу
@@ -296,9 +266,8 @@ export function buildCommand(executablePath: string, args: string[], shellType?:
 	const shell = shellType || detectShellType();
 	const quotedPath = quoteExecutable(normalizePathForShell(executablePath, shell), shell);
 	const argsString = escapeCommandArgs(args, shell);
-	const encodingPrefix = getEncodingPrefix(shell);
-	
-	return `${encodingPrefix}${quotedPath} ${argsString}`;
+
+	return `${commandPrefix(shell)}${quotedPath} ${argsString}`;
 }
 
 /**
@@ -315,26 +284,7 @@ export function buildCommand(executablePath: string, args: string[], shellType?:
 export function buildProcessCommand(executablePath: string, args: string[]): string {
 	const quotedPath = quoteExecutable(executablePath, PROCESS_HOST_SHELL);
 	const argsString = escapeCommandArgs(args, PROCESS_HOST_SHELL);
-	return `${getEncodingPrefix(PROCESS_HOST_SHELL)}${quotedPath} ${argsString}`;
-}
-
-/**
- * Получает разделитель команд для указанной оболочки
- * 
- * - PowerShell: `;` (последовательное выполнение, ошибки не останавливают)
- * - cmd/bash: `&&` (условное выполнение, останавливается при ошибке)
- * 
- * @param shellType - Тип оболочки терминала
- * @returns Разделитель команд ('; ' для PowerShell, ' && ' для остальных)
- */
-function getCommandSeparator(shellType: ShellType): string {
-	if (shellType === 'powershell') {
-		// В PowerShell используем ; для последовательного выполнения
-		// Каждая команда выполняется независимо, ошибки не останавливают выполнение
-		return '; ';
-	}
-	// В cmd и bash используем && для условного выполнения (останавливается при ошибке)
-	return ' && ';
+	return `${commandPrefix(PROCESS_HOST_SHELL)}${quotedPath} ${argsString}`;
 }
 
 /**
@@ -349,8 +299,7 @@ function getCommandSeparator(shellType: ShellType): string {
  * @returns Объединенная строка команд с соответствующими разделителями
  */
 export function joinCommands(commands: string[], shellType?: ShellType): string {
-	const shell = shellType || detectShellType();
-	return commands.join(getCommandSeparator(shell));
+	return joinShellCommands(commands, shellType || detectShellType());
 }
 
 /**
@@ -411,7 +360,7 @@ export function buildDockerCommand(
 	// получает как argv, поэтому экранируем их для оболочки хоста.
 	const dockerArgs = dockerRunArgs(dockerImage, vrunnerArgs, normalizePathForShell(workspaceRoot, shell), containerName);
 
-	return `docker ${escapeCommandArgs(dockerArgs, shell)}`;
+	return `${pathConversionPrefix(shell)}docker ${escapeCommandArgs(dockerArgs, shell)}`;
 }
 
 /**
@@ -453,7 +402,7 @@ export function buildDockerCommandSequence(
 
 	// Готовая строка sh нормализации слэшей не подлежит: обратный слэш в ней —
 	// часть экранирования апострофа ('\''), а не путь.
-	return `docker ${escapeCommandArgs(dockerArgs, shell)} ${escapeCommandArg(innerCommand, shell)}`;
+	return `${pathConversionPrefix(shell)}docker ${escapeCommandArgs(dockerArgs, shell)} ${escapeCommandArg(innerCommand, shell)}`;
 }
 
 /**

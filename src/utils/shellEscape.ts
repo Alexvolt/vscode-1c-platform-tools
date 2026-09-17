@@ -1,5 +1,6 @@
 /**
- * Экранирование аргументов для конкретной оболочки.
+ * Строка команды для конкретной оболочки: экранирование аргументов, префикс
+ * команды и соединение команд.
  *
  * Тип оболочки передаётся явно: `exec` и `spawn({ shell: true })` на Windows
  * всегда идут через cmd.exe, даже если терминал — PowerShell.
@@ -198,4 +199,70 @@ export function quoteExecutable(executablePath: string, shellType: ShellType): s
 		return quoted === executablePath ? quoted : `& ${quoted}`;
 	}
 	return escapeCommandArg(executablePath, shellType);
+}
+
+/**
+ * Присваивание перед командой, отключающее конвертацию аргументов MSYS.
+ *
+ * Git Bash и MSYS2 на Windows переписывают аргументы программы Windows, похожие
+ * на POSIX-пути: `/workspace` становится `C:/Program Files/Git/workspace`,
+ * `/F./build/ib` тоже. `MSYS2_ARG_CONV_EXCL='*'` выключает это только для
+ * аргументов: переменные окружения с путями вида `/c/...` из профиля
+ * пользователя по-прежнему приходят программе как `C:/...`;
+ * `MSYS_NO_PATHCONV` выключил бы и их. Присваивание действует на одну команду
+ * и не остаётся в оболочке; bash без MSYS (WSL, Cygwin) получает обычную
+ * переменную окружения.
+ *
+ * @param shellType - Оболочка, которая будет разбирать строку
+ * @returns Префикс команды или пустая строка
+ */
+export function pathConversionPrefix(shellType: ShellType): string {
+	return isBashLikeOnWindows(shellType) ? `MSYS2_ARG_CONV_EXCL='*' ` : '';
+}
+
+/**
+ * Префикс кодовой страницы UTF-8 на Windows: без него oscript выводит кириллицу
+ * в OEM-кодировке. На других ОС не нужен.
+ *
+ * @param shellType - Оболочка, которая будет разбирать строку
+ * @returns Префикс команды или пустая строка
+ */
+function encodingPrefix(shellType: ShellType): string {
+	if (process.platform !== 'win32') {
+		return '';
+	}
+	if (shellType === 'powershell') {
+		return 'chcp 65001 | Out-Null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; ';
+	}
+	if (shellType === 'cmd') {
+		return 'chcp 65001 >nul && ';
+	}
+	// Git Bash/MSYS работают поверх той же Windows-консоли: без chcp oscript выводит кириллицу
+	// в OEM-кодировке. Builtin chcp из bash недоступен — только chcp.com; ошибки глушим,
+	// чтобы отсутствие chcp.com в PATH (например, WSL без interop) не ломало команду.
+	return 'chcp.com 65001 >/dev/null 2>&1; ';
+}
+
+/**
+ * Префикс одной команды: кодовая страница и отключение конвертации путей MSYS.
+ *
+ * @param shellType - Оболочка, которая будет разбирать строку
+ * @returns Префикс, после которого идёт исполняемый файл
+ */
+export function commandPrefix(shellType: ShellType): string {
+	return encodingPrefix(shellType) + pathConversionPrefix(shellType);
+}
+
+/**
+ * Соединяет команды для оболочки.
+ *
+ * PowerShell идёт через `;`: следующая команда выполняется и после ошибки.
+ * cmd и POSIX-оболочки идут через `&&`: цепочка останавливается на ошибке.
+ *
+ * @param commands - Готовые строки команд
+ * @param shellType - Оболочка, которая будет разбирать строку
+ * @returns Команды одной строкой
+ */
+export function joinShellCommands(commands: string[], shellType: ShellType): string {
+	return commands.join(shellType === 'powershell' ? '; ' : ' && ');
 }
