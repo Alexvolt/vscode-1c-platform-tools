@@ -5,7 +5,8 @@
  * странице консоли, а `chcp` уважают не все. Декодер смотрит на сами байты:
  * пока идёт ASCII, кодировка не важна; на первом же не-ASCII байте поток
  * проверяется на корректность UTF-8 и дальше читается либо как UTF-8, либо как
- * однобайтовая кодовая страница.
+ * однобайтовая кодовая страница. Поток в UTF-16LE узнаётся по нулевому старшему
+ * байту у латиницы.
  *
  * @module processOutput
  */
@@ -107,6 +108,28 @@ export function pickFallbackEncoding(buffer: Buffer): FallbackEncoding {
 }
 
 /**
+ * Похож ли поток на UTF-16LE: у латиницы, цифр и знаков старший байт нулевой,
+ * а в однобайтовых кодировках и UTF-8 нулевых байтов в тексте нет.
+ *
+ * @param buffer - Начало вывода
+ * @returns true, если в первых байтах хотя бы две пары «символ, 0» и нет пары «0, 0»
+ */
+export function looksUtf16le(buffer: Buffer): boolean {
+	const length = Math.min(buffer.length, 64) & ~1;
+	let asciiPairs = 0;
+	for (let index = 0; index < length; index += 2) {
+		if (buffer[index + 1] !== 0) {
+			continue;
+		}
+		if (buffer[index] === 0) {
+			return false;
+		}
+		asciiPairs++;
+	}
+	return asciiPairs >= 2;
+}
+
+/**
  * Потоковый декодер вывода процесса.
  *
  * Держит незавершённый хвост между чанками, поэтому многобайтовый символ,
@@ -129,6 +152,15 @@ export class ProcessOutputDecoder {
 		this.pending = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
 
 		if (this.decoder === undefined) {
+			if (this.pending.length < 4) {
+				// По одному-трём байтам UTF-16 от ASCII не отличить: решение ждёт следующих байтов
+				return '';
+			}
+			if (looksUtf16le(this.pending)) {
+				this.decoder = new TextDecoder('utf-16le');
+				return this.take(this.pending.length);
+			}
+
 			const firstHighByte = this.pending.findIndex((byte) => byte >= 0x80);
 			if (firstHighByte === -1) {
 				return this.take(this.pending.length);
@@ -155,7 +187,13 @@ export class ProcessOutputDecoder {
 			return '';
 		}
 		if (this.decoder === undefined) {
-			this.decoder = new TextDecoder(scanUtf8(this.pending) === 'valid' ? 'utf-8' : pickFallbackEncoding(this.pending));
+			this.decoder = new TextDecoder(
+				looksUtf16le(this.pending)
+					? 'utf-16le'
+					: scanUtf8(this.pending) === 'valid'
+						? 'utf-8'
+						: pickFallbackEncoding(this.pending)
+			);
 		}
 		const rest = this.pending;
 		this.pending = Buffer.alloc(0);

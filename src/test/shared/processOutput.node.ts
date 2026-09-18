@@ -7,10 +7,12 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
-import { ProcessOutputDecoder, decodeProcessOutput, pickFallbackEncoding, scanUtf8 } from '../../shared/processOutput';
+import { ProcessOutputDecoder, decodeProcessOutput, looksUtf16le, pickFallbackEncoding, scanUtf8 } from '../../shared/processOutput';
 
 const PHRASE = 'Требуемая версия OneScript: 2.0.0';
 const MIXED = 'compile - Сборка cf-файла из исходников.';
+// Лаунчер 1cedtcli пишет в stderr в UTF-16LE без BOM
+const LAUNCHER = 'Failed to copy file C:\\edt\\1cedtcli-startup.txt: Процесс не может получить доступ к файлу';
 
 /** Кодирует строку в однобайтовую кодовую страницу через обратную таблицу TextDecoder. */
 function encodeSingleByte(text: string, encoding: string): Buffer {
@@ -31,6 +33,7 @@ function encodeSingleByte(text: string, encoding: string): Buffer {
 const UTF8 = Buffer.from(PHRASE, 'utf8');
 const CP866 = encodeSingleByte(PHRASE, 'ibm866');
 const CP1251 = encodeSingleByte(PHRASE, 'windows-1251');
+const UTF16 = Buffer.from(LAUNCHER, 'utf16le');
 
 function resolveRepoRoot(): string {
 	let dir = __dirname;
@@ -120,15 +123,40 @@ describe('decodeProcessOutput', () => {
 	test('пустой вывод не падает', () => {
 		assert.equal(decodeProcessOutput(Buffer.alloc(0)), '');
 	});
+
+	test('читает UTF-16LE', () => {
+		assert.equal(decodeProcessOutput(UTF16), LAUNCHER);
+		assert.equal(decodeProcessOutput(Buffer.from('Ошибка: файл занят', 'utf16le')), 'Ошибка: файл занят');
+	});
+});
+
+describe('looksUtf16le', () => {
+	test('узнаёт латиницу с нулевым старшим байтом', () => {
+		assert.equal(looksUtf16le(UTF16), true);
+		assert.equal(looksUtf16le(Buffer.from('Ошибка: файл', 'utf16le')), true);
+	});
+
+	test('текст без нулевых байтов и короткое начало не считаются UTF-16', () => {
+		assert.equal(looksUtf16le(UTF8), false);
+		assert.equal(looksUtf16le(CP866), false);
+		assert.equal(looksUtf16le(Buffer.from('opm install', 'utf8')), false);
+		assert.equal(looksUtf16le(UTF16.subarray(0, 2)), false);
+		assert.equal(looksUtf16le(Buffer.from([0x00, 0x00, 0x41, 0x00])), false);
+	});
 });
 
 describe('ProcessOutputDecoder по чанкам', () => {
-	for (const [label, bytes] of [['utf-8', UTF8], ['ibm866', CP866], ['windows-1251', CP1251]] as const) {
+	for (const [label, bytes, expected] of [
+		['utf-8', UTF8, PHRASE],
+		['ibm866', CP866, PHRASE],
+		['windows-1251', CP1251, PHRASE],
+		['utf-16le', UTF16, LAUNCHER],
+	] as const) {
 		test(`${label}: любое разбиение даёт тот же текст`, () => {
 			for (let cut = 0; cut <= bytes.length; cut++) {
 				const decoder = new ProcessOutputDecoder();
 				const text = decoder.push(bytes.subarray(0, cut)) + decoder.push(bytes.subarray(cut)) + decoder.flush();
-				assert.equal(text, PHRASE, `разрез на ${cut} байте`);
+				assert.equal(text, expected, `разрез на ${cut} байте`);
 			}
 		});
 	}
@@ -159,5 +187,9 @@ describe('живой дочерний процесс', () => {
 
 	test('вывод в windows-1251 читается', async () => {
 		assert.equal(await runEchoBytes(encodeSingleByte(MIXED, 'windows-1251')), MIXED);
+	});
+
+	test('вывод в UTF-16LE читается', async () => {
+		assert.equal(await runEchoBytes(UTF16), LAUNCHER);
 	});
 });
