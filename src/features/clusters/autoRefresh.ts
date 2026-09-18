@@ -76,7 +76,7 @@ export class ClustersAutoRefresh {
 	}
 
 	dispose(): void {
+		// При выгрузке окна команды уже отменены: setContext здесь падает с Canceled
 		this.stop();
-		void vscode.commands.executeCommand('setContext', AUTO_REFRESH_CONTEXT_KEY, false);
 	}
 }
