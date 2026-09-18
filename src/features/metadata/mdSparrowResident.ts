@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { processAlive } from '../../shared/cacheDir';
 import type { ScopedLogger } from '../../shared/logger';
 import type { MdSparrowRuntime } from './mdSparrowBootstrap';
 import type { MdSparrowRunResult } from './mdSparrowRunner';
@@ -900,16 +901,4 @@ async function sweepStaleCopies(tempRoot: string): Promise<void> {
 			await fs.rm(path.join(tempRoot, entry), { recursive: true, force: true }).catch(() => undefined);
 		})
 	);
-}
-
-function processAlive(pid: number): boolean {
-	if (pid === process.pid) {
-		return true;
-	}
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === 'EPERM';
-	}
 }

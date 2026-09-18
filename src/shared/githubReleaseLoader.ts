@@ -13,6 +13,7 @@ import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import * as vscode from 'vscode';
+import { ComponentBusyError, processAlive, removeUnlessBusy } from './cacheDir';
 import { extractZip } from './zipExtract';
 import { logger } from './logger';
 import { githubTokenFromSession, githubTokenFromStore } from './githubToken';
@@ -23,8 +24,12 @@ const execFileAsync = promisify(execFile);
 const NO_INDENTATION = 0;
 /** Не опрашивать GitHub чаще, чем раз в это время (8 минут). */
 const UPDATE_CHECK_THROTTLE_MS = 8 * 60 * 1000;
-/** Подкаталог кэша, куда идёт скачивание до установки в кэш. */
-const DOWNLOAD_DIR = '_dl';
+/** Префикс каталога загрузки в кэше компонента; за ним номер процесса, который качает. */
+const DOWNLOAD_PREFIX = '_dl-';
+/** Каталоги версий, которые этот процесс сейчас заполняет. */
+const installing = new Set<string>();
+/** Кэши компонентов, которые этот процесс уже убирал. */
+const tidied = new Set<string>();
 /** Сколько ждать ответа GitHub API: дольше ждать нечего, дальше работаем на кэше. */
 const API_TIMEOUT_MS = 15 * 1000;
 /** Подсказка на машине, которой GitHub недоступен. */
@@ -303,14 +308,51 @@ function tagDirOf(baseDir: string, spec: ReleaseComponentSpec, tag: string): str
 }
 
 /**
- * Убирает каталоги прежних версий компонента, оставляя текущую.
+ * Каталог версии, в котором лежит артефакт из штампа.
+ *
+ * @param root каталог кэша компонента
+ * @param stamp штамп
+ */
+function versionDirOf(root: string, stamp: StampInfo | undefined): string | undefined {
+	const assetPath = stamp?.assetPath ?? stamp?.jarPath;
+	if (!assetPath) {
+		return undefined;
+	}
+	const relative = path.relative(root, assetPath);
+	if (relative === '' || path.isAbsolute(relative) || relative.startsWith('..')) {
+		return undefined;
+	}
+	return path.join(root, relative.split(path.sep)[0]);
+}
+
+/** Каталог загрузки живого процесса. */
+function downloadInProgress(entry: string): boolean {
+	const owner = new RegExp(`^${DOWNLOAD_PREFIX}(\\d+)-`).exec(entry);
+	return owner !== null && processAlive(Number(owner[1]));
+}
+
+/**
+ * Раз за сеанс убирает в фоне прежние версии и загрузки завершившихся окон.
+ *
+ * @param baseDir каталог globalStorage расширения
+ * @param spec описание компонента
+ */
+function tidyReleaseCache(baseDir: string, spec: ReleaseComponentSpec): void {
+	if (!tidied.has(path.join(baseDir, spec.cacheSubdir))) {
+		void dropOtherVersions(baseDir, spec, undefined).catch(() => undefined);
+	}
+}
+
+/**
+ * Убирает каталоги прежних версий компонента, оставляя текущую. Занятые остаются до следующей уборки.
  *
  * @param baseDir каталог globalStorage расширения
  * @param spec описание компонента
  * @param keepDir каталог версии, которая осталась в работе
  */
-async function dropOtherVersions(baseDir: string, spec: ReleaseComponentSpec, keepDir: string): Promise<void> {
+async function dropOtherVersions(baseDir: string, spec: ReleaseComponentSpec, keepDir: string | undefined): Promise<void> {
 	const root = path.join(baseDir, spec.cacheSubdir);
+	tidied.add(root);
 	let entries: string[];
 	try {
 		entries = await fs.readdir(root);
@@ -319,10 +361,16 @@ async function dropOtherVersions(baseDir: string, spec: ReleaseComponentSpec, ke
 	}
 	for (const entry of entries) {
 		const full = path.join(root, entry);
-		if (full === keepDir || entry === spec.stampName || entry === DOWNLOAD_DIR) {
+		if (full === keepDir || entry === spec.stampName || installing.has(full) || downloadInProgress(entry)) {
 			continue;
 		}
-		await fs.rm(full, { recursive: true, force: true }).catch(() => undefined);
+		// Штамп перечитывается: другое окно могло переключить его на свою версию
+		if (full === versionDirOf(root, await readStamp(baseDir, spec))) {
+			continue;
+		}
+		if (!(await removeUnlessBusy(full).catch(() => false))) {
+			log.debug(`${spec.label}: каталог оставлен: ${full}`);
+		}
 	}
 }
 
@@ -341,28 +389,50 @@ export async function installReleaseAsset(
 	spec: ReleaseComponentSpec,
 	install: { tag: string; assetName: string; sourceFile: string }
 ): Promise<EnsuredComponent> {
-	await spec.beforeReplace?.();
-	const destDir = tagDirOf(baseDir, spec, install.tag);
-	await fs.rm(destDir, { recursive: true, force: true }).catch(() => undefined);
-	await fs.mkdir(destDir, { recursive: true });
-
-	let assetPath: string;
-	if (spec.extract) {
-		await extractArchive(install.sourceFile, destDir);
-		assetPath = destDir;
-	} else {
-		assetPath = path.join(destDir, install.assetName);
-		await fs.copyFile(install.sourceFile, assetPath);
+	// Ту же версию могло поставить другое окно, пока шла загрузка
+	const stamp = await readStamp(baseDir, spec);
+	if (
+		stamp?.tag === install.tag &&
+		stamp.assetName === install.assetName &&
+		stamp.assetPath !== undefined &&
+		fssync.existsSync(stamp.assetPath)
+	) {
+		return { tag: stamp.tag, assetPath: stamp.assetPath };
 	}
+	await spec.beforeReplace?.();
+	let destDir = tagDirOf(baseDir, spec, install.tag);
+	// Ту же версию может держать запущенный процесс: она остаётся ему, новая ложится рядом
+	if (!(await removeUnlessBusy(destDir))) {
+		destDir = await fs.mkdtemp(`${destDir}-`);
+	}
+	installing.add(destDir);
+	try {
+		await fs.mkdir(destDir, { recursive: true });
+		let assetPath: string;
+		try {
+			if (spec.extract) {
+				await extractArchive(install.sourceFile, destDir);
+				assetPath = destDir;
+			} else {
+				assetPath = path.join(destDir, install.assetName);
+				await fs.copyFile(install.sourceFile, assetPath);
+			}
+		} catch (error) {
+			await fs.rm(destDir, { recursive: true, force: true }).catch(() => undefined);
+			throw error;
+		}
 
-	await writeStamp(baseDir, spec, {
-		tag: install.tag,
-		assetPath,
-		assetName: install.assetName,
-		lastCheckMs: Date.now(),
-	});
-	await dropOtherVersions(baseDir, spec, destDir);
-	return { tag: install.tag, assetPath };
+		await writeStamp(baseDir, spec, {
+			tag: install.tag,
+			assetPath,
+			assetName: install.assetName,
+			lastCheckMs: Date.now(),
+		});
+		await dropOtherVersions(baseDir, spec, destDir);
+		return { tag: install.tag, assetPath };
+	} finally {
+		installing.delete(destDir);
+	}
 }
 
 /**
@@ -402,6 +472,7 @@ export async function ensureReleaseComponent(
 	const inCache = usableCachedComponent(cached, spec);
 	if (inCache && !updateCheckDue(cached?.lastCheckMs)) {
 		log.debug(`${spec.label} из кэша: ${inCache.assetPath} (${inCache.tag})`);
+		tidyReleaseCache(baseDir, spec);
 		return inCache;
 	}
 
@@ -418,6 +489,7 @@ export async function ensureReleaseComponent(
 			}
 			// Без сети работаем на том, что уже загружено.
 			log.warn(`${spec.label}: не удалось проверить обновление: ${e instanceof Error ? e.message : String(e)}`);
+			tidyReleaseCache(baseDir, spec);
 			return inCache;
 		}
 		if (inCache && !isNewerTag(rel.tag_name, inCache.tag)) {
@@ -428,16 +500,19 @@ export async function ensureReleaseComponent(
 				lastCheckMs: Date.now(),
 			});
 			log.debug(`${spec.label} актуален: ${inCache.tag}`);
+			tidyReleaseCache(baseDir, spec);
 			return inCache;
 		}
 		log.info(`Загрузка ${spec.label} ${rel.tag_name} с GitHub (${owner}/${repo})…`);
 		status.dispose();
 		status = showStatus(`${spec.label}: загрузка…`);
 		const asset = pickAsset(rel, spec);
-		// Качаем рядом с кэшем: прежняя версия остаётся рабочей, пока новая не легла целиком
-		const downloadDir = path.join(baseDir, spec.cacheSubdir, DOWNLOAD_DIR);
+		// Качаем рядом с кэшем: прежняя версия остаётся рабочей, пока новая не легла целиком.
+		// У каждой загрузки свой каталог: то же самое может качать другое окно
+		const cacheRoot = path.join(baseDir, spec.cacheSubdir);
+		await fs.mkdir(cacheRoot, { recursive: true });
+		const downloadDir = await fs.mkdtemp(path.join(cacheRoot, `${DOWNLOAD_PREFIX}${process.pid}-`));
 		const downloaded = path.join(downloadDir, asset.name);
-		await fs.mkdir(downloadDir, { recursive: true });
 		try {
 			await streamDownload(asset.browser_download_url, downloaded, {
 				...headers,
@@ -458,10 +533,21 @@ export async function ensureReleaseComponent(
 	}
 }
 
-/** Сброс кэша компонента — следующий {@link ensureReleaseComponent} скачает заново. */
+/**
+ * Сброс кэша компонента — следующий {@link ensureReleaseComponent} скачает заново.
+ *
+ * @throws ComponentBusyError - текущую версию держит запущенный процесс, кэш не тронут
+ */
 export async function clearReleaseCache(baseDir: string, spec: ReleaseComponentSpec): Promise<void> {
 	await spec.beforeReplace?.();
-	await fs.rm(path.join(baseDir, spec.cacheSubdir), { recursive: true, force: true }).catch(() => undefined);
+	const root = path.join(baseDir, spec.cacheSubdir);
+	const current = versionDirOf(root, await readStamp(baseDir, spec));
+	if (current !== undefined && !(await removeUnlessBusy(current))) {
+		throw new ComponentBusyError(spec.label);
+	}
+	await fs.rm(stampPathOf(baseDir, spec), { force: true });
+	await dropOtherVersions(baseDir, spec, undefined);
+	await fs.rmdir(root).catch(() => undefined);
 }
 
 /** Тег релиза в кэше компонента; undefined — кэш пуст или повреждён. */
