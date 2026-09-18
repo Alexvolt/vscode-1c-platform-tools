@@ -32,6 +32,12 @@ let sessionToken = '';
 /** Учётная запись сессии: попадает в журнал, чтобы источник токена был виден. */
 let sessionAccount = '';
 
+/** Чтение сессии на активации; завершается и тогда, когда сессии нет. */
+let sessionRead: Promise<void> = Promise.resolve();
+
+/** Сколько запрос к GitHub ждёт сессию редактора, прежде чем уйти без неё. */
+const SESSION_WAIT_MS = 10_000;
+
 /**
  * Читает токен из сессии GitHub редактора.
  *
@@ -53,6 +59,9 @@ async function readGithubSession(silent: boolean): Promise<string> {
 /**
  * Читает сохранённый токен в память. Вызывается на активации, до первой загрузки компонентов.
  *
+ * Сессию редактора читает в фоне: провайдер GitHub поднимается вместе с остальными
+ * расширениями окна, это секунды. Запросы к GitHub ждут её через {@link githubSessionSettled}.
+ *
  * @param secrets - Хранилище секретов расширения
  */
 export async function initGithubToken(context: vscode.ExtensionContext): Promise<void> {
@@ -64,8 +73,10 @@ export async function initGithubToken(context: vscode.ExtensionContext): Promise
 		storedToken = '';
 	}
 
-	sessionToken = await readGithubSession(true);
-	log.info(`Токен GitHub: ${githubTokenSource()}`);
+	sessionRead = readGithubSession(true).then((token) => {
+		sessionToken = token;
+		log.info(`Токен GitHub: ${githubTokenSource()}`);
+	});
 	context.subscriptions.push(
 		vscode.authentication.onDidChangeSessions(async (event) => {
 			if (event.provider.id === 'github') {
@@ -122,6 +133,19 @@ export function githubTokenSource(): string {
  */
 export function githubTokenFromSession(): string {
 	return sessionToken;
+}
+
+/**
+ * Дожидается чтения сессии на активации, но не дольше {@link SESSION_WAIT_MS}.
+ *
+ * @returns Промис, который разрешается, когда сессия прочитана или время вышло
+ */
+export function githubSessionSettled(): Promise<void> {
+	let timer: NodeJS.Timeout | undefined;
+	const timeout = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, SESSION_WAIT_MS);
+	});
+	return Promise.race([sessionRead, timeout]).finally(() => clearTimeout(timer));
 }
 
 /**

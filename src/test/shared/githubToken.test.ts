@@ -61,4 +61,14 @@ suite('токен GitHub', () => {
 		const source = fs.readFileSync(path.join(EXTENSION_ROOT, 'src', 'shared', 'githubToken.ts'), 'utf8');
 		assert.ok(source.includes('readGithubSession(true)'), 'при инициализации вход предлагать нельзя');
 	});
+
+	test('активация не ждёт сессию GitHub, её ждут запросы к GitHub', () => {
+		const token = fs.readFileSync(path.join(EXTENSION_ROOT, 'src', 'shared', 'githubToken.ts'), 'utf8');
+		const initStart = token.indexOf('export async function initGithubToken');
+		// Смена сессий позже читается с ожиданием: это уже не активация
+		const init = token.slice(initStart, token.indexOf('context.subscriptions.push', initStart));
+		assert.ok(!init.includes('await readGithubSession'), 'провайдер GitHub поднимается секундами, панели ждали бы его');
+		const loader = fs.readFileSync(path.join(EXTENSION_ROOT, 'src', 'shared', 'githubReleaseLoader.ts'), 'utf8');
+		assert.strictEqual(loader.match(/githubHeaders\(await requestToken\(token\)\)/g)?.length, 2);
+	});
 });
