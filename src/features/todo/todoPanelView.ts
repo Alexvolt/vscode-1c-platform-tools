@@ -4,17 +4,28 @@
  * @module todoPanelView
  */
 
+import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { projectScanRoots, type ProjectScanRoot } from '../../shared/workspaceProjects';
+import { directoryKey } from '../../shared/projectLayout';
+import { projectScanRoots, sameProjectRoot, type ProjectScanRoot } from '../../shared/workspaceProjects';
 import {
 	CURRENT_PROJECT_DESCRIPTION,
+	isOutsideScanRoot,
 	isSelectedRoot,
 	projectLabel,
 	projectRelativePath,
 	sameScanRoots,
 	selectedFirst,
 } from '../artifacts/projectScan';
-import { scanWorkspaceForTodos, type TodoEntry, type TodoScanResult } from './todoScanner';
+import {
+	compareTodoEntries,
+	scanTodoDocument,
+	scanTodoPaths,
+	scanWorkspaceForTodos,
+	type TodoEntry,
+	type TodoPathChange,
+	type TodoScanResult,
+} from './todoScanner';
 
 const STATE_KEYS = {
 	groupByFile: '1c-platform-tools.todo.groupByHierarchy',
@@ -47,6 +58,24 @@ const MESSAGE_LOADING = 'Идёт поиск';
 const MESSAGE_EMPTY = 'Нет дел';
 const MESSAGE_EMPTY_FILTERED = 'Нет дел под текущими отборами';
 const MESSAGE_NO_WORKSPACE = 'Откройте папку проекта';
+
+/** Пауза, за которую изменения путей на диске собираются в одну пачку. */
+const PENDING_DELAY_MS = 300;
+
+/** Путь или один из каталогов над ним среди ключей путей. */
+function underAny(file: string, keys: ReadonlySet<string>): boolean {
+	if (keys.size === 0) {
+		return false;
+	}
+	for (let current = path.resolve(file); ; current = path.dirname(current)) {
+		if (keys.has(directoryKey(current))) {
+			return true;
+		}
+		if (path.dirname(current) === current) {
+			return false;
+		}
+	}
+}
 
 function getIconForTag(tag: string): vscode.ThemeIcon {
 	const colorId = TAG_ICON_COLORS[tag] ?? 'editorInfo.foreground';
@@ -96,6 +125,10 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 	private _treeView: vscode.TreeView<TodoNode> | undefined;
 	private _refreshPromise: Promise<void> | null = null;
 	private _rescanRequested = false;
+	/** Пути на диске, дела под которыми ждут перечитывания, по ключу пути. */
+	private readonly _pending = new Map<string, TodoPathChange>();
+	private _pendingTimer: ReturnType<typeof setTimeout> | undefined;
+	private _applyingPending = false;
 
 	/**
 	 * @param _context - Контекст расширения: отборы и группировка в globalState
@@ -186,6 +219,7 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 		try {
 			while (this._rescanRequested) {
 				this._rescanRequested = false;
+				this._pending.clear();
 				const result = await this._scan();
 				if (this._rescanRequested && !sameScanRoots(result.roots, this._scanRoots())) {
 					continue;
@@ -193,18 +227,167 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 				this._entries = result.entries;
 				this._roots = result.roots;
 				this._didInitialLoad = true;
-				this._lastFilteredCount = this._filterEntries().length;
-				this._updateViewTitle();
-				// Значок обновляется и когда панель скрыта: getChildren тогда не зовут
-				this._setViewState(
-					this._lastFilteredCount > 0 ? undefined : this._emptyMessage(),
-					this._lastFilteredCount
-				);
+				this._showCount();
 			}
 		} finally {
 			this._isScanning = false;
 			this._refreshPromise = null;
 		}
+		this._fireChange();
+		this._schedulePending();
+	}
+
+	/** Счётчик и сообщение по найденному; значок обновляется и когда панель скрыта: getChildren тогда не зовут. */
+	private _showCount(): void {
+		this._lastFilteredCount = this._filterEntries().length;
+		this._updateViewTitle();
+		this._setViewState(
+			this._lastFilteredCount > 0 ? undefined : this._emptyMessage(),
+			this._lastFilteredCount
+		);
+	}
+
+	/**
+	 * Проект последнего скана, которому принадлежит путь.
+	 *
+	 * @param file - Абсолютный путь
+	 * @param scanRoots - Каталоги проектов окна сейчас
+	 * @returns Корень в написании скана; undefined вне проектов скана
+	 */
+	private _scannedRootOf(file: string, scanRoots: readonly ProjectScanRoot[]): ProjectScanRoot | undefined {
+		const scanRoot = scanRoots.find((item) => !isOutsideScanRoot(item, file, []));
+		const root = scanRoot && this._roots.find((scanned) => sameProjectRoot(scanned, scanRoot.root));
+		return scanRoot && root !== undefined ? { root, excludeDirs: scanRoot.excludeDirs } : undefined;
+	}
+
+	/**
+	 * Документ сохранён: его дела заменяются без скана проектов. До первого скана
+	 * делать нечего, во время скана документ перечитывается после него.
+	 *
+	 * @param document - Сохранённый документ
+	 */
+	documentSaved(document: vscode.TextDocument): void {
+		if (this._isScanning) {
+			this.pathsChanged([document.uri], false);
+			return;
+		}
+		if (!this._didInitialLoad) {
+			return;
+		}
+		const scanRoot = this._scannedRootOf(document.uri.fsPath, this._scanRoots());
+		if (!scanRoot) {
+			return;
+		}
+		const found = scanTodoDocument(scanRoot, document) ?? [];
+		const key = document.uri.toString();
+		const rest = this._entries.filter((entry) => entry.uri.toString() !== key);
+		if (found.length === 0 && rest.length === this._entries.length) {
+			return;
+		}
+		this._entries = [...rest, ...found].sort(compareTodoEntries);
+		this._showCount();
+		this._fireChange();
+	}
+
+	/**
+	 * Пути на диске изменились: дела под ними перечитываются пачкой без скана проектов.
+	 * До первого скана делать нечего, пришедшее во время скана перечитывается после него.
+	 *
+	 * @param uris - Созданные, изменённые, удалённые или переименованные пути
+	 * @param tree - Путь может быть каталогом: заменяются дела всех файлов под ним
+	 */
+	pathsChanged(uris: readonly vscode.Uri[], tree: boolean): void {
+		if (!this._didInitialLoad && !this._isScanning) {
+			return;
+		}
+		for (const uri of uris) {
+			if (uri.scheme !== 'file') {
+				continue;
+			}
+			const key = directoryKey(uri.fsPath);
+			this._pending.set(key, { uri, tree: tree || (this._pending.get(key)?.tree ?? false) });
+		}
+		this._schedulePending();
+	}
+
+	/** Останавливает отложенное перечитывание путей. */
+	dispose(): void {
+		if (this._pendingTimer) {
+			clearTimeout(this._pendingTimer);
+			this._pendingTimer = undefined;
+		}
+		this._pending.clear();
+	}
+
+	/** Пачка путей применяется после паузы, когда не идут скан и прошлая пачка. */
+	private _schedulePending(): void {
+		if (this._pending.size === 0 || this._pendingTimer || this._applyingPending || this._isScanning) {
+			return;
+		}
+		this._pendingTimer = setTimeout(() => {
+			this._pendingTimer = undefined;
+			void this._applyPending();
+		}, PENDING_DELAY_MS);
+	}
+
+	private async _applyPending(): Promise<void> {
+		if (this._isScanning || this._applyingPending) {
+			return;
+		}
+		this._applyingPending = true;
+		try {
+			const changes = [...this._pending.values()];
+			this._pending.clear();
+			const found = await this._scanChanges(changes);
+			// Скан, начатый за время чтения, заменит все записи
+			if (!this._isScanning) {
+				this._replaceUnder(changes, found);
+			}
+		} finally {
+			this._applyingPending = false;
+		}
+		this._schedulePending();
+	}
+
+	/**
+	 * Дела файлов под путями пачки. Путь под другим путём-каталогом того же проекта
+	 * читается вместе с ним.
+	 */
+	private async _scanChanges(changes: readonly TodoPathChange[]): Promise<TodoEntry[]> {
+		const scanRoots = this._scanRoots();
+		const byRoot = new Map<string, { scanRoot: ProjectScanRoot; changes: TodoPathChange[] }>();
+		for (const change of changes) {
+			const scanRoot = this._scannedRootOf(change.uri.fsPath, scanRoots);
+			if (scanRoot) {
+				const group = byRoot.get(scanRoot.root) ?? { scanRoot, changes: [] };
+				group.changes.push(change);
+				byRoot.set(scanRoot.root, group);
+			}
+		}
+		const found: TodoEntry[] = [];
+		for (const { scanRoot, changes: rootChanges } of byRoot.values()) {
+			const trees = new Set(rootChanges.filter((change) => change.tree).map((change) => directoryKey(change.uri.fsPath)));
+			const own = rootChanges.filter((change) => !underAny(path.dirname(change.uri.fsPath), trees));
+			found.push(...(await scanTodoPaths(scanRoot, own)));
+		}
+		return found;
+	}
+
+	/**
+	 * Дела под путями пачки заменяются найденными: у пути-каталога все файлы под ним,
+	 * у файла только он сам.
+	 */
+	private _replaceUnder(changes: readonly TodoPathChange[], found: readonly TodoEntry[]): void {
+		const files = new Set(changes.map((change) => directoryKey(change.uri.fsPath)));
+		const trees = new Set(changes.filter((change) => change.tree).map((change) => directoryKey(change.uri.fsPath)));
+		const rest = this._entries.filter(
+			(entry) => !files.has(directoryKey(entry.uri.fsPath)) && !underAny(entry.uri.fsPath, trees)
+		);
+		if (found.length === 0 && rest.length === this._entries.length) {
+			return;
+		}
+		this._entries = [...rest, ...found].sort(compareTodoEntries);
+		this._showCount();
 		this._fireChange();
 	}
 
