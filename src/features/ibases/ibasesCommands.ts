@@ -7,8 +7,14 @@
 import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
 import { infobaseConnectionString, readInfobases, type InfobaseEntry } from '../../shared/infobaseList';
-import { readClustersSettings } from '../clusters/settings';
-import { launchInfobase, launchStartWindow, shouldPassIbName, type CestartMode } from './cestart';
+import { projectPlatformRoots } from '../../shared/platformSettings';
+import {
+	CESTART_NOT_FOUND_MESSAGE,
+	launchInfobase,
+	launchStartWindow,
+	shouldPassIbName,
+	type CestartMode,
+} from './cestart';
 import { launchEdtStart } from './edtStart';
 import type { IbasesProvider } from './ibasesProvider';
 import { IbaseItem } from './nodes';
@@ -39,7 +45,7 @@ interface IbasePickItem extends vscode.QuickPickItem {
  */
 async function runInfobase(entry: InfobaseEntry, mode: CestartMode): Promise<void> {
 	const result = launchInfobase(entry.name, mode, {
-		extraRoots: [readClustersSettings().platformPath],
+		roots: projectPlatformRoots(),
 		connect: entry.connect,
 		useIbName: shouldPassIbName(
 			entry.name,
@@ -50,25 +56,34 @@ async function runInfobase(entry: InfobaseEntry, mode: CestartMode): Promise<voi
 		log.info(`запуск ${mode} «${entry.name}»: ${result.binary} ${result.args.join(' ')}`);
 		return;
 	}
-	log.warn(result.message);
-	const openSettings = result.message.includes('1cestart');
-	const choice = openSettings
-		? await vscode.window.showErrorMessage(result.message, 'Настройки')
-		: await vscode.window.showErrorMessage(result.message);
-	if (choice === 'Настройки') {
-		await vscode.commands.executeCommand('1c-platform-tools.clusters.openSettings');
-	}
+	await showLaunchFailure(result.message);
 }
 
 /** Открывает окно запуска платформы со списком баз. */
-function openStartWindow(): void {
-	const result = launchStartWindow({ extraRoots: [readClustersSettings().platformPath] });
+async function openStartWindow(): Promise<void> {
+	const result = launchStartWindow({ roots: projectPlatformRoots() });
 	if (result.ok) {
 		log.info(`окно запуска платформы: ${result.binary}`);
 		return;
 	}
-	log.warn(result.message);
-	void vscode.window.showErrorMessage(result.message);
+	await showLaunchFailure(result.message);
+}
+
+/**
+ * Показывает, почему запуск не удался; без стартера предлагает открыть настройку каталога платформы.
+ *
+ * @param message - Причина
+ */
+async function showLaunchFailure(message: string): Promise<void> {
+	log.warn(message);
+	if (message !== CESTART_NOT_FOUND_MESSAGE) {
+		void vscode.window.showErrorMessage(message);
+		return;
+	}
+	const choice = await vscode.window.showErrorMessage(message, 'Настройки');
+	if (choice === 'Настройки') {
+		await vscode.commands.executeCommand('workbench.action.openSettings', '1c-platform-tools.platform.path');
+	}
 }
 
 /** Открывает окно 1C:EDT Start: его проекты это рабочие области EDT, по одной под базу. */

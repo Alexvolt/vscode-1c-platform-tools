@@ -6,23 +6,56 @@ import { isEdtProject } from '../../shared/projectLayout';
 import { resolveFileIbConnectionString } from '../../shared/ibConnectionPath';
 import { logger } from '../../shared/logger';
 import { VRunnerManager } from '../../shared/vrunnerManager';
-import { resolvePlatformVersion } from '../../shared/platformBinary';
+import {
+	PLATFORM_PATH_SETTING_TITLE,
+	resolvePlatformVersion,
+	resolvePlatformVersionInRoots,
+} from '../../shared/platformBinary';
+import { projectPlatformRoots } from '../../shared/platformSettings';
 import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
 import { BUILD_SUBDIRS } from '../../shared/pathDefaults';
 import { currentRoot, deepestProject, projectOf, runWithProject } from '../../shared/workspaceProjects';
-
-const platformBasePath =
-	process.platform === 'win32' ? '${env:PROGRAMFILES}/1cv8' : '/opt/1C/v8.3/x86_64';
 
 const launchConfig: vscode.DebugConfiguration = {
 	name: 'Отладка 1С (запуск)',
 	type: DEBUG_TYPE,
 	request: 'launch',
-	platformPath: platformBasePath,
 	rootProject: '${workspaceFolder}',
 	debugServerHost: 'localhost',
 	autoAttachTypes: ['ManagedClient', 'Server'],
 };
+
+/** Платформа, которую получает адаптер отладки. */
+export interface DebugPlatform {
+	/** Каталог с каталогами версий. */
+	readonly platformPath?: string;
+	/** Имя каталога версии. */
+	readonly platformVersion?: string;
+}
+
+/**
+ * Каталог с версиями и версия платформы для адаптера отладки.
+ *
+ * `platformPath` из конфигурации запуска главнее каталогов, найденных расширением.
+ *
+ * @param config - Конфигурация отладки
+ * @param requestedVersion - Версия из конфигурации или профиля, возможно префиксом
+ * @param roots - Каталоги установки платформы проекта
+ */
+export function resolveDebugPlatform(
+	config: vscode.DebugConfiguration,
+	requestedVersion: string | undefined,
+	roots: readonly string[]
+): DebugPlatform {
+	if (typeof config.platformPath === 'string' && config.platformPath.trim() !== '') {
+		return {
+			platformPath: config.platformPath,
+			platformVersion: resolvePlatformVersion(config.platformPath, requestedVersion) ?? requestedVersion,
+		};
+	}
+	const found = resolvePlatformVersionInRoots(roots, requestedVersion);
+	return found ? { platformPath: found.root, platformVersion: found.version } : { platformVersion: requestedVersion };
+}
 
 /** Путь от корня рабочей области в записи конфигурации запуска. */
 function templatePath(relative: string): string {
@@ -250,15 +283,19 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 		const password = (config.password as string | undefined)
 			?? this.vrunner.readActiveProfileSettingSync('db-pwd') ?? '';
 
-		// Версию платформы (`platformPath` — база каталогов версий, `platformVersion`
-		// — выбор конкретной сборки) подставляем из --v8version активного профиля,
-		// если она не задана явно в конфигурации: профиль может пинить версию.
-		// Запрос профиля (например, префикс «8.3») сводим к конкретной сборке из
-		// каталога установки, чтобы адаптер получил существующую версию.
+		// Адаптер получает каталог с версиями (`platformPath`) и имя каталога версии
+		// (`platformVersion`), поэтому запрос профиля вроде «8.3» сводится к
+		// существующей сборке.
 		const requestedVersion = (config.platformVersion as string | undefined)
 			?? (await this.vrunner.getActiveV8Version());
-		const basePath = typeof config.platformPath === 'string' ? config.platformPath : platformBasePath;
-		const platformVersion = resolvePlatformVersion(basePath, requestedVersion) ?? requestedVersion;
+		const platform = resolveDebugPlatform(config, requestedVersion, projectPlatformRoots(workspaceRoot));
+		if (platform.platformPath === undefined && config.request === 'launch') {
+			const version = requestedVersion ? ` версии ${requestedVersion}` : '';
+			void vscode.window.showErrorMessage(
+				`Платформа 1С${version} не найдена. Укажите каталог установки платформы в настройке ${PLATFORM_PATH_SETTING_TITLE}.`
+			);
+			return undefined;
+		}
 
 		return {
 			...config,
@@ -266,7 +303,8 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 			trace,
 			user,
 			password,
-			...(platformVersion ? { platformVersion } : {}),
+			...(platform.platformPath ? { platformPath: platform.platformPath } : {}),
+			...(platform.platformVersion ? { platformVersion: platform.platformVersion } : {}),
 		};
 	}
 

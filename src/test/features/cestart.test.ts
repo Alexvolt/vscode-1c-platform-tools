@@ -64,8 +64,7 @@ suite('1cestart', () => {
 		const binary = path.join(root, 'common', '1cestart');
 		const lookup = findCestart({
 			platform: 'linux',
-			defaultRoots: [root],
-			extraRoots: [],
+			roots: [root],
 			exists: (filePath) => filePath === binary,
 		});
 
@@ -79,8 +78,7 @@ suite('1cestart', () => {
 		const binary = path.join(install, 'common', '1cestart.exe');
 		const lookup = findCestart({
 			platform: 'win32',
-			defaultRoots: [],
-			extraRoots: [version],
+			roots: [version],
 			exists: (filePath) => filePath === binary,
 		});
 

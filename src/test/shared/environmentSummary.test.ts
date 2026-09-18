@@ -29,7 +29,11 @@ function sampleSummary(overrides: Partial<EnvironmentSummary> = {}): Environment
 				autoloadOff: true,
 			},
 		],
-		platformVersions: ['8.3.27.1936', '8.3.24.1548'],
+		platformInstallations: [
+			{ root: 'C:/Program Files/1cv8', versions: ['8.3.27.1936', '8.3.24.1548'] },
+			{ root: 'C:/Users/user/AppData/Local/Programs/1cv8_x64', versions: ['8.5.1.1343'] },
+		],
+		cestartPath: 'C:/Program Files/1cv8/common/1cestart.exe',
 		racPath: 'C:/Program Files/1cv8/8.3.27.1936/bin/rac.exe',
 		edtVersions: ['2026.1'],
 		edtCliPath: 'C:/1C/1cedtstart/installations/1C_EDT 2026.1/1cedt/1cedtcli.exe',
@@ -60,7 +64,12 @@ suite('сводка окружения', () => {
 		assert.match(text, /- Расширение: 0\.8\.9/);
 		assert.match(text, /- MCP: 0\.2\.0/);
 		assert.match(text, /- OneScript: 2\.0\.0, C:\/ovm\/current\/bin\/oscript\.exe/);
-		assert.match(text, /- Платформа 1С: 8\.3\.27\.1936, 8\.3\.24\.1548/);
+		assert.ok(
+			text.includes(
+				'- Платформа 1С: 8.3.27.1936, 8.3.24.1548 в C:/Program Files/1cv8; 8.5.1.1343 в C:/Users/user/AppData/Local/Programs/1cv8_x64\n'
+			)
+		);
+		assert.ok(text.includes('- 1cestart: C:/Program Files/1cv8/common/1cestart.exe\n'));
 		assert.match(text, /- rac: C:\/Program Files\/1cv8\/8\.3\.27\.1936\/bin\/rac\.exe/);
 		assert.match(text, /- IPC: включён, порт 40241, токен задан/);
 		assert.doesNotMatch(text, /неизвестно/);
@@ -74,7 +83,8 @@ suite('сводка окружения', () => {
 				oscript: {},
 				vrunner: {},
 				components: [],
-				platformVersions: [],
+				platformInstallations: [],
+				cestartPath: undefined,
 				racPath: undefined,
 				ipcEnabled: false,
 				ipcTokenSet: false,
@@ -87,6 +97,7 @@ suite('сводка окружения', () => {
 		assert.match(text, /- vrunner: не найден/);
 		assert.match(text, /- Компоненты:\n  - нет/);
 		assert.match(text, /- Платформа 1С: не найдена/);
+		assert.match(text, /- 1cestart: не найден/);
 		assert.match(text, /- rac: не найден/);
 		assert.match(text, /- IPC: выключен, порт 40241, токен не задан/);
 		assert.match(text, /- Удалённый режим: ssh-remote/);

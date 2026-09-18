@@ -29,8 +29,7 @@
         "1c-platform-tools.components.path.oscript",
         "1c-platform-tools.test.path.onescriptRunner",
         "1c-platform-tools.test.path.onebdd",
-        "1c-platform-tools.server.path.platform",
-        "1c-platform-tools.clusters.path.platform",
+        "1c-platform-tools.platform.path",
         "1c-platform-tools.edt.path",
         "1c-platform-tools.edt.vmargs",
         "1c-platform-tools.docker.enabled",
@@ -319,8 +318,7 @@
         "configurationAttributes": {
           "launch": {
             "required": [
-              "rootProject",
-              "platformPath"
+              "rootProject"
             ],
             "properties": {
               "rootProject": {
@@ -425,8 +423,7 @@
           },
           "attach": {
             "required": [
-              "rootProject",
-              "platformPath"
+              "rootProject"
             ],
             "properties": {
               "rootProject": {
@@ -538,7 +535,6 @@
               "name": "Отладка 1С (запуск)",
               "type": "1c-platform-tools",
               "request": "launch",
-              "platformPath": "\\${env:PROGRAMFILES}/1cv8",
               "rootProject": "\\${workspaceFolder}/src/cf",
               "debugServerHost": "localhost",
               "autoAttachTypes": [
@@ -4507,15 +4503,22 @@
         }
       },
       {
-        "title": "Автономный сервер",
+        "title": "Платформа 1С",
+        "id": "1c-platform-tools.platform",
         "order": 8,
         "properties": {
-          "1c-platform-tools.server.path.platform": {
+          "1c-platform-tools.platform.path": {
             "type": "string",
             "default": "",
             "scope": "resource",
-            "description": "Каталог установки платформы 1С для поиска ibsrv (автономный сервер). Пусто: определяется автоматически (%PROGRAMFILES%\\1cv8 в Windows, /opt/1cv8/x86_64 и /opt/1C/v8.3/x86_64 в Linux). Бинарь ищется в bin/, напрямую в каталоге версии и в самой базе."
-          },
+            "description": "Каталог установки платформы 1С, если расширение не нашло её само."
+          }
+        }
+      },
+      {
+        "title": "Автономный сервер",
+        "order": 9,
+        "properties": {
           "1c-platform-tools.server.platformVersion": {
             "type": "string",
             "default": "",
@@ -4603,7 +4606,7 @@
       {
         "title": "EDT",
         "id": "1c-platform-tools.edt",
-        "order": 10,
+        "order": 11,
         "properties": {
           "1c-platform-tools.edt.path": {
             "type": "string",
@@ -4644,13 +4647,8 @@
       {
         "title": "Кластеры",
         "id": "1c-platform-tools.clusters",
-        "order": 9,
+        "order": 10,
         "properties": {
-          "1c-platform-tools.clusters.path.platform": {
-            "type": "string",
-            "default": "",
-            "description": "Каталог установки платформы 1С для поиска rac и 1cestart. Пусто: определяется автоматически (%PROGRAMFILES%\\1cv8 в Windows, /opt/1cv8/<архитектура> и /opt/1C/v8.3/<архитектура> в Linux и macOS). Версия rac задаётся у каждого подключения отдельно."
-          },
           "1c-platform-tools.clusters.timeoutSeconds": {
             "type": "number",
             "default": 30,

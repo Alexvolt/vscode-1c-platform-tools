@@ -6,17 +6,18 @@ import * as vscode from 'vscode';
 import { ensureOnecDebugAdapter } from '../../features/debug/onecDebugAdapterBootstrap';
 import { edtWorkspaceDir, readEdtSettings } from '../../features/edt/edtRunner';
 import { ensureMdSparrowRuntime } from '../../features/metadata/mdSparrowBootstrap';
+import { projectPlatformRoots } from '../../shared/platformSettings';
 import { runWithProject, sameProjectRoot } from '../../shared/workspaceProjects';
 
 type GetConfiguration = typeof vscode.workspace.getConfiguration;
 
 const EXTENSION_ROOT = path.resolve(__dirname, '../../..');
 
-/** Настройки компонентов и EDT, которые читаются для проекта. */
-const PROJECT_SETTING = /^1c-platform-tools\.(components\.(path|autoload)|edt)\./;
+/** Настройки компонентов, платформы и EDT, которые читаются для проекта. */
+const PROJECT_SETTING = /^1c-platform-tools\.(components\.(path|autoload)|edt|platform)\./;
 
 suite('область настроек компонентов и EDT', () => {
-	test('настройки путей, автозагрузки компонентов и EDT объявлены с областью resource', () => {
+	test('настройки путей, автозагрузки компонентов, платформы и EDT объявлены с областью resource', () => {
 		const pkg = JSON.parse(fs.readFileSync(path.join(EXTENSION_ROOT, 'package.json'), 'utf8')) as {
 			contributes: { configuration: { properties: Record<string, { scope?: string }> }[] };
 		};
@@ -34,6 +35,7 @@ suite('область настроек компонентов и EDT', () => {
 			'1c-platform-tools.components.autoload.metadataJar',
 			'1c-platform-tools.components.path.adapter',
 			'1c-platform-tools.components.autoload.adapter',
+			'1c-platform-tools.platform.path',
 			'1c-platform-tools.edt.version',
 			'1c-platform-tools.edt.workspace',
 			'1c-platform-tools.edt.vmargs',
@@ -136,6 +138,20 @@ suite('настройки компонентов и EDT читаются для 
 
 		assert.deepStrictEqual(runtime.args, [firstDll]);
 		assert.deepStrictEqual(current.args, [secondDll]);
+		assertScopes(first, second);
+	});
+
+	test('каталог установки платформы читается для проекта команды', async () => {
+		const firstPlatform = path.join(first, '1cv8');
+		const secondPlatform = path.join(second, '1cv8');
+		values.set(first, { 'platform.path': firstPlatform });
+		values.set(second, { 'platform.path': secondPlatform });
+
+		const roots = projectPlatformRoots(first);
+		const current = await runWithProject(second, async () => projectPlatformRoots());
+
+		assert.deepStrictEqual(roots, [firstPlatform]);
+		assert.deepStrictEqual(current, [secondPlatform]);
 		assertScopes(first, second);
 	});
 

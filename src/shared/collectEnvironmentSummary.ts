@@ -6,8 +6,8 @@ import { execFile } from 'node:child_process';
 import * as os from 'node:os';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
-import { findRac, listRacVersions } from '../features/clusters/racLocator';
-import { readClustersSettings } from '../features/clusters/settings';
+import { findRac } from '../features/clusters/racLocator';
+import { findCestart } from '../features/ibases/cestart';
 import { readComponentStates } from './componentsRegistry';
 import {
 	type EnvironmentSummary,
@@ -16,6 +16,8 @@ import {
 import { decodeProcessOutput } from './processOutput';
 import { VRunnerManager } from './vrunnerManager';
 import { findEdtInstallations, pickEdtInstallation } from './edtLocator';
+import { describePlatformInstallations } from './platformBinary';
+import { projectPlatformRoots } from './platformSettings';
 import { projectConfiguration } from './projectConfiguration';
 
 const execFileAsync = promisify(execFile);
@@ -38,9 +40,9 @@ export async function collectEnvironmentSummary(
 		readVrunnerInfo(),
 		readComponents(context, config),
 	]);
-	const platformPath = readClustersSettings().platformPath;
-	const platformVersions = listRacVersions(platformPath);
-	const rac = findRac(platformPath);
+	const platformRoots = projectPlatformRoots();
+	const rac = findRac(platformRoots);
+	const cestart = findCestart({ roots: platformRoots });
 	const edt = findEdtInstallations(config.get<string>('edt.path', ''));
 	const edtSelected = pickEdtInstallation(edt.installations, config.get<string>('edt.version', ''));
 
@@ -57,7 +59,8 @@ export async function collectEnvironmentSummary(
 		oscript,
 		vrunner,
 		components,
-		platformVersions,
+		platformInstallations: describePlatformInstallations(platformRoots),
+		cestartPath: cestart.binary,
 		racPath: rac.binary,
 		edtVersions: edt.installations.map((installation) => installation.version),
 		edtCliPath: edtSelected?.cli,

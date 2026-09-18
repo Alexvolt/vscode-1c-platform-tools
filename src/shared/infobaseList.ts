@@ -143,9 +143,13 @@ export function infobaseConnectionString(connect: string): string | undefined {
 }
 
 /** Каталог, в котором платформа держит список баз и настройки запуска. */
-export function startupDirectory(platform: NodeJS.Platform = process.platform, home = os.homedir()): string {
+export function startupDirectory(
+	platform: NodeJS.Platform = process.platform,
+	home = os.homedir(),
+	env: NodeJS.ProcessEnv = process.env
+): string {
 	if (platform === 'win32') {
-		const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
+		const appData = env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
 		return path.join(appData, '1C', '1CEStart');
 	}
 	// На Linux и macOS платформа хранит список в домашнем каталоге пользователя.
@@ -170,23 +174,37 @@ export function readPlatformText(filePath: string): string | undefined {
 }
 
 /**
+ * Значения параметра `1cestart.cfg`: параметр может повторяться, имя без учёта регистра.
+ *
+ * @param text Содержимое `1cestart.cfg`.
+ * @param key Имя параметра.
+ * @returns Непустые значения в порядке файла.
+ */
+export function cestartConfigValues(text: string, key: string): string[] {
+	const wanted = key.toLowerCase();
+	const out: string[] = [];
+	for (const raw of text.split(/\r?\n/)) {
+		const line = raw.trim();
+		const eq = line.indexOf('=');
+		if (eq > 0 && line.slice(0, eq).trim().toLowerCase() === wanted) {
+			const value = line.slice(eq + 1).trim();
+			if (value) {
+				out.push(value);
+			}
+		}
+	}
+	return out;
+}
+
+/**
  * Общие списки баз из `1cestart.cfg`: организация раздаёт их одним файлом на всех.
  *
  * @param text Содержимое `1cestart.cfg`.
  */
 export function commonListPaths(text: string): string[] {
-	const out: string[] = [];
-	for (const raw of text.split(/\r?\n/)) {
-		const line = raw.trim();
-		const eq = line.indexOf('=');
-		if (eq > 0 && line.slice(0, eq).trim().toLowerCase() === 'commoninfobases') {
-			const value = line.slice(eq + 1).trim();
-			if (value) {
-				out.push(...value.split(';').map((part) => part.trim()).filter(Boolean));
-			}
-		}
-	}
-	return out;
+	return cestartConfigValues(text, 'CommonInfoBases').flatMap((value) =>
+		value.split(';').map((part) => part.trim()).filter(Boolean)
+	);
 }
 
 /**

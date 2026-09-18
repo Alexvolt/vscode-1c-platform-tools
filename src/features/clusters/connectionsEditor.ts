@@ -21,8 +21,8 @@ import * as vscode from 'vscode';
 import { notifyQuiet } from '../../shared/notify';
 import { CHROME_LABELS, chromeScript, chromeStyles, saveBarHtml } from '../editors/webviewChrome';
 import { DEFAULT_RAS_PORT } from './constants';
+import { projectPlatformRoots } from '../../shared/platformSettings';
 import { listRacVersions } from './racLocator';
-import { readClustersSettings } from './settings';
 import type { ClusterService } from './clusterService';
 import type { ClustersProvider } from './clustersProvider';
 import type { ConnectionStore } from './connectionStore';
@@ -303,7 +303,7 @@ export class ClusterConnectionsEditor {
 			defaultPort: DEFAULT_RAS_PORT,
 			// Версии перечитываются при каждом открытии: платформу могли доустановить,
 			// пока форма была закрыта.
-			versions: listRacVersions(readClustersSettings().platformPath),
+			versions: listRacVersions(projectPlatformRoots()),
 		});
 	}
 

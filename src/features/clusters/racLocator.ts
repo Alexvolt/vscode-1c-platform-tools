@@ -2,20 +2,17 @@
  * Поиск утилиты администрирования кластера (rac).
  *
  * rac входит в поставку платформы и лежит рядом с остальными бинарями, поэтому
- * каталоги установки и выбор версии берутся из общего резолвера платформы.
- * Настройка задаёт каталог установки платформы, а не путь к самой утилите: имя
- * бинаря и раскладку каталогов расширение знает само — так же, как для ibsrv.
+ * каталоги установки и выбор версии берутся из общего поиска платформы.
  *
  * rac запускается локально и общается с сервером администрирования по сети,
  * так что для управления удалённым кластером достаточно локальной платформы.
  */
 
 import {
-	compare1cVersions,
-	defaultPlatformBasePaths,
-	listPlatformVersions,
+	listPlatformVersionsInRoots,
+	PLATFORM_PATH_SETTING_TITLE,
 	platformBinaryFileName,
-	resolvePlatformBinary,
+	resolvePlatformBinaryInRoots,
 } from '../../shared/platformBinary';
 
 /** Итог поиска rac. */
@@ -27,27 +24,22 @@ export interface RacLookup {
 }
 
 /**
- * Находит rac в каталоге установки платформы.
+ * Находит rac в каталогах установки платформы.
  *
- * Если настройка пуста, перебираются каталоги установки по умолчанию для
- * текущей ОС и архитектуры.
- *
- * @param platformPath - Настройка `clusters.path.platform` (каталог установки платформы)
+ * @param roots - Каталоги установки платформы
  * @param requestedVersion - Версия платформы или её префикс (пусто — наибольшая)
+ * @param platform - Платформа ОС
  * @returns Найденный путь и перебранные каталоги
  */
-export function findRac(platformPath: string, requestedVersion?: string): RacLookup {
-	const configured = platformPath.trim();
-	const bases = configured ? [configured] : defaultPlatformBasePaths();
-	for (const base of bases) {
-		const binary = resolvePlatformBinary(base, 'rac', {
-			requestedVersion: requestedVersion || undefined,
-		});
-		if (binary) {
-			return { binary, bases };
-		}
-	}
-	return { binary: undefined, bases };
+export function findRac(
+	roots: readonly string[],
+	requestedVersion?: string,
+	platform: NodeJS.Platform = process.platform
+): RacLookup {
+	return {
+		binary: resolvePlatformBinaryInRoots(roots, 'rac', { requestedVersion: requestedVersion || undefined, platform }),
+		bases: [...roots],
+	};
 }
 
 /**
@@ -57,19 +49,12 @@ export function findRac(platformPath: string, requestedVersion?: string): RacLoo
  * установленных, а не вспоминает номер. Каталоги те же, что и при поиске
  * утилиты, поэтому предложенная версия точно запустится.
  *
- * @param platformPath - Настройка `clusters.path.platform` (пусто — каталоги по умолчанию)
+ * @param roots - Каталоги установки платформы
+ * @param platform - Платформа ОС
  * @returns Версии от новых к старым, без повторов
  */
-export function listRacVersions(platformPath: string): string[] {
-	const configured = platformPath.trim();
-	const bases = configured ? [configured] : defaultPlatformBasePaths();
-	const versions = new Set<string>();
-	for (const base of bases) {
-		for (const version of listPlatformVersions(base, 'rac')) {
-			versions.add(version);
-		}
-	}
-	return [...versions].sort((a, b) => compare1cVersions(b, a));
+export function listRacVersions(roots: readonly string[], platform: NodeJS.Platform = process.platform): string[] {
+	return listPlatformVersionsInRoots(roots, 'rac', platform);
 }
 
 /**
@@ -83,6 +68,6 @@ export function describeRacNotFound(lookup: RacLookup): string {
 	const bases = lookup.bases.length > 0 ? lookup.bases.join(', ') : 'каталоги установки не определены';
 	return (
 		`Утилита ${fileName} не найдена. Проверены каталоги: ${bases}. ` +
-		'Укажите каталог установки платформы настройкой «Кластеры: каталог установки платформы».'
+		`Укажите каталог установки платформы в настройке ${PLATFORM_PATH_SETTING_TITLE}.`
 	);
 }
