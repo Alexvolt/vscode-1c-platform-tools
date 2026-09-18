@@ -1,7 +1,8 @@
 /**
  * Дерево «1С: Артефакты»: данные из {@link scanArtifacts}.
  *
- * - `refresh` отменяет предыдущий скан и передаёт {@link vscode.CancellationToken} в сканер.
+ * - `refresh` отменяет предыдущий скан и передаёт {@link vscode.CancellationToken} в сканер;
+ *   скрытое дерево сканируется, когда его покажут.
  * - При нескольких проектах разделы группируются по проекту, выбранный проект первым.
  * - У элементов артефактов `resourceUri` — каталог/файл для команд сборки и vrunner; открытие в редакторе
  *   выполняется по корневому файлу (`ArtifactItem.openTargetUri`), `projectRoot` — корень проекта артефакта.
@@ -71,19 +72,50 @@ export class ProjectArtifactsTreeDataProvider
 	private _scanResult: ProjectArtifacts[] | null = null;
 	private readonly _context: vscode.ExtensionContext;
 	private _scanCts: vscode.CancellationTokenSource | undefined;
+	private _view: Pick<vscode.TreeView<vscode.TreeItem>, 'visible'> | undefined;
 
-	constructor(context: vscode.ExtensionContext) {
+	/**
+	 * @param context - Контекст расширения: режим вида в globalState
+	 * @param _scan - Скан проектов окна
+	 */
+	constructor(
+		context: vscode.ExtensionContext,
+		private readonly _scan: (token: vscode.CancellationToken) => Promise<ProjectArtifacts[]> = (token) => scanArtifacts(token)
+	) {
 		this._context = context;
 	}
 
-	/** Полное пересканирование; параллельный вызов отменяет устаревший скан. */
+	/**
+	 * Дерево, по видимости которого решается, сканировать ли сейчас.
+	 *
+	 * @param view - Дерево панели
+	 */
+	setTreeView(view: Pick<vscode.TreeView<vscode.TreeItem>, 'visible'>): void {
+		this._view = view;
+	}
+
+	/**
+	 * Пересканирование; параллельный вызов отменяет устаревший скан. Скрытое дерево
+	 * забывает найденное и сканируется, когда его покажут.
+	 */
 	async refresh(): Promise<void> {
+		if (this._view && !this._view.visible) {
+			this._scanCts?.cancel();
+			this._scanResult = null;
+			this._onDidChangeTreeData.fire(undefined);
+			return;
+		}
+		await this._rescan();
+	}
+
+	/** Полное пересканирование; параллельный вызов отменяет устаревший скан. */
+	private async _rescan(): Promise<void> {
 		this._scanCts?.cancel();
 		this._scanCts = new vscode.CancellationTokenSource();
 		const cts = this._scanCts;
 		const token = cts.token;
 		try {
-			this._scanResult = await scanArtifacts(token);
+			this._scanResult = await this._scan(token);
 			if (!token.isCancellationRequested) {
 				this._onDidChangeTreeData.fire(undefined);
 			}
@@ -138,8 +170,9 @@ export class ProjectArtifactsTreeDataProvider
 	}
 
 	async getChildren(element?: ArtifactTreeItem): Promise<ArtifactTreeItem[]> {
+		// Узлы запрашивает только показанное дерево
 		if (!this._scanResult) {
-			await this.refresh();
+			await this._rescan();
 		}
 		const result = this._scanResult;
 		if (!result) {
