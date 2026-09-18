@@ -14,6 +14,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { edtComponentRoots, edtStartDataDirectory, fileUrlToPath } from '../../shared/edtLocator';
+import { subdirectoryNames } from '../../shared/installPaths';
 import { spawnDetached } from './cestart';
 
 /** Имя исполняемого файла стартера. */
@@ -24,24 +26,6 @@ export function edtStartFileName(platform: NodeJS.Platform = process.platform): 
 /** Имя Java без консоли: с ней у стартера не висело бы чёрное окно. */
 function javaFileName(platform: NodeJS.Platform): string {
 	return platform === 'win32' ? 'javaw.exe' : 'java';
-}
-
-/** Каталог данных 1cedtstart: настройки, установки, рабочие области. */
-export function edtStartDataDirectory(platform: NodeJS.Platform = process.platform): string {
-	if (platform === 'win32') {
-		const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-		return path.join(localAppData, '1C', '1cedtstart');
-	}
-	return path.join(process.env.HOME || '', '.local', 'share', '1C', '1cedtstart');
-}
-
-/** Каталоги, куда установщик кладёт компоненты 1С, среди них и стартер. */
-export function edtStartComponentRoots(platform: NodeJS.Platform = process.platform): string[] {
-	if (platform === 'win32') {
-		const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-		return [path.join(programFiles, '1C', '1CE', 'components')];
-	}
-	return ['/opt/1C/1CE/components'];
 }
 
 /**
@@ -70,15 +54,9 @@ export function edtStartInComponents(
 ): string[] {
 	const found: string[] = [];
 	for (const root of roots) {
-		let entries: fs.Dirent[];
-		try {
-			entries = fs.readdirSync(root, { withFileTypes: true });
-		} catch {
-			continue;
-		}
-		const candidates = entries
-			.filter((entry) => entry.isDirectory() && entry.name.startsWith('1c-edt-start-'))
-			.map((entry) => path.join(root, entry.name, edtStartFileName(platform)))
+		const candidates = subdirectoryNames(root)
+			.filter((name) => name.startsWith('1c-edt-start-'))
+			.map((name) => path.join(root, name, edtStartFileName(platform)))
 			.filter((candidate) => exists(candidate))
 			.sort((left, right) => right.localeCompare(left, 'en'));
 		found.push(...candidates);
@@ -127,23 +105,6 @@ export function jvmFromPreferences(
 	}
 	candidates.sort((left, right) => right.feature - left.feature);
 	return candidates[0]?.java;
-}
-
-/**
- * Путь из ссылки `file:` в записи целевой платформы, а не той, где идёт код.
- *
- * @param url - `file:///C:/Program%20Files/Java/bin/` либо уже путь
- * @param platform - Операционная система
- */
-export function fileUrlToPath(url: string, platform: NodeJS.Platform): string {
-	if (!url.startsWith('file:')) {
-		return url;
-	}
-	const decoded = decodeURIComponent(url.replace(/^file:\/\/\/?/, ''));
-	if (platform === 'win32') {
-		return decoded.replace(/\//g, '\\');
-	}
-	return `/${decoded.replace(/^\/+/, '')}`;
 }
 
 /**
@@ -199,19 +160,25 @@ function readText(filePath: string): string | undefined {
 /**
  * Находит стартер: на Windows по обработчику схемы в реестре, иначе по каталогам компонентов.
  *
+ * На macOS в каталоге компонентов лежит пакет `.app` с версией в имени, а не
+ * исполняемый файл, поэтому там стартер не ищется.
+ *
  * @param deps - Зависимости поиска
  * @returns Путь к стартеру или undefined
  */
 export function findEdtStart(deps: LaunchEdtStartDeps = {}): string | undefined {
 	const platform = deps.platform ?? process.platform;
 	const exists = deps.exists ?? fs.existsSync;
+	if (platform === 'darwin') {
+		return undefined;
+	}
 	if (platform === 'win32') {
 		const fromRegistry = edtStartFromRegistryOutput((deps.registryQuery ?? queryRegistry)());
 		if (fromRegistry && exists(fromRegistry)) {
 			return fromRegistry;
 		}
 	}
-	return edtStartInComponents(deps.componentRoots ?? edtStartComponentRoots(platform), platform, exists)[0];
+	return edtStartInComponents(deps.componentRoots ?? edtComponentRoots(platform), platform, exists)[0];
 }
 
 /**
@@ -228,7 +195,10 @@ export function launchEdtStart(url?: string, deps: LaunchEdtStartDeps = {}): Lau
 	if (!binary) {
 		return {
 			ok: false,
-			message: '1cedtstart не найден: установите 1С:EDT через него.',
+			message:
+				platform === 'darwin'
+					? 'На macOS расширение не открывает 1C:EDT Start: запустите его сами.'
+					: '1cedtstart не найден: установите 1С:EDT через него.',
 		};
 	}
 	const preferences = (deps.readFile ?? readText)(
