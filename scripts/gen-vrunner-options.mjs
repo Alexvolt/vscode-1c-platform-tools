@@ -223,16 +223,41 @@ function parseDocsDescriptions(docsDir) {
 	return byKey;
 }
 
-/** Имя команды из имени файла подкоманды: ПодкомандаCfeLoad → cfe.load */
-function commandPathFromFileName(fileName) {
-	const base = fileName.replace(/^Подкоманда/, '').replace(/\.os$/, '');
-	const parts = base.match(/[A-ZА-ЯЁ][a-zа-яё0-9]*/g) ?? [base];
-	if (parts.length === 0) {
-		return base.toLowerCase();
+/**
+ * Разбирает аннотацию команды модуля OneScript: имя команды и модуль-родитель.
+ *
+ * @returns { name, parent } или undefined, если модуль не команда
+ */
+function parseCommandAnnotation(text) {
+	for (const tag of ['&ПодкомандаПриложения(', '&КомандаПриложения(']) {
+		const at = text.indexOf(tag);
+		if (at === -1) {
+			continue;
+		}
+		const end = scanAnnotationEnd(text, at + tag.length - 1);
+		if (end === -1) {
+			return undefined;
+		}
+		const argsText = text.slice(at + tag.length, end - 1);
+		return { name: annotationArg(argsText, 'Имя'), parent: annotationArg(argsText, 'Родитель') };
 	}
-	const group = parts[0].toLowerCase();
-	const sub = parts.slice(1).join('-').toLowerCase();
-	return sub ? `${group}.${sub}` : group;
+	return undefined;
+}
+
+/**
+ * Путь команды в файле настроек: имена команд от группы до самой команды
+ * по цепочке родителей, как ключ настройки собирает vanessa-runner
+ * (`cluster session kill` → `cluster.session.kill`).
+ *
+ * @param moduleName - Имя модуля команды
+ * @param commandsByModule - Аннотации команд по именам модулей
+ */
+function commandPath(moduleName, commandsByModule) {
+	const segments = [];
+	for (let current = commandsByModule.get(moduleName); current?.name; current = commandsByModule.get(current.parent)) {
+		segments.unshift(current.name);
+	}
+	return segments.join('.');
 }
 
 function walk(dir) {
@@ -285,17 +310,27 @@ function generateV3(srcRoot, v2Options) {
 		sets[setName] = parseOptions(fs.readFileSync(path.join(setsDir, file), 'utf8')).map(enrich);
 	}
 
+	const modules = walk(cliDir).map((file) => ({
+		name: path.basename(file, '.os'),
+		text: fs.readFileSync(file, 'utf8'),
+	}));
+	const commandsByModule = new Map();
+	for (const source of modules) {
+		const annotation = parseCommandAnnotation(source.text);
+		if (annotation) {
+			commandsByModule.set(source.name, annotation);
+		}
+	}
+
 	const commands = [];
-	for (const file of walk(cliDir)) {
-		const fileName = path.basename(file);
-		if (!fileName.startsWith('Подкоманда')) {
+	for (const source of modules) {
+		if (!source.name.startsWith('Подкоманда') || !commandsByModule.has(source.name)) {
 			continue;
 		}
-		const text = fs.readFileSync(file, 'utf8');
-		const usedSets = [...text.matchAll(/&НаборОпций\("([^"]+)"\)/g)].map((m) => m[1]);
+		const usedSets = [...source.text.matchAll(/&НаборОпций\("([^"]+)"\)/g)].map((m) => m[1]);
 		commands.push({
-			path: commandPathFromFileName(fileName),
-			options: parseOptions(text).map(enrich),
+			path: commandPath(source.name, commandsByModule),
+			options: parseOptions(source.text).map(enrich),
 			sets: usedSets,
 		});
 	}

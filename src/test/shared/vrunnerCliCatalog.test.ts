@@ -72,8 +72,6 @@ const INTENTS: VRunnerIntent[] = [
 	{ kind: 'jobs.unlock' },
 ];
 
-const normalize = (commandPath: string): string => commandPath.replace(/-/g, '');
-
 /** Глобальные опции корневой команды: их vanessa-runner принимает перед группой. */
 const ROOT_OPTIONS = new Set(['settings']);
 
@@ -82,8 +80,7 @@ function findCommand(catalog: Catalog, argv: string[]): { command: Catalog['comm
 	const words = argv.findIndex((token) => token.startsWith('-'));
 	const limit = words === -1 ? argv.length : words;
 	for (let count = Math.min(limit, 3); count > 0; count--) {
-		const candidate = [argv[0], argv.slice(1, count).join('-')].filter(Boolean).join('.');
-		const command = catalog.commands.find((entry) => normalize(entry.path) === normalize(candidate));
+		const command = catalog.commands.find((entry) => entry.path === argv.slice(0, count).join('.'));
 		if (command) {
 			return { command, words: count };
 		}
