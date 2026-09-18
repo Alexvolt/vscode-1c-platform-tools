@@ -2653,9 +2653,7 @@
 			editedRoleFlags.clear();
 			saveError = '';
 			savedFlash = false;
-			if (currentTabIsEdit()) {
-				renderContent();
-			}
+			renderContent();
 			renderSaveBar();
 		});
 		window.addEventListener('message', function (event) {
