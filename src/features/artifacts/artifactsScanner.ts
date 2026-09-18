@@ -18,7 +18,7 @@ import {
 	type SourceRoot,
 } from '../../shared/projectLayout';
 import type { ProjectScanRoot } from '../../shared/workspaceProjects';
-import { detectedScanRoots, isOutsideScanRoot, projectRelativePath } from './projectScan';
+import { detectedScanRoots, findProjectFiles, isOutsideScanRoot, projectRelativePath } from './projectScan';
 
 export type ArtifactType = 'configuration' | 'extension' | 'processor' | 'report';
 
@@ -120,12 +120,11 @@ async function binariesIn(
 	exclude: readonly string[],
 	token: vscode.CancellationToken | undefined
 ): Promise<Artifact[]> {
-	const pattern = new vscode.RelativePattern(vscode.Uri.file(scanRoot.root), BINARY_GLOB);
-	const files = await vscode.workspace.findFiles(pattern, undefined, undefined, token);
+	const files = await findProjectFiles(scanRoot, BINARY_GLOB, exclude, token);
 	const found: Artifact[] = [];
 	for (const uri of files) {
 		const type = BINARY_TYPES.get(path.extname(uri.fsPath).toLowerCase());
-		if (!type || isOutsideScanRoot(scanRoot, uri.fsPath, exclude)) {
+		if (!type) {
 			continue;
 		}
 		found.push({

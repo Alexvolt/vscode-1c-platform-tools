@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import type { ProjectScanRoot } from '../../shared/workspaceProjects';
-import { detectedScanRoots, isOutsideScanRoot } from '../artifacts/projectScan';
+import { detectedScanRoots, findProjectFiles } from '../artifacts/projectScan';
 
 const log = logger.scope('todo');
 
@@ -87,14 +87,13 @@ async function filesOf(scanRoot: ProjectScanRoot, includePatterns: string[], exc
 	const globs = exts.length === includePatterns.length && exts.length > 0
 		? [`**/*.{${exts.join(',')}}`]
 		: includePatterns;
-	const base = vscode.Uri.file(scanRoot.root);
 	const found = new Map<string, vscode.Uri>();
 	for (const glob of globs) {
-		for (const uri of await vscode.workspace.findFiles(new vscode.RelativePattern(base, glob))) {
+		for (const uri of await findProjectFiles(scanRoot, glob, excludeSegments)) {
 			found.set(uri.fsPath, uri);
 		}
 	}
-	return [...found.values()].filter((uri) => !isOutsideScanRoot(scanRoot, uri.fsPath, excludeSegments));
+	return [...found.values()];
 }
 
 /**
