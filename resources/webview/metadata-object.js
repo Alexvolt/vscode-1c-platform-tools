@@ -706,6 +706,11 @@
 		if (!contentRoot) {
 			return;
 		}
+		document.body.classList.remove('split-view');
+		if (splitObserver) {
+			splitObserver.disconnect();
+			splitObserver = null;
+		}
 		const tab = tabs.find((item) => item.id === activeTabId);
 		if (!tab) {
 			contentRoot.innerHTML = '<div class="empty">Нет данных.</div>';
@@ -753,7 +758,144 @@
 		}
 	}
 
-	/** Дерево подсистем с флажками участия: как в конфигураторе. */
+	/** Доля нижнего списка по высоте после перетаскивания разделителя; null - по содержимому. */
+	let splitBottomShare = null;
+	/** Держит aria-valuenow разделителя в соответствии с высотой частей. */
+	let splitObserver = null;
+
+	function applySplitShare(bottom) {
+		bottom.classList.toggle('sized', splitBottomShare !== null);
+		bottom.style.flexBasis = splitBottomShare === null ? '' : (splitBottomShare * 100).toFixed(2) + '%';
+	}
+
+	/** Дерево с флажками сверху, отмеченное снизу: вкладка на высоту окна, у каждой части своя прокрутка. */
+	function renderSplitPanes() {
+		document.body.classList.add('split-view');
+		const split = document.createElement('div');
+		split.className = 'split';
+		const top = document.createElement('div');
+		top.className = 'split-pane split-top';
+		const sash = document.createElement('div');
+		sash.className = 'split-sash';
+		sash.tabIndex = 0;
+		sash.setAttribute('role', 'separator');
+		sash.setAttribute('aria-orientation', 'horizontal');
+		const bottom = document.createElement('div');
+		bottom.className = 'split-pane split-bottom';
+		split.append(top, sash, bottom);
+		applySplitShare(bottom);
+		const setShare = function (share) {
+			splitBottomShare = Math.min(0.9, Math.max(0.1, share));
+			applySplitShare(bottom);
+		};
+		// Значение разделителя - доля дерева по высоте в процентах
+		splitObserver = new ResizeObserver(function () {
+			const topHeight = top.getBoundingClientRect().height;
+			const total = topHeight + bottom.getBoundingClientRect().height;
+			if (total > 0) {
+				sash.setAttribute('aria-valuenow', String(Math.round((topHeight / total) * 100)));
+			}
+		});
+		splitObserver.observe(top);
+		splitObserver.observe(bottom);
+		sash.addEventListener('keydown', function (event) {
+			const step = event.key === 'ArrowUp' ? 0.05 : event.key === 'ArrowDown' ? -0.05 : 0;
+			if (step === 0) {
+				return;
+			}
+			event.preventDefault();
+			setShare(bottom.getBoundingClientRect().height / split.getBoundingClientRect().height + step);
+		});
+		sash.addEventListener('pointerdown', function (event) {
+			if (event.button !== 0) {
+				return;
+			}
+			event.preventDefault();
+			const startY = event.clientY;
+			const startHeight = bottom.getBoundingClientRect().height;
+			const total = split.getBoundingClientRect().height;
+			sash.setPointerCapture(event.pointerId);
+			sash.classList.add('dragging');
+			const move = function (moveEvent) {
+				setShare((startHeight + startY - moveEvent.clientY) / total);
+			};
+			const stop = function () {
+				sash.classList.remove('dragging');
+				sash.removeEventListener('pointermove', move);
+				sash.removeEventListener('pointerup', stop);
+				sash.removeEventListener('pointercancel', stop);
+			};
+			sash.addEventListener('pointermove', move);
+			sash.addEventListener('pointerup', stop);
+			sash.addEventListener('pointercancel', stop);
+		});
+		sash.addEventListener('dblclick', function () {
+			splitBottomShare = null;
+			applySplitShare(bottom);
+		});
+		return { split, top, bottom };
+	}
+
+	/** Раскрывает свёрнутых предков узла дерева, прокручивает к нему, подсвечивает строку и ставит фокус на флажок. */
+	function revealTreeNode(node) {
+		for (let box = node.parentElement; box; box = box.parentElement) {
+			if (box.classList.contains('subsys-children') && box.classList.contains('collapsed')) {
+				box.classList.remove('collapsed');
+				const twist = box.parentElement && box.parentElement.querySelector(':scope > .subsys-row > .subsys-twist');
+				if (twist) {
+					twist.textContent = '▾';
+				}
+			}
+		}
+		const row = node.querySelector(':scope > .subsys-row') || node;
+		row.scrollIntoView({ block: 'center' });
+		row.classList.remove('revealed');
+		// Чтение размера перезапускает анимацию на той же строке
+		void row.offsetWidth;
+		row.classList.add('revealed');
+		const box = row.querySelector('input[type="checkbox"]');
+		if (box && !box.disabled) {
+			box.focus({ preventScroll: true });
+		}
+	}
+
+	/** Строка нижнего списка: имя с путём, щелчок или Enter и пробел показывают узел в дереве. */
+	function splitListItem(pathParts, onReveal) {
+		const item = document.createElement('div');
+		item.className = 'struct-item';
+		const name = document.createElement('span');
+		name.className = 'struct-item-name';
+		if (pathParts.length > 1) {
+			const parents = document.createElement('span');
+			parents.className = 'split-item-path';
+			parents.textContent = pathParts.slice(0, -1).join(' / ') + ' / ';
+			name.appendChild(parents);
+		}
+		name.appendChild(document.createTextNode(pathParts[pathParts.length - 1]));
+		item.appendChild(name);
+		if (onReveal) {
+			item.classList.add('split-item-link');
+			item.tabIndex = 0;
+			item.setAttribute('role', 'button');
+			item.addEventListener('click', onReveal);
+			item.addEventListener('keydown', function (event) {
+				if (event.key === 'Enter' || event.key === ' ') {
+					event.preventDefault();
+					onReveal();
+				}
+			});
+		}
+		return item;
+	}
+
+	function splitListEmpty() {
+		const empty = document.createElement('div');
+		empty.className = 'edit-ref-empty';
+		empty.textContent = '(пусто)';
+		return empty;
+	}
+
+	/** Дерево подсистем с флажками участия, как в конфигураторе; ниже подсистемы, куда объект входит. */
 	function renderSubsystemsTab() {
 		if (!contentRoot) {
 			return;
@@ -770,9 +912,59 @@
 		filter.className = 'list-filter';
 		filter.placeholder = 'Фильтр по списку...';
 		contentRoot.appendChild(filter);
+		const panes = renderSplitPanes();
+		contentRoot.appendChild(panes.split);
 		const tree = document.createElement('div');
 		tree.className = 'subsys-tree';
-		contentRoot.appendChild(tree);
+		panes.top.appendChild(tree);
+		const selectedTitle = document.createElement('div');
+		selectedTitle.className = 'split-title';
+		const selectedList = document.createElement('div');
+		selectedList.className = 'struct-list';
+		panes.bottom.append(selectedTitle, selectedList);
+		const elementByNode = new Map();
+
+		/** Отмеченные подсистемы в порядке дерева, каждая с путём от корня. */
+		function checkedNodes(nodes, parents, out) {
+			for (const node of nodes) {
+				const pathParts = parents.concat(String(node.name));
+				if (subsystemChecked(node)) {
+					out.push({ node, pathParts });
+				}
+				if (Array.isArray(node.children)) {
+					checkedNodes(node.children, pathParts, out);
+				}
+			}
+			return out;
+		}
+
+		function renderSelected() {
+			const checked = checkedNodes(modelSubsystems.nodes, [], []);
+			selectedTitle.textContent = 'Входит в подсистемы (' + checked.length + ')';
+			selectedList.textContent = '';
+			if (checked.length === 0) {
+				selectedList.appendChild(splitListEmpty());
+				return;
+			}
+			for (const entry of checked) {
+				selectedList.appendChild(
+					splitListItem(entry.pathParts, function () {
+						reveal(elementByNode.get(entry.node));
+					})
+				);
+			}
+		}
+
+		function reveal(element) {
+			if (!element) {
+				return;
+			}
+			if (element.closest('.subsys-node.hidden')) {
+				filter.value = '';
+				applyFilter();
+			}
+			revealTreeNode(element);
+		}
 
 		/** Строит узел; возвращает корневой элемент и признак совпадения с фильтром. */
 		function buildNode(node) {
@@ -793,12 +985,14 @@
 			box.disabled = readonly;
 			box.addEventListener('change', function () {
 				toggleSubsystem(node, box.checked);
+				renderSelected();
 				renderSaveBar();
 			});
 			label.appendChild(box);
 			label.appendChild(document.createTextNode(' ' + node.name));
 			row.appendChild(label);
 			wrap.appendChild(row);
+			elementByNode.set(node, wrap);
 			let childrenBox = null;
 			if (hasChildren) {
 				childrenBox = document.createElement('div');
@@ -820,8 +1014,11 @@
 		for (const node of modelSubsystems.nodes) {
 			tree.appendChild(buildNode(node).element);
 		}
+		renderSelected();
 
-		filter.addEventListener('input', function () {
+		filter.addEventListener('input', applyFilter);
+
+		function applyFilter() {
 			const needle = String(filter.value || '').trim().toLowerCase();
 			// Совпадение показывает узел и всех его предков; пустой фильтр - всё
 			function apply(el) {
@@ -835,6 +1032,7 @@
 					}
 					if (needle) {
 						childrenBox.classList.remove('collapsed');
+						el.querySelector(':scope > .subsys-row > .subsys-twist').textContent = '▾';
 					}
 				}
 				el.classList.toggle('hidden', !visible);
@@ -843,7 +1041,7 @@
 			for (const root of tree.querySelectorAll(':scope > .subsys-node')) {
 				apply(root);
 			}
-		});
+		}
 	}
 
 	/** Командный интерфейс подсистемы: флажки общей видимости, размещение списком. */
@@ -1377,6 +1575,8 @@
 		filter.className = 'list-filter';
 		filter.placeholder = 'Фильтр по списку...';
 		contentRoot.appendChild(filter);
+		const panes = renderSplitPanes();
+		contentRoot.appendChild(panes.split);
 
 		const labelByTag = new Map();
 		for (const section of sections) {
@@ -1476,20 +1676,17 @@
 				const heading = document.createElement('div');
 				heading.className = 'section-title section-title-spaced';
 				heading.textContent = section.title;
-				contentRoot.appendChild(heading);
+				panes.top.appendChild(heading);
 			}
 			const tree = document.createElement('div');
 			tree.className = 'subsys-tree';
-			contentRoot.appendChild(tree);
-			const selectedBlock = document.createElement('div');
-			selectedBlock.className = 'ref-selected';
+			panes.top.appendChild(tree);
 			const selectedTitle = document.createElement('div');
-			selectedTitle.className = 'section-title';
-			selectedBlock.appendChild(selectedTitle);
+			selectedTitle.className = 'split-title';
 			const selectedList = document.createElement('div');
 			selectedList.className = 'struct-list';
-			selectedBlock.appendChild(selectedList);
-			contentRoot.appendChild(selectedBlock);
+			panes.bottom.append(selectedTitle, selectedList);
+			const rowByRef = new Map();
 
 			function currentRefs() {
 				const refs = new Set(Array.isArray(section.refs) ? section.refs : []);
@@ -1510,22 +1707,16 @@
 
 			function renderSelected() {
 				const refs = currentRefs();
-				selectedTitle.textContent = 'Входит в состав (' + refs.length + ')';
+				const caption = sections.length > 1 ? section.title : 'Входит в состав';
+				selectedTitle.textContent = caption + ' (' + refs.length + ')';
 				selectedList.textContent = '';
 				if (refs.length === 0) {
-					const empty = document.createElement('div');
-					empty.className = 'edit-ref-empty';
-					empty.textContent = '(пусто)';
-					selectedList.appendChild(empty);
+					selectedList.appendChild(splitListEmpty());
 					return;
 				}
 				for (const ref of refs) {
-					const item = document.createElement('div');
-					item.className = 'struct-item';
-					const name = document.createElement('span');
-					name.className = 'struct-item-name';
-					name.textContent = refCaption(ref);
-					item.appendChild(name);
+					const row = rowByRef.get(ref);
+					const item = splitListItem([refCaption(ref)], row ? () => reveal(row) : null);
 					if (section.modes) {
 						const edit = contentEdit(section, ref);
 						const option = section.modes.options.find((candidate) => candidate.value === edit.mode);
@@ -1588,6 +1779,7 @@
 					renderSaveBar();
 				});
 				row.appendChild(inner);
+				rowByRef.set(ref, row);
 				return row;
 			}
 
@@ -1640,7 +1832,17 @@
 
 		const trees = sections.map((section) => renderSection(section));
 
-		filter.addEventListener('input', function () {
+		function reveal(row) {
+			if (row.closest('.subsys-node.hidden')) {
+				filter.value = '';
+				applyFilter();
+			}
+			revealTreeNode(row);
+		}
+
+		filter.addEventListener('input', applyFilter);
+
+		function applyFilter() {
 			const needle = String(filter.value || '').trim().toLowerCase();
 			for (const tree of trees) {
 				for (const groupEl of tree.querySelectorAll(':scope > .subsys-node')) {
@@ -1661,7 +1863,7 @@
 					}
 				}
 			}
-		});
+		}
 	}
 
 	function renderOverview() {
