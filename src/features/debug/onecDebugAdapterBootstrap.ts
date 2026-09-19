@@ -260,7 +260,7 @@ export function describeRuntime(runtime: OnecDebugAdapterRuntime): string {
 }
 
 /**
- * Фоновая проверка нового релиза адаптера (чистит кэш, чтобы следующий запуск скачал свежий).
+ * Фоновая проверка нового релиза адаптера: найденная версия загружается сразу.
  *
  * @param context - Контекст расширения
  * @param root - Корень проекта, для которого читаются настройки компонентов
@@ -277,7 +277,10 @@ export function checkOnecDebugAdapterUpdateInBackground(
 		return;
 	}
 	checkReleaseUpdateInBackground(installBaseDir(context), onecDebugAdapterSpec(), resolveGithubToken(), () => {
-		/* кэш очищен; следующий запуск отладки скачает новую версию */
+		// Без загрузки отметка о проверке остаётся снятой, и новая версия находится заново на каждом запуске
+		void downloadOnecDebugAdapter(context).catch((error: unknown) => {
+			log.warn(`не удалось загрузить новую версию адаптера: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	});
 }
 

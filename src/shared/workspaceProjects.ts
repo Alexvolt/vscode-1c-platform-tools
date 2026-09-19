@@ -32,7 +32,10 @@ import {
 	type ProjectLayout,
 	type SourceRoot,
 } from './projectLayout';
+import { logger } from './logger';
 import { notifyProjectLayoutChanged, onDidChangeProjectLayout, type ProjectLayoutChange } from './projectLayoutWatch';
+
+const log = logger.scope('projects');
 
 /** Ключ выбранного проекта в workspaceState: абсолютный корень. */
 export const CURRENT_PROJECT_KEY = '1c-platform-tools.currentProject';
@@ -716,6 +719,7 @@ export class WorkspaceProjects implements vscode.Disposable {
 		if (created && this.snapshotNow().complete && this.projectByRoot(dir)) {
 			return false;
 		}
+		log.info(`${PROJECT_FILE} ${created ? 'появился' : 'удалён'}: ${dir}`);
 		forgetSubProjectDecision(dir);
 		invalidateProjectLayoutsContaining(dir);
 		this.requestRefresh();
@@ -927,6 +931,20 @@ export class WorkspaceProjects implements vscode.Disposable {
 		return promise;
 	}
 
+	/** Состав проектов сменился: от него зависит, видны ли панели проекта. */
+	private logProjects(previous: WorkspaceProjectsSnapshot | undefined, next: WorkspaceProjectsSnapshot): void {
+		const roots = next.projects.map((project) => project.root).join(', ');
+		const was = previous ? `, было ${previous.projects.length}` : '';
+		log.info(`проектов в окне: ${next.projects.length}${was}${roots ? `: ${roots}` : ''}`);
+		if (next.projects.length > 0) {
+			return;
+		}
+		const folders = this.options
+			.folders()
+			.map((folder) => `${folder.root} ${hasProjectFile(folder.root) ? `с ${PROJECT_FILE}` : `без ${PROJECT_FILE}`}`);
+		log.warn(`проектов нет, панели проекта скрыты; папки окна: ${folders.join(', ') || 'нет'}`);
+	}
+
 	private apply(next: WorkspaceProjectsSnapshot): void {
 		const previous = this.snapshot;
 		this.snapshot = next;
@@ -938,6 +956,9 @@ export class WorkspaceProjects implements vscode.Disposable {
 		const listChanged = !previous || snapshotSignature(previous) !== snapshotSignature(next);
 		if (listChanged || firstComplete) {
 			this.publishContext();
+		}
+		if (next.complete && (listChanged || firstComplete)) {
+			this.logProjects(firstComplete ? undefined : previous, next);
 		}
 		outsideProject(() => {
 			if (listChanged) {

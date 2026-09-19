@@ -15,7 +15,7 @@ import { Readable } from 'node:stream';
 import * as vscode from 'vscode';
 import { extractZip } from './zipExtract';
 import { logger } from './logger';
-import { githubTokenFromSession, githubTokenFromStore } from './githubToken';
+import { githubSessionSettled, githubTokenFromSession, githubTokenFromStore } from './githubToken';
 
 const log = logger.scope('releases');
 
@@ -164,6 +164,21 @@ export function resolveGithubToken(): string {
 		}
 	}
 	return '';
+}
+
+/**
+ * Токен запроса к GitHub: без токена из хранилища и окружения сначала дожидается
+ * сессии редактора, которая читается в фоне с активации.
+ *
+ * @param token - Токен, известный вызывающему
+ * @returns Токен или пустая строка для анонимного запроса
+ */
+async function requestToken(token: string): Promise<string> {
+	if (token !== '') {
+		return token;
+	}
+	await githubSessionSettled();
+	return resolveGithubToken();
 }
 
 export function parseRepoSlug(slug: string): { owner: string; repo: string } {
@@ -403,7 +418,7 @@ export async function ensureReleaseComponent(
 	}
 
 	const { owner, repo } = parseRepoSlug(spec.repoSlug);
-	const headers = githubHeaders(token);
+	const headers = githubHeaders(await requestToken(token));
 	let status = showStatus(`${spec.label}: проверка обновлений…`);
 	try {
 		let rel: GithubRelease;
@@ -505,7 +520,7 @@ export function checkReleaseUpdateInBackground(
 			const { owner, repo } = parseRepoSlug(spec.repoSlug);
 			let latest: GithubRelease;
 			try {
-				latest = await fetchLatestStableRelease(owner, repo, githubHeaders(token));
+				latest = await fetchLatestStableRelease(owner, repo, githubHeaders(await requestToken(token)));
 			} catch {
 				return;
 			}
