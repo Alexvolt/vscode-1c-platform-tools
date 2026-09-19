@@ -106,6 +106,8 @@ export type MdSparrowOp =
 	| 'cf-md-subsystem-command-visibility-set'
 	| 'cf-role-rights-get'
 	| 'cf-role-rights-set'
+	| 'cf-object-rights-get'
+	| 'cf-object-rights-set'
 	| 'cf-support-get'
 	| 'cf-support-object-get'
 	| 'cf-support-object-states'

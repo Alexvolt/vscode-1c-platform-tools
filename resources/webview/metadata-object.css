@@ -1266,6 +1266,117 @@ body.split-view .content > .list-filter {
 	cursor: pointer;
 }
 
+/* Права ролей на объект: у матрицы и у подробностей роли своя прокрутка */
+.object-rights-box {
+	max-height: max(180px, calc(100vh - 440px));
+}
+.object-rights-counter {
+	opacity: 0.75;
+	font-size: 12px;
+}
+.object-rights-table,
+.object-rights-legend {
+	--object-rights-new-tint: color-mix(in srgb, var(--vscode-charts-green) 18%, transparent);
+}
+.object-rights-legend {
+	font-size: 12px;
+	padding: 1px 8px;
+	border-left: 3px solid var(--vscode-charts-green);
+	background: var(--object-rights-new-tint);
+}
+.object-rights-table th .object-rights-head {
+	writing-mode: vertical-rl;
+	transform: rotate(180deg);
+	max-height: 150px;
+	white-space: normal;
+	text-align: left;
+	line-height: 1.15;
+	font-weight: 500;
+	margin: 0 auto;
+}
+.object-rights-table th {
+	vertical-align: bottom;
+	padding: 6px 4px;
+}
+.object-rights-table th.rights-object-col {
+	vertical-align: bottom;
+}
+.object-rights-table td {
+	position: relative;
+	padding: 3px 6px;
+}
+.object-rights-table tbody tr {
+	cursor: default;
+}
+.object-rights-table tr.object-rights-new td.rights-object-col {
+	box-shadow: inset 3px 0 0 var(--vscode-charts-green);
+	background-image: linear-gradient(var(--object-rights-new-tint), var(--object-rights-new-tint));
+}
+.object-rights-table tr.is-selected td,
+.object-rights-table tr.is-selected td.rights-object-col {
+	background: var(--vscode-list-inactiveSelectionBackground);
+}
+/* Неотправленная правка: цвет изменённых файлов VS Code */
+.object-rights-table tbody tr td.object-rights-changed {
+	background: color-mix(in srgb, var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-charts-blue)) 22%, transparent);
+}
+.object-rights-table td.object-rights-role-changed {
+	color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-charts-blue));
+}
+.object-rights-table td.object-rights-role-changed::after {
+	content: ' •';
+}
+.object-rights-rls {
+	position: absolute;
+	top: 0;
+	right: 3px;
+	color: var(--vscode-charts-orange);
+	font-size: 14px;
+	line-height: 1;
+}
+.object-rights-detail {
+	margin-top: 10px;
+	padding: 8px 10px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 2px;
+	max-height: 240px;
+	overflow: auto;
+}
+.object-rights-detail-title {
+	font-weight: 600;
+	margin-bottom: 6px;
+}
+.object-rights-section {
+	margin: 8px 0 4px 0;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	opacity: 0.75;
+}
+.object-rights-restriction + .object-rights-restriction {
+	margin-top: 6px;
+}
+.object-rights-restriction-head {
+	font-weight: 500;
+}
+.object-rights-restriction-off {
+	margin-left: 8px;
+	font-weight: normal;
+	color: var(--vscode-descriptionForeground);
+}
+.object-rights-condition {
+	margin: 2px 0 0 0;
+	padding: 6px 8px;
+	background: var(--vscode-textCodeBlock-background);
+	font-family: var(--vscode-editor-font-family);
+	font-size: var(--vscode-editor-font-size);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.object-rights-child {
+	padding: 1px 0;
+}
+
 /* Командный интерфейс: селект группы и стрелки порядка */
 .ci-group-select {
 	background: var(--vscode-dropdown-background);

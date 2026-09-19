@@ -4512,6 +4512,8 @@ export interface EnumValueLabels {
 	readonly byProperty?: Readonly<Record<string, Readonly<Record<string, string>>>>;
 	/** Права роли: набор задаёт платформа, а не формат выгрузки. */
 	readonly rights?: Readonly<Record<string, string>>;
+	/** Виды объектов с правами в ролях: вид -> права в порядке платформы. */
+	readonly rightsByKind?: Readonly<Record<string, readonly string[]>>;
 	/** Группы командного интерфейса подсистемы. */
 	readonly commandGroups?: Readonly<Record<string, string>>;
 	/** Стандартные команды объекта: открыть список, создать и прочие. */
