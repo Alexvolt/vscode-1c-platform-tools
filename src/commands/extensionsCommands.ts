@@ -733,13 +733,13 @@ export class ExtensionsCommands extends BaseCommand {
 			return;
 		}
 
-		const exitCode = await convertSourcesWithEdt(workspaceRoot, {
+		const converted = await convertSourcesWithEdt(workspaceRoot, {
 			sourceDir: absolute(selected.dir),
 			format: selected.format,
 			outputPath: absolute(outputPath),
 			baseProjectDir,
 		});
-		return this.edtCommandResult(exitCode, outputPath, opts);
+		return this.edtCommandResult(converted, outputPath, opts);
 	}
 
 	/**

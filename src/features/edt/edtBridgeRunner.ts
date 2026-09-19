@@ -15,7 +15,15 @@ import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
 import { resolveProjectLayout, type ProjectLayout } from '../../shared/projectLayout';
 import type { TaskOutputChain } from '../tasks/vrunnerTask';
-import { detachProject, edtProjectName, edtWorkspaceDir, ensureProjectRegistered, runEdtCommand } from './edtRunner';
+import {
+	detachProject,
+	edtFailureMessage,
+	edtProjectName,
+	edtWorkspaceDir,
+	ensureProjectRegistered,
+	runEdtCommand,
+	type EdtRunResult,
+} from './edtRunner';
 import {
 	designerExternalsUnder,
 	EDT_IMPORT_DIR,
@@ -54,11 +62,11 @@ interface ProjectStep {
  *
  * @param steps - Что сделать
  * @param context - Рабочая область и каталог сборки
- * @returns Удались ли все выгрузки
+ * @returns Итог первой неудавшейся выгрузки либо успех
  */
-export async function runEdtExports(steps: readonly EdtExportStep[], context: EdtBridgeContext): Promise<boolean> {
+export async function runEdtExports(steps: readonly EdtExportStep[], context: EdtBridgeContext): Promise<EdtRunResult> {
 	if (steps.length === 0) {
-		return true;
+		return { exitCode: 0 };
 	}
 	const workspaceDir = edtWorkspaceDir(context.workspaceRoot, context.buildDir);
 	for (const step of steps) {
@@ -71,14 +79,15 @@ export async function runEdtExports(steps: readonly EdtExportStep[], context: Ed
 			continue;
 		}
 		const target = path.resolve(context.workspaceRoot, step.target);
-		if (!(await exportProject(step, target, workspaceDir, context))) {
-			return false;
+		const exported = await exportProject(step, target, workspaceDir, context);
+		if (exported.exitCode !== 0) {
+			return exported;
 		}
 		if (step.externalName) {
 			await flattenExternalExport(target, step.externalName);
 		}
 	}
-	return true;
+	return { exitCode: 0 };
 }
 
 /**
@@ -96,7 +105,7 @@ export async function runEdtImports(steps: readonly EdtImportStep[], context: Ed
 		const source = path.resolve(context.workspaceRoot, step.source);
 		const projectDir = path.resolve(context.workspaceRoot, step.projectDir);
 		const base = step.baseProjectDir === undefined ? undefined : path.resolve(context.workspaceRoot, step.baseProjectDir);
-		if (!(await registerProjects([base], workspaceDir, context))) {
+		if ((await registerProjects([base], workspaceDir, context)).exitCode !== 0) {
 			continue;
 		}
 		if (step.external) {
@@ -155,23 +164,29 @@ async function importExternals(
 	for (const [projectDir, names] of owned) {
 		const baseProjectDir = edtBaseProjectOf(projectDir, { configurations, projectName: edtProjectName, active: base });
 		const merged = path.resolve(context.workspaceRoot, context.buildDir, EDT_IMPORT_DIR, path.basename(projectDir));
-		if (!(await exportProject({ projectDir, baseProjectDir }, merged, workspaceDir, context))) {
-			void vscode.window.showWarningMessage(`Выгрузка проекта ${edtProjectName(projectDir)} не удалась, объекты ${names.join(', ')} в него не вернулись.`);
+		const exported = await exportProject({ projectDir, baseProjectDir }, merged, workspaceDir, context);
+		if (exported.exitCode !== 0) {
+			void vscode.window.showWarningMessage(
+				edtFailureMessage(
+					`Выгрузка проекта ${edtProjectName(projectDir)} не удалась, объекты ${names.join(', ')} в него не вернулись.`,
+					exported
+				)
+			);
 			continue;
 		}
 		await flattenExternalExport(merged);
 		for (const name of names) {
 			await replaceExternalObject(merged, path.join(source, name), name);
 		}
-		const code = await importProject(merged, projectDir, [], workspaceDir, context);
-		if (code === 0 && baseProjectDir !== undefined) {
+		const imported = await importProject(merged, projectDir, [], workspaceDir, context);
+		if (imported.exitCode === 0 && baseProjectDir !== undefined) {
 			await writeBaseProject(projectDir, edtProjectName(baseProjectDir));
 		}
 	}
 	for (const name of orphans) {
 		const target = path.join(container, name);
-		const code = await importProject(path.join(source, name), target, [], workspaceDir, context);
-		if (code === 0 && base !== undefined) {
+		const imported = await importProject(path.join(source, name), target, [], workspaceDir, context);
+		if (imported.exitCode === 0 && base !== undefined) {
 			await writeBaseProject(target, edtProjectName(base));
 		}
 	}
@@ -181,15 +196,21 @@ async function importExternals(
  * Выгружает проект в формат конфигуратора; прошлая выгрузка убирается целиком,
  * иначе удалённый объект остался бы в ней.
  *
- * @returns Удалась ли выгрузка
+ * @returns Итог выгрузки
  */
-async function exportProject(step: ProjectStep, target: string, workspaceDir: string, context: EdtBridgeContext): Promise<boolean> {
-	if (!(await registerProjects([step.baseProjectDir, step.projectDir], workspaceDir, context))) {
-		return false;
+async function exportProject(
+	step: ProjectStep,
+	target: string,
+	workspaceDir: string,
+	context: EdtBridgeContext
+): Promise<EdtRunResult> {
+	const registered = await registerProjects([step.baseProjectDir, step.projectDir], workspaceDir, context);
+	if (registered.exitCode !== 0) {
+		return registered;
 	}
 	await fs.rm(target, { recursive: true, force: true });
 	const name = edtProjectName(path.resolve(context.workspaceRoot, step.projectDir));
-	const code = await runEdtCommand({
+	return runEdtCommand({
 		command: 'export',
 		args: ['--project-name', name, '--configuration-files', target],
 		title: `EDT: выгрузка ${name}`,
@@ -197,14 +218,13 @@ async function exportProject(step: ProjectStep, target: string, workspaceDir: st
 		cwd: context.workspaceRoot,
 		output: context.output,
 	});
-	return code === 0;
 }
 
 /**
  * Импортирует выгрузку в проект. Подключённый проект EDT выгрузкой не обновляет,
  * поэтому перед импортом он отключается от рабочей области.
  *
- * @returns Код возврата импорта
+ * @returns Итог импорта
  */
 async function importProject(
 	source: string,
@@ -212,9 +232,9 @@ async function importProject(
 	baseArgs: readonly string[],
 	workspaceDir: string,
 	context: EdtBridgeContext
-): Promise<number> {
+): Promise<EdtRunResult> {
 	const detached = await detachProject(projectDir, workspaceDir, context.workspaceRoot, context.output);
-	if (detached !== 0) {
+	if (detached.exitCode !== 0) {
 		return detached;
 	}
 	return runEdtCommand({
@@ -247,23 +267,24 @@ async function writeBaseProject(projectDir: string, baseProject: string): Promis
  * которые ссылаются на него по имени.
  *
  * @param dirs - Каталоги проектов относительно рабочей области либо абсолютные
- * @returns Подключились ли все
+ * @returns Итог первого неудавшегося подключения либо успех
  */
 async function registerProjects(
 	dirs: readonly (string | undefined)[],
 	workspaceDir: string,
 	context: EdtBridgeContext
-): Promise<boolean> {
+): Promise<EdtRunResult> {
 	for (const dir of dirs) {
 		if (dir === undefined) {
 			continue;
 		}
 		const projectDir = path.resolve(context.workspaceRoot, dir);
-		if ((await ensureProjectRegistered(projectDir, workspaceDir, context.workspaceRoot, context.output)) !== 0) {
-			return false;
+		const registered = await ensureProjectRegistered(projectDir, workspaceDir, context.workspaceRoot, context.output);
+		if (registered.exitCode !== 0) {
+			return registered;
 		}
 	}
-	return true;
+	return { exitCode: 0 };
 }
 
 /**

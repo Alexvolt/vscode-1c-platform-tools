@@ -19,7 +19,7 @@ import { ensureMdSparrowRuntime } from '../features/metadata/mdSparrowBootstrap'
 import { runMdSparrowParamsMutation } from '../features/metadata/mdSparrowParams';
 import { edtStagingTarget } from '../features/edt/edtSourceBridge';
 import { runEdtExports, runEdtImports } from '../features/edt/edtBridgeRunner';
-import { edtStagingRoot } from '../features/edt/edtRunner';
+import { edtFailureMessage, edtStagingRoot } from '../features/edt/edtRunner';
 
 const log = logger.scope('commands');
 
@@ -92,8 +92,10 @@ export class SetVersionCommands extends BaseCommand {
 			],
 			context
 		);
-		if (!exported) {
-			void vscode.window.showErrorMessage('Выгрузка проекта 1С:EDT не удалась, версия не изменена.');
+		if (exported.exitCode !== 0) {
+			void vscode.window.showErrorMessage(
+				edtFailureMessage('Выгрузка проекта 1С:EDT не удалась, версия не изменена.', exported)
+			);
 			return;
 		}
 		await this.vrunner.executeVRunnerTaskSequenceAndWait(

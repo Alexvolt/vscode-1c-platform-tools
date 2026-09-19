@@ -15,7 +15,14 @@ import * as path from 'node:path';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import type { SourceFormat } from '../../shared/projectLayout';
 import { TaskOutputChain } from '../tasks/vrunnerTask';
-import { detachProject, edtProjectName, edtWorkspaceDir, ensureProjectRegistered, runEdtCommand } from './edtRunner';
+import {
+	detachProject,
+	edtProjectName,
+	edtWorkspaceDir,
+	ensureProjectRegistered,
+	runEdtCommand,
+	type EdtRunResult,
+} from './edtRunner';
 
 /** Каталог в каталоге сборки, куда по умолчанию конвертируется конфигурация из выгрузки конфигуратора. */
 export const CONVERTED_CONFIGURATION_DIR = 'cf-edt';
@@ -59,23 +66,23 @@ export function designerExtensionBase(
  *
  * @param workspaceRoot - Корень рабочей области
  * @param conversion - Что и куда конвертируется
- * @returns Код возврата 1cedtcli
+ * @returns Итог первой неудавшейся команды 1cedtcli либо последней
  */
-export async function convertSourcesWithEdt(workspaceRoot: string, conversion: EdtConversion): Promise<number> {
+export async function convertSourcesWithEdt(workspaceRoot: string, conversion: EdtConversion): Promise<EdtRunResult> {
 	const workspaceDir = edtWorkspaceDir(workspaceRoot, VRunnerManager.getInstance().getOutPath());
 	const output = new TaskOutputChain();
 
 	if (conversion.baseProjectDir !== undefined) {
-		const code = await ensureProjectRegistered(conversion.baseProjectDir, workspaceDir, workspaceRoot, output);
-		if (code !== 0) {
-			return code;
+		const registered = await ensureProjectRegistered(conversion.baseProjectDir, workspaceDir, workspaceRoot, output);
+		if (registered.exitCode !== 0) {
+			return registered;
 		}
 	}
 
 	if (conversion.format === 'edt') {
-		const code = await ensureProjectRegistered(conversion.sourceDir, workspaceDir, workspaceRoot, output);
-		if (code !== 0) {
-			return code;
+		const registered = await ensureProjectRegistered(conversion.sourceDir, workspaceDir, workspaceRoot, output);
+		if (registered.exitCode !== 0) {
+			return registered;
 		}
 		await fsp.rm(conversion.outputPath, { recursive: true, force: true });
 		const name = edtProjectName(conversion.sourceDir);
@@ -91,7 +98,7 @@ export async function convertSourcesWithEdt(workspaceRoot: string, conversion: E
 
 	// Проект прошлой конвертации ещё подключён к рабочей области: в подключённый проект импорт не идёт
 	const detached = await detachProject(conversion.outputPath, workspaceDir, workspaceRoot, output);
-	if (detached !== 0) {
+	if (detached.exitCode !== 0) {
 		return detached;
 	}
 	await fsp.rm(conversion.outputPath, { recursive: true, force: true });

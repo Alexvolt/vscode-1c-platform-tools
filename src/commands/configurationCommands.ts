@@ -316,12 +316,12 @@ export class ConfigurationCommands extends BaseCommand {
 			return;
 		}
 
-		const exitCode = await convertSourcesWithEdt(workspaceRoot, {
+		const converted = await convertSourcesWithEdt(workspaceRoot, {
 			sourceDir: source.dir,
 			format: source.format,
 			outputPath: path.resolve(workspaceRoot, outputPath),
 		});
-		return this.edtCommandResult(exitCode, outputPath, opts);
+		return this.edtCommandResult(converted, outputPath, opts);
 	}
 
 	async decompile(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
