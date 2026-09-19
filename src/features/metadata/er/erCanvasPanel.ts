@@ -225,7 +225,13 @@ async function loadAndInitCanvas(
 			payload: { message },
 		});
 		if (e instanceof MdSparrowOutdatedError) {
-			await clearMdSparrowJarCache(context);
+			try {
+				await clearMdSparrowJarCache(context);
+			} catch (clearError) {
+				log.warn(`кэш md-sparrow не очищен: ${clearError instanceof Error ? clearError.message : String(clearError)}`);
+				instance.graphState = 'failed';
+				return;
+			}
 			void loadAndInitCanvas(instance, context, loadGraph);
 			return;
 		}

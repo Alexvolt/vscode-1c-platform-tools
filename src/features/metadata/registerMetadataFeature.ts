@@ -32,6 +32,7 @@ import {
 	type MutatableChildKind,
 } from './metadataChildMutations';
 import { createMdSparrowMutationRunner } from './mdSparrowMutationQueue';
+import { stopMdSparrowResidents } from './mdSparrowRunner';
 import type { MetadataFilterViewProvider } from './metadataFilterView';
 import { MetadataSearchViewProvider } from './metadataSearchView';
 import { computeSubsystemFilter, findSubsystemByName, loadSubsystemTrees } from './metadataSubsystemFilter';
@@ -2942,16 +2943,19 @@ export function registerMetadataFeature(
 			}
 		})),
 		vscode.workspace.onDidChangeConfiguration((e) => {
-			const runtime = [
-				'1c-platform-tools.metadata',
+			const components = [
 				'1c-platform-tools.components.path.metadataJar',
 				'1c-platform-tools.components.autoload.metadataJar',
 				'1c-platform-tools.components.path.java',
 				'1c-platform-tools.components.autoload.java',
 			];
-			if (runtime.some((section) => e.affectsConfiguration(section))) {
-				void metadataTreeProvider.refresh();
+			const componentsChanged = components.some((section) => e.affectsConfiguration(section));
+			if (!componentsChanged && !e.affectsConfiguration('1c-platform-tools.metadata')) {
+				return;
 			}
+			// Дерево перечитывается уже процессом новой сборки
+			const restarted = componentsChanged ? stopMdSparrowResidents() : Promise.resolve();
+			void restarted.then(() => metadataTreeProvider.refresh());
 		}),
 		// Дерево показывает состав текущего проекта
 		onDidChangeCurrentProject(() => {

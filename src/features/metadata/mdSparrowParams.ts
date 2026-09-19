@@ -199,7 +199,7 @@ async function writeParamsAndRun(
 	const payload = supportEnabled() ? params : { ...params, ignoreSupport: true };
 	await fs.writeFile(tmpPath, JSON.stringify(payload), 'utf8');
 	try {
-		return await runMdSparrow(runtime, [command, '--params', tmpPath], options);
+		return await runMdSparrow(runtime, [command, '--params', tmpPath], { ...options, label: `${command} ${params.op}` });
 	} finally {
 		await fs.unlink(tmpPath).catch(() => undefined);
 	}
