@@ -748,14 +748,22 @@ export class MdSparrowResidentPool {
 	private readonly unsupported = new Set<string>();
 	private readonly timing: ResidentTiming;
 	private staleCopiesSwept = false;
+	private identityRead: Promise<unknown> = Promise.resolve();
 
 	constructor(private readonly options: ResidentPoolOptions) {
 		this.timing = { ...RESIDENT_TIMING, ...options.timing };
 	}
 
-	/** Выполняет запрос резидентом сборки или разовым запуском. */
+	/**
+	 * Выполняет запрос резидентом сборки или разовым запуском.
+	 *
+	 * Отметка сборки читается по очереди, поэтому запросы встают в очередь
+	 * резидента в порядке вызова.
+	 */
 	async run(runtime: MdSparrowRuntime, request: ResidentRequest): Promise<MdSparrowRunResult> {
-		const identity = await jarIdentity(runtime);
+		const read = this.identityRead.then(() => jarIdentity(runtime));
+		this.identityRead = read;
+		const identity = await read;
 		if (identity === undefined || this.unsupported.has(identity)) {
 			return this.options.runOnce(runtime, request);
 		}
