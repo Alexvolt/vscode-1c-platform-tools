@@ -99,7 +99,7 @@ function missingRunnerHint(result: { stdout: string; stderr: string; exitCode: n
 	return (
 		'\nПохоже, раннер тестов не найден. Установите зависимости проекта ' +
 		'(команда «Установить зависимости» или opm install --dev -l) ' +
-		'либо укажите путь к раннеру в настройках testing.*Path.'
+		'либо укажите путь к раннеру в настройке test.path.onescriptRunner или test.path.onebdd.'
 	);
 }
 
@@ -1440,7 +1440,7 @@ export class TestingController implements vscode.Disposable {
 	/**
 	 * Абсолютный путь к базовому каталогу временных отчётов прогонов
 	 *
-	 * Единый источник пути (testing.reportsPath) для создания подкаталогов
+	 * Единый источник пути (test.path.reports) для создания подкаталогов
 	 * прогонов и для очистки устаревших отчётов.
 	 *
 	 * @param root - Корень проекта

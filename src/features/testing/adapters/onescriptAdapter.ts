@@ -20,7 +20,7 @@ type OneScriptRunner = '1testrunner' | 'oneunit';
  * Discovery: .os модули в каталоге тестов OneScript — классический стиль
  * (ИсполняемыеСценарии) и аннотационный (&Тест над процедурой).
  *
- * Запуск — без платформы 1С, раннер выбирается настройкой testing.onescriptRunner
+ * Запуск — без платформы 1С, раннер выбирается настройкой test.onescriptRunner
  * ('auto' — oneunit, если он локально в oscript_modules/bin или объявлен в packagedef,
  * иначе 1testrunner):
  * - 1testrunner: `-run <файл> xddReportPath <каталог>` — jUnit-отчёт. Имя файла
@@ -34,7 +34,7 @@ type OneScriptRunner = '1testrunner' | 'oneunit';
  * «Allure отчёт». Для старых версий 1testrunner без поддержки xddReportPath
  * прогон завершится errored с подсказкой обновить зависимости.
  *
- * Путь к раннеру: настройка testing.onescriptRunnerPath (поддерживает
+ * Путь к раннеру: настройка test.path.onescriptRunner (поддерживает
  * относительные пути от корня проекта), иначе локальный oscript_modules/bin,
  * иначе PATH.
  */
@@ -221,7 +221,7 @@ export class OneScriptAdapter implements TestFrameworkAdapter {
 	/**
 	 * Определяет раннер и команду его запуска
 	 *
-	 * Порядок: testing.onescriptRunnerPath (относительные пути — от корня
+	 * Порядок: test.path.onescriptRunner (относительные пути — от корня
 	 * проекта) → локальная установка в oscript_modules/bin → PATH.
 	 */
 	private resolveRunner(): { kind: OneScriptRunner; command: string } {
