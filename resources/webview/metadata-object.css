@@ -986,15 +986,128 @@ select.edit-input {
 	cursor: pointer;
 }
 
-/* Нижний список состава: что вошло, плоско и без группировки */
-.ref-selected {
-	margin-top: 14px;
-	border-top: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.35));
-	padding-top: 8px;
+.subsys-row.revealed {
+	animation: subsys-reveal 1.6s ease-out;
 }
-.ref-selected .struct-list {
-	max-height: 220px;
-	overflow-y: auto;
+@keyframes subsys-reveal {
+	from {
+		background: color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent);
+	}
+	to {
+		background: transparent;
+	}
+}
+
+/* Дерево с флажками сверху, отмеченное снизу: вкладка на высоту окна, прокрутка у каждой части своя.
+   Окно ниже наименьшей вкладки прокручивается целиком, место под панелью сохранения остаётся внизу страницы */
+body.split-view {
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+}
+body.split-view .page {
+	flex: 1 0 auto;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+}
+body.split-view .content {
+	flex: 1 0 auto;
+	display: flex;
+	flex-direction: column;
+}
+body.split-view .content > .list-filter {
+	flex: none;
+}
+.split {
+	--split-pane-min: 64px;
+	--split-sash: 8px;
+	flex: 1 1 auto;
+	/* Без этого высота вкладки идёт от содержимого и страница вытягивается на всё дерево */
+	contain: size;
+	min-height: calc(2 * var(--split-pane-min) + var(--split-sash));
+	display: flex;
+	flex-direction: column;
+	margin-top: 10px;
+}
+.split-pane {
+	box-sizing: border-box;
+	min-height: var(--split-pane-min);
+	overflow: auto;
+	border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+	border-radius: 4px;
+}
+.split-top {
+	flex: 1 1 0;
+	padding: 4px;
+}
+.split-top > .subsys-tree {
+	margin-top: 0;
+}
+.split-top > .section-title:first-child {
+	margin-top: 0;
+}
+/* Пока разделитель не двигали, нижний список по содержимому, но не выше доли окна */
+.split-bottom {
+	flex: 0 1 auto;
+	max-height: 40%;
+}
+.split-bottom.sized {
+	max-height: none;
+}
+.split-bottom > .struct-list {
+	border: none;
+	border-radius: 0;
+	background: transparent;
+}
+.split-title {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: 5px 8px;
+	font-weight: 600;
+	background: var(--vscode-editor-background);
+	border-bottom: 1px solid var(--vscode-panel-border);
+}
+.struct-list + .split-title {
+	border-top: 1px solid var(--vscode-panel-border);
+}
+.split-item-path {
+	color: var(--vscode-descriptionForeground);
+}
+.split-item-link {
+	cursor: pointer;
+}
+.split-item-link:focus {
+	outline: none;
+}
+.split-item-link:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+.split-sash {
+	flex: none;
+	position: relative;
+	height: var(--split-sash);
+	cursor: row-resize;
+	touch-action: none;
+}
+.split-sash:focus {
+	outline: none;
+}
+.split-sash::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 3px;
+	height: 2px;
+	border-radius: 1px;
+}
+.split-sash:hover::after,
+.split-sash.dragging::after,
+.split-sash:focus-visible::after {
+	background: var(--vscode-focusBorder);
 }
 
 .subsys-mode {
@@ -1030,11 +1143,6 @@ select.edit-input {
 }
 .edit-chip-remove:hover {
 	color: var(--vscode-errorForeground, #f66);
-}
-.ref-selected .struct-item {
-	display: flex;
-	align-items: center;
-	gap: 8px;
 }
 .ref-selected-mode {
 	margin-left: auto;
