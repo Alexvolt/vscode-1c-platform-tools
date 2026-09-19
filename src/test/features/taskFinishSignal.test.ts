@@ -1,4 +1,6 @@
 import * as assert from 'node:assert';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { createVRunnerTaskTerminal } from '../../features/tasks/vrunnerTask';
 import { buildProcessCommand } from '../../utils/commandUtils';
 import {
@@ -168,6 +170,101 @@ suite('vrunnerTask: остановка задачи', () => {
 
 		assert.deepStrictEqual(cancelled, [1]);
 		assert.notStrictEqual(exitCode, 0);
+	});
+
+	test('программа с аргументами: остановка вызывает обе уборки', async () => {
+		const calls: string[] = [];
+		const terminal = createVRunnerTaskTerminal({
+			name: 'Долгая программа',
+			cwd: process.cwd(),
+			command: () => ({
+				command: { file: process.execPath, args: ['-e', 'setTimeout(() => {}, 60000)'] },
+				onCancel: () => calls.push('cancel'),
+				onCancelled: () => calls.push('cancelled'),
+			}),
+		});
+
+		const exitCode = await new Promise<number>((resolve) => {
+			terminal.onDidClose?.((code: number | void) => resolve(typeof code === 'number' ? code : -1));
+			terminal.open(undefined);
+			setTimeout(() => terminal.close(), 300);
+		});
+
+		assert.deepStrictEqual(calls, ['cancel', 'cancelled']);
+		assert.notStrictEqual(exitCode, 0);
+	});
+});
+
+suite('vrunnerTask: программа с аргументами', () => {
+	test('эхо показывает команду, вывод и код возврата доходят до задачи', async () => {
+		const outcomes: TaskFinishOutcome[] = [];
+		const unsubscribe = onTaskFinished((outcome) => outcomes.push(outcome));
+		const written: string[] = [];
+		const terminal = createVRunnerTaskTerminal({
+			name: 'Программа задачи',
+			cwd: process.cwd(),
+			command: { file: process.execPath, args: ['-e', 'process.stdout.write("готово"); process.exit(4)'] },
+		});
+
+		try {
+			const exitCode = await new Promise<number>((resolve) => {
+				terminal.onDidWrite((text) => written.push(text));
+				terminal.onDidClose?.((code: number | void) => resolve(typeof code === 'number' ? code : -1));
+				terminal.open(undefined);
+			});
+
+			assert.strictEqual(exitCode, 4);
+			assert.strictEqual(outcomes[0]?.exitCode, 4);
+			assert.ok(written[0].includes('process.exit(4)'), `эхо без команды: ${written[0]}`);
+			assert.ok(written.join('').includes('готово'));
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	test('переменные запуска ложатся поверх окружения задачи, уборка идёт после выхода', async () => {
+		const calls: string[] = [];
+		const written: string[] = [];
+		const terminal = createVRunnerTaskTerminal({
+			name: 'Запуск со своим окружением',
+			cwd: process.cwd(),
+			env: { TASK_VALUE: 'задача', RUN_VALUE: 'задача' },
+			command: () => ({
+				command: {
+					file: process.execPath,
+					args: ['-e', 'process.stdout.write(`${process.env.TASK_VALUE}|${process.env.RUN_VALUE}`)'],
+				},
+				env: { RUN_VALUE: 'запуск' },
+				onExit: () => calls.push('по окончании'),
+			}),
+		});
+
+		await new Promise<void>((resolve) => {
+			terminal.onDidWrite((text) => written.push(text));
+			terminal.onDidClose?.(() => resolve());
+			terminal.open(undefined);
+		});
+
+		assert.ok(written.join('').includes('задача|запуск'), written.join(''));
+		assert.deepStrictEqual(calls, ['по окончании']);
+	});
+
+	test('отказ запуска программы виден в терминале задачи', async () => {
+		const written: string[] = [];
+		const terminal = createVRunnerTaskTerminal({
+			name: 'Ненайденная программа',
+			cwd: process.cwd(),
+			command: { file: path.join(os.tmpdir(), 'нет-такой-программы'), args: [] },
+		});
+
+		const exitCode = await new Promise<number>((resolve) => {
+			terminal.onDidWrite((text) => written.push(text));
+			terminal.onDidClose?.((code: number | void) => resolve(typeof code === 'number' ? code : -1));
+			terminal.open(undefined);
+		});
+
+		assert.strictEqual(exitCode, 1);
+		assert.match(written.slice(1).join(''), /ENOENT/);
 	});
 });
 

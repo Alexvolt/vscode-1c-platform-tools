@@ -2041,11 +2041,12 @@ export class VRunnerManager {
 		const run = built.run();
 		return runCancellableCommand(run.command, {
 			cwd: options?.cwd || this.getEffectiveRoot(),
-			env: this.childEnv(options?.env),
+			env: this.childEnv({ ...options?.env, ...run.env }),
 			token: options?.token,
 			onOutput: options?.onOutput,
 			onCancel: run.onCancel,
-			onCancelled: run.onCancelled
+			onCancelled: run.onCancelled,
+			onExit: run.onExit
 		});
 	}
 

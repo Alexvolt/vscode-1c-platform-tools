@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { spawn, exec } from 'node:child_process';
+import { spawn, exec, type ChildProcess } from 'node:child_process';
 import { logger } from './logger';
 import { ProcessOutputDecoder } from './processOutput';
 import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
@@ -23,15 +23,34 @@ export interface CancellableProcessResult {
 }
 
 /**
- * Команда запуска вместе с уборкой при отмене
+ * Программа со списком аргументов: запускается без оболочки.
+ *
+ * Пакетные файлы Windows (.bat, .cmd) так не запускаются.
+ */
+export interface ProgramCall {
+	/** Исполняемый файл */
+	file: string;
+	/** Аргументы, каждый передаётся программе как есть */
+	args: readonly string[];
+}
+
+/** Строка для оболочки дочернего процесса либо программа с аргументами. */
+export type ProcessCommand = string | ProgramCall;
+
+/**
+ * Команда запуска вместе с её окружением и уборкой
  */
 export interface CommandRun {
-	/** Строка команды для оболочки дочернего процесса */
-	command: string;
+	/** Что запустить */
+	command: ProcessCommand;
+	/** Переменные этого запуска поверх окружения задачи */
+	env?: NodeJS.ProcessEnv;
 	/** Уборка при отмене */
 	onCancel?: () => void;
 	/** Уборка после выхода отменённого процесса */
 	onCancelled?: () => void;
+	/** Уборка после выхода процесса при любом исходе */
+	onExit?: () => void;
 }
 
 /**
@@ -50,6 +69,8 @@ export interface CancellableProcessOptions {
 	onCancel?: () => void;
 	/** Уборка после выхода отменённого процесса: то, что он успел запустить снаружи, ещё живо */
 	onCancelled?: () => void;
+	/** Уборка по окончании запуска при любом исходе, в том числе когда процесс не стартовал; после onCancelled */
+	onExit?: () => void;
 }
 
 /**
@@ -79,7 +100,7 @@ function killProcessTree(pid: number): void {
 }
 
 /**
- * Выполняет команду оболочки как отменяемый процесс с живым выводом.
+ * Выполняет команду как отменяемый процесс с живым выводом.
  *
  * В отличие от child_process.exec, позволяет:
  * - прервать выполнение по CancellationToken (с завершением всего дерева процессов);
@@ -88,19 +109,28 @@ function killProcessTree(pid: number): void {
  * Промис никогда не отклоняется: ошибки запуска возвращаются как
  * { success: false, exitCode: -1, stderr: <сообщение> }.
  *
- * @param command - Полная строка команды (выполняется через оболочку)
+ * @param command - Строка команды для оболочки либо программа с аргументами
  * @param options - Опции выполнения
  * @returns Промис с результатом выполнения
  */
 export function runCancellableCommand(
-	command: string,
+	command: ProcessCommand,
 	options?: CancellableProcessOptions
 ): Promise<CancellableProcessResult> {
-	return new Promise((resolve) => {
+	return new Promise((settle) => {
 		let stdout = '';
 		let stderr = '';
 		let cancelled = false;
 		let settled = false;
+
+		const resolve = (result: CancellableProcessResult) => {
+			try {
+				options?.onExit?.();
+			} catch (error) {
+				log.warn(`Уборка после запуска не удалась: ${(error as Error).message}`);
+			}
+			settle(result);
+		};
 
 		// Отменённый заранее запуск не стартует: иначе процесс успел бы создать контейнер или базу
 		if (options?.token?.isCancellationRequested) {
@@ -110,20 +140,31 @@ export function runCancellableCommand(
 
 		// Единственная точка запуска дочерних процессов расширения: терминал задачи,
 		// панель тестирования и синхронные команды приходят сюда
-		if (untrustedWorkspaceBlocks(command)) {
+		if (untrustedWorkspaceBlocks(typeof command === 'string' ? command : command.file)) {
 			options?.onOutput?.(`${WORKSPACE_TRUST_REQUIRED}\n`);
 			resolve({ success: false, stdout, stderr: WORKSPACE_TRUST_REQUIRED, exitCode: -1, cancelled: false });
 			return;
 		}
 
-		const child = spawn(command, {
+		const spawnOptions = {
 			cwd: options?.cwd,
 			env: options?.env ? { ...process.env, ...options.env } : process.env,
-			shell: true,
 			windowsHide: true,
 			// На POSIX — собственная группа процессов, чтобы убивать всё дерево
 			detached: process.platform !== 'win32'
-		});
+		};
+		let child: ChildProcess;
+		try {
+			child = typeof command === 'string'
+				? spawn(command, { ...spawnOptions, shell: true })
+				: spawn(command.file, command.args, { ...spawnOptions, shell: false });
+		} catch (error) {
+			// Отказ запуска без оболочки (например, EINVAL у пакетного файла) приходит исключением
+			const message = (error as Error).message;
+			options?.onOutput?.(message);
+			resolve({ success: false, stdout, stderr: message, exitCode: -1, cancelled: false });
+			return;
+		}
 
 		const finish = (exitCode: number) => {
 			if (settled) {
@@ -172,6 +213,7 @@ export function runCancellableCommand(
 
 		child.on('error', (error) => {
 			stderr += error.message;
+			options?.onOutput?.(error.message);
 			finish(-1);
 		});
 

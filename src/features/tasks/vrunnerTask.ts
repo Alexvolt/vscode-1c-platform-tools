@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { runCancellableCommand, type CommandRun } from '../../shared/cancellableProcess';
+import { runCancellableCommand, type CommandRun, type ProcessCommand } from '../../shared/cancellableProcess';
 import { logger } from '../../shared/logger';
 import { currentRoot, deepestProject, projectOf, workspaceFolderOf } from '../../shared/workspaceProjects';
 import { signalTaskFinished } from './taskFinishSignal';
@@ -65,10 +65,11 @@ export interface VRunnerTaskParams {
 	/** Имя задачи (заголовок панели и метка в списке задач). */
 	name: string;
 	/**
-	 * Строка команды для системной оболочки. Функция вызывается на каждый запуск
-	 * задачи, включая повтор, и отдаёт команду с уборкой при остановке.
+	 * Строка команды для системной оболочки либо программа с аргументами. Функция
+	 * вызывается на каждый запуск задачи, включая повтор, и отдаёт команду с
+	 * уборкой при остановке.
 	 */
-	command: string | (() => CommandRun);
+	command: ProcessCommand | (() => CommandRun);
 	/** Рабочая директория выполнения. */
 	cwd: string;
 	/** Дополнительные переменные окружения (поверх process.env). */
@@ -101,6 +102,27 @@ export class TaskOutputChain {
 }
 
 /**
+ * Команда в том виде, в каком её показывает эхо задачи.
+ *
+ * Служебный префикс кодировки не показывается. Программа с аргументами
+ * показывается без экранирования под оболочку.
+ *
+ * @param command - Команда задачи
+ * @returns Текст для эха и журнала
+ */
+function commandEcho(command: ProcessCommand): string {
+	if (typeof command !== 'string') {
+		return [command.file, ...command.args].map(quoteForEcho).join(' ');
+	}
+	return command.replaceAll('chcp 65001 >nul && ', '');
+}
+
+/** Аргумент с пробелом, кавычкой или пустой берётся в кавычки. */
+function quoteForEcho(value: string): string {
+	return value === '' || /[\s"]/.test(value) ? `"${value.replaceAll('"', '\\"')}"` : value;
+}
+
+/**
  * Псевдотерминал, исполняющий команду vrunner как отменяемый дочерний процесс.
  *
  * Поток вывода транслируется в панель задачи. Закрытие панели (или остановка
@@ -128,21 +150,22 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 	) {}
 
 	public open(): void {
-		log.debug(`запуск задачи: ${this.run.command}`);
+		log.debug(`запуск задачи: ${commandEcho(this.run.command)}`);
 		this.startedAt = Date.now();
 		if (this.root !== undefined) {
 			rememberTaskProject({ name: this.name, source: VRUNNER_TASK_SOURCE }, this.root);
 		}
 		// Эхо исходной команды в начале вывода (как у штатных задач VS Code),
 		// чтобы было видно, что именно запущено. Служебный префикс кодировки прячем.
-		const displayCommand = this.run.command.replaceAll('chcp 65001 >nul && ', '');
+		const displayCommand = commandEcho(this.run.command);
 		this.writeEmitter.fire(`[90m> ${displayCommand}[0m\r\n\r\n`);
 		runCancellableCommand(this.run.command, {
 			cwd: this.cwd,
-			env: this.env,
+			env: this.run.env === undefined ? this.env : { ...this.env, ...this.run.env },
 			token: this.cts.token,
 			onCancel: this.run.onCancel,
 			onCancelled: this.run.onCancelled,
+			onExit: this.run.onExit,
 			// Псевдотерминалу нужны переводы строки в формате \r\n.
 			onOutput: (chunk) => {
 				this.onOutput?.(chunk);
@@ -177,7 +200,7 @@ class VRunnerPseudoterminal implements vscode.Pseudoterminal {
 export function createVRunnerTaskTerminal(params: VRunnerTaskParams): vscode.Pseudoterminal {
 	return new VRunnerPseudoterminal(
 		params.name,
-		typeof params.command === 'string' ? { command: params.command } : params.command(),
+		typeof params.command === 'function' ? params.command() : { command: params.command },
 		params.cwd,
 		params.env,
 		params.exitCallback,
