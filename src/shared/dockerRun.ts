@@ -7,7 +7,8 @@
  * @module dockerRun
  */
 
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import type { CommandRun } from './cancellableProcess';
 import { logger } from './logger';
 
 const log = logger.scope('vrunner');
@@ -22,16 +23,51 @@ export function dockerContainerName(): string {
 }
 
 /**
- * Останавливает контейнер запуска. Удаление делает сам `docker run --rm`.
+ * Запуск в контейнере с новым именем: отмена останавливает контейнер по нему,
+ * а после выхода клиента убирает его.
+ *
+ * Имя берётся на каждый вызов: демон отказывает запуску с именем контейнера,
+ * который ещё останавливается после прошлой отмены.
+ *
+ * @param build - Строит команду `docker run` с заданным именем контейнера
+ * @returns Команда и уборка при отмене
+ */
+export function dockerCommandRun(build: (containerName: string) => string): CommandRun {
+	const containerName = dockerContainerName();
+	return {
+		command: build(containerName),
+		onCancel: () => stopDockerContainer(containerName),
+		onCancelled: () => removeDockerContainer(containerName),
+	};
+}
+
+/**
+ * Останавливает контейнер запуска.
  *
  * @param containerName - Имя контейнера из {@link dockerContainerName}
  */
 export function stopDockerContainer(containerName: string): void {
 	log.info(`Отмена: останавливаю контейнер ${containerName}`);
-	exec(`docker stop ${containerName}`, { timeout: 30000 }, (error) => {
+	execFile('docker', ['stop', containerName], { timeout: 30000, windowsHide: true }, (error) => {
 		if (error) {
 			// Контейнер мог остановиться сам вместе с клиентом: это не ошибка
 			log.debug(`docker stop ${containerName}: ${error.message}`);
+		}
+	});
+}
+
+/**
+ * Убирает контейнер, который клиент `docker run --rm` оставил после отмены:
+ * созданный, но ещё не запущенный, `--rm` не удаляет, а запущенный за миг
+ * до завершения клиента продолжает работать.
+ *
+ * @param containerName - Имя контейнера из {@link dockerContainerName}
+ */
+export function removeDockerContainer(containerName: string): void {
+	execFile('docker', ['rm', '-f', containerName], { timeout: 30000, windowsHide: true }, (error) => {
+		if (error) {
+			// Контейнер уже удалён вместе с клиентом: это не ошибка
+			log.debug(`docker rm ${containerName}: ${error.message}`);
 		}
 	});
 }

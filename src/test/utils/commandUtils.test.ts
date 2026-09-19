@@ -13,13 +13,17 @@ import {
 	quoteExecutable,
 	type ShellType
 } from '../../utils/commandUtils';
-import { dockerContainerName } from '../../shared/dockerRun';
+import { pathConversionPrefix } from '../../utils/shellEscape';
+import { dockerCommandRun, dockerContainerName } from '../../shared/dockerRun';
 
 suite('commandUtils', () => {
 	// Установка кодировки (chcp/[Console]::OutputEncoding) добавляется только на Windows
 	// (см. buildCommand → process.platform === 'win32'), поэтому соответствующие проверки
 	// выполняем только там.
 	const winTest = process.platform === 'win32' ? test : test.skip;
+	const posixTest = process.platform === 'win32' ? test.skip : test;
+	// Префикс MSYS есть у sh только на Windows, его проверяет отдельный тест
+	const shPrefix = pathConversionPrefix('sh');
 
 	test('detectShellType возвращает валидный тип оболочки', () => {
 		const shell = detectShellType();
@@ -163,20 +167,47 @@ suite('commandUtils', () => {
 
 	winTest('buildDockerCommand нормализует путь и кавычки для bash-хоста', () => {
 		const result = buildDockerCommand('vrunner:8.3.27', ['vanessa'], String.raw`C:\ws dir`, 'bash');
-		assert.strictEqual(result, "docker run --rm -v 'C:/ws dir:/workspace' -w /workspace vrunner:8.3.27 vanessa");
+		assert.strictEqual(
+			result,
+			"MSYS2_ARG_CONV_EXCL='*' docker run --rm -v 'C:/ws dir:/workspace' -w /workspace vrunner:8.3.27 vanessa"
+		);
+	});
+
+	winTest('команды для bash-подобных оболочек Windows выключают конвертацию путей MSYS', () => {
+		const prefix = "MSYS2_ARG_CONV_EXCL='*' ";
+		for (const shell of ['bash', 'sh', 'zsh'] as ShellType[]) {
+			assert.ok(
+				buildCommand('vrunner', ['init-dev', '--ibconnection', '/F./build/ib'], shell).includes(`${prefix}vrunner init-dev`),
+				`${shell}: префикс должен стоять прямо перед исполняемым файлом`
+			);
+			assert.ok(
+				buildDockerCommandSequence('vrunner:8.3.27', [['compile']], String.raw`C:\ws`, shell).startsWith(`${prefix}docker run`),
+				`${shell}: префикс должен стоять перед docker`
+			);
+		}
+		for (const shell of ['cmd', 'powershell'] as ShellType[]) {
+			assert.ok(!buildCommand('vrunner', ['init-dev'], shell).includes('MSYS'), `${shell}: префикс MSYS не нужен`);
+			assert.ok(!buildDockerCommand('vrunner:8.3.27', ['compile'], String.raw`C:\ws`, shell).includes('MSYS'), `${shell}: префикс MSYS не нужен`);
+		}
+		assert.ok(!buildProcessCommand('vrunner', ['init-dev']).includes('MSYS'), 'дочерний процесс идёт через cmd');
+	});
+
+	posixTest('вне Windows команды для bash без префикса MSYS', () => {
+		assert.strictEqual(buildCommand('vrunner', ['init-dev'], 'bash'), 'vrunner init-dev');
+		assert.ok(buildDockerCommand('vrunner:8.3.27', ['compile'], '/home/ws', 'bash').startsWith('docker run'));
 	});
 
 	test('buildDockerCommand даёт контейнеру имя: по нему его останавливают при отмене', () => {
 		const result = buildDockerCommand('vrunner:8.3.27', ['vanessa'], '/home/ws', 'sh', '1cpt-run-test');
 		assert.strictEqual(
 			result,
-			'docker run --rm --name 1cpt-run-test -v /home/ws:/workspace -w /workspace vrunner:8.3.27 vanessa'
+			`${shPrefix}docker run --rm --name 1cpt-run-test -v /home/ws:/workspace -w /workspace vrunner:8.3.27 vanessa`
 		);
 	});
 
 	test('buildDockerCommand без имени контейнера остаётся прежним', () => {
 		const result = buildDockerCommand('vrunner:8.3.27', ['vanessa'], '/home/ws', 'sh');
-		assert.strictEqual(result, 'docker run --rm -v /home/ws:/workspace -w /workspace vrunner:8.3.27 vanessa');
+		assert.strictEqual(result, `${shPrefix}docker run --rm -v /home/ws:/workspace -w /workspace vrunner:8.3.27 vanessa`);
 	});
 
 	test('dockerRunArgs отдаёт путь проекта одним аргументом без кавычек', () => {
@@ -189,7 +220,7 @@ suite('commandUtils', () => {
 	test('buildDockerCommandSequence тоже именует контейнер', () => {
 		const result = buildDockerCommandSequence('vrunner:8.3.27', [['compile']], '/home/ws', 'sh', '1cpt-run-test');
 		assert.ok(
-			result.startsWith('docker run --rm --name 1cpt-run-test -v /home/ws:/workspace'),
+			result.startsWith(`${shPrefix}docker run --rm --name 1cpt-run-test -v /home/ws:/workspace`),
 			`имя контейнера не попало в команду: ${result}`
 		);
 	});
@@ -200,6 +231,23 @@ suite('commandUtils', () => {
 		for (const name of names) {
 			assert.match(name, /^1cpt-run-[a-z0-9]+-[a-z0-9]+$/);
 		}
+	});
+
+	test('запуск в контейнере получает новое имя на каждый вызов', () => {
+		const names: string[] = [];
+		const build = (name: string): string => {
+			names.push(name);
+			return `docker run --name ${name}`;
+		};
+
+		const first = dockerCommandRun(build);
+		const second = dockerCommandRun(build);
+
+		assert.strictEqual(names.length, 2);
+		assert.notStrictEqual(names[0], names[1], 'повтор задачи столкнулся бы с именем контейнера, который ещё останавливается');
+		assert.strictEqual(first.command, `docker run --name ${names[0]}`);
+		assert.strictEqual(second.command, `docker run --name ${names[1]}`);
+		assert.strictEqual(typeof first.onCancel, 'function');
 	});
 
 	test('buildDockerCommandSequence отдаёт строку sh одним аргументом хоста', () => {

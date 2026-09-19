@@ -9,7 +9,15 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { escapeCommandArgs, PROCESS_HOST_SHELL, quoteExecutable, type ShellType } from '../../utils/shellEscape';
+import {
+	commandPrefix,
+	escapeCommandArg,
+	escapeCommandArgs,
+	joinShellCommands,
+	PROCESS_HOST_SHELL,
+	quoteExecutable,
+	type ShellType,
+} from '../../utils/shellEscape';
 
 const execFileAsync = promisify(execFile);
 
@@ -24,6 +32,7 @@ const COMMON_FIXTURES: { name: string; args: string[] }[] = [
 	{ name: 'обратная кавычка и восклицательный знак', args: ['--name', 'a`b!c!'] },
 	{ name: 'кириллица с пробелом', args: ['--settings', 'Рабочая база/env.json'] },
 	{ name: 'табуляция внутри значения', args: ['--name', 'a\tb'] },
+	{ name: 'POSIX-пути контейнера и ключи 1С', args: ['-w', '/workspace', '--entrypoint', '/bin/sh', '/F./build/ib', '--ibconnection=/F./build/ib'] },
 ];
 
 /**
@@ -146,11 +155,27 @@ async function runViaPowerShell(binary: string, args: string[]): Promise<string[
 	return runShell(binary, ['-NoProfile', '-NonInteractive', '-Command', `& ${buildLine(args, 'powershell')}`]);
 }
 
+/** Окружение терминала пользователя: конвертацию путей MSYS никто заранее не выключал. */
+function userShellEnv(): NodeJS.ProcessEnv {
+	const env = { ...process.env };
+	delete env.MSYS_NO_PATHCONV;
+	delete env.MSYS2_ARG_CONV_EXCL;
+	return env;
+}
+
+/** Строка с префиксом команды, как у buildCommand. */
 async function runViaPosix(binary: string, shell: ShellType, args: string[]): Promise<string[]> {
-	const env = process.platform === 'win32' && shell === 'bash'
-		? { ...process.env, MSYS_NO_PATHCONV: '1' }
-		: process.env;
-	return runShell(binary, ['-c', buildLine(args, shell)], env);
+	return runShell(binary, ['-c', `${commandPrefix(shell)}${buildLine(args, shell)}`], userShellEnv());
+}
+
+/** POSIX-оболочки терминала пользователя. */
+function collectPosixShells(): { binary: string; shell: ShellType }[] {
+	const shells: { binary: string | undefined; shell: ShellType }[] = [
+		{ binary: resolveBash(), shell: 'bash' },
+		{ binary: process.platform === 'win32' ? undefined : resolveBinary('sh'), shell: 'sh' },
+		{ binary: resolveBinary('zsh'), shell: 'zsh' },
+	];
+	return shells.flatMap(({ binary, shell }) => (binary === undefined ? [] : [{ binary, shell }]));
 }
 
 /**
@@ -222,6 +247,18 @@ function collectProbes(): Probe[] {
 
 const probes = collectProbes();
 
+/** bash на MSYS-рантайме (Git Bash, MSYS2): только он переписывает аргументы. */
+function resolveMsysBash(): string | undefined {
+	const bash = process.platform === 'win32' ? resolveBash() : undefined;
+	if (bash === undefined) {
+		return undefined;
+	}
+	const system = execFileSync(bash, ['-c', 'uname -s'], { encoding: 'utf8', windowsHide: true });
+	return /^(MINGW|MSYS)/.test(system.trim()) ? bash : undefined;
+}
+
+const msysBash = resolveMsysBash();
+
 describe(`круг argv на ${process.platform} (${probes.map((probe) => probe.name).join(', ')})`, () => {
 	for (const probe of probes) {
 		for (const fixture of COMMON_FIXTURES) {
@@ -243,6 +280,49 @@ describe(`круг argv на ${process.platform} (${probes.map((probe) => probe.
 			const args = ['designer', '--additional', '/LoadConfigFromFiles src/cf -updateConfigDumpInfo'];
 			const received = await runViaHostExec(`${WIN_EXEC_PREFIX}${buildLine(args, 'powershell')}`);
 			assert.notDeepEqual(received, args);
+		}
+	);
+
+	for (const { binary, shell } of collectPosixShells()) {
+		test(`${shell}: цепочка команд с префиксами останавливается на ошибке`, { timeout: TEST_TIMEOUT_MS }, async () => {
+			const command = (line: string): string => `${commandPrefix(shell)}${line}`;
+			const failing = command(`node -e ${escapeCommandArg('process.exit(3)', shell)}`);
+			const next = command(buildLine(['следующая'], shell));
+			const options = { encoding: 'utf8' as const, windowsHide: true, cwd: repoRoot, env: userShellEnv() };
+
+			const passed = await execFileAsync(binary, ['-c', joinShellCommands([next, next], shell)], options);
+			assert.deepEqual(parseArgvJson(passed.stdout, passed.stderr), ['следующая']);
+			assert.equal(passed.stdout.trim().split(/\r?\n/).length, 2, 'после успешной команды цепочка идёт дальше');
+
+			await assert.rejects(
+				execFileAsync(binary, ['-c', joinShellCommands([failing, next], shell)], options),
+				(error: { code?: unknown; stdout?: unknown }) => {
+					assert.equal(error.code, 3);
+					assert.equal(error.stdout, '', 'после ошибки следующая команда выполнилась');
+					return true;
+				}
+			);
+		});
+	}
+
+	test(
+		'Git Bash без префикса команды переписывает POSIX-пути',
+		{ timeout: TEST_TIMEOUT_MS, skip: msysBash === undefined },
+		async () => {
+			const args = ['-w', '/workspace', '/F./build/ib'];
+			const received = await runShell(msysBash ?? '', ['-c', buildLine(args, 'bash')], userShellEnv());
+			assert.notDeepEqual(received, args);
+		}
+	);
+
+	test(
+		'префикс команды не трогает конвертацию переменных окружения Git Bash',
+		{ timeout: TEST_TIMEOUT_MS, skip: msysBash === undefined },
+		async () => {
+			const args = ['-w', '/workspace', '/F./build/ib'];
+			const script = 'console.log(JSON.stringify([process.env.PT_POSIX_PATH, ...process.argv.slice(1)]))';
+			const line = `export PT_POSIX_PATH=/c/Users/probe; ${commandPrefix('bash')}node -e ${escapeCommandArg(script, 'bash')} -- ${escapeCommandArgs(args, 'bash')}`;
+			assert.deepEqual(await runShell(msysBash ?? '', ['-c', line], userShellEnv()), ['C:/Users/probe', ...args]);
 		}
 	);
 

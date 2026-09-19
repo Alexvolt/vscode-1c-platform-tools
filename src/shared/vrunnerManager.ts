@@ -19,8 +19,8 @@ import {
 } from '../utils/commandUtils';
 import { logger } from './logger';
 import { setTerminalOscriptBinDir } from './terminalEnv';
-import { dockerContainerName, stopDockerContainer } from './dockerRun';
-import { runCancellableCommand, CancellableProcessResult } from './cancellableProcess';
+import { dockerCommandRun, dockerContainerName } from './dockerRun';
+import { runCancellableCommand, CancellableProcessResult, type CommandRun } from './cancellableProcess';
 import { DEFAULT_PATHS, DEFAULT_VRUNNER, DEFAULT_ENV } from './pathDefaults';
 import { getOvmBinaryPath, getOvmBinDir, getOvmRootDir, getOpmBinaryCandidates, getOpmScriptPath, withBinDirFirst } from './ovmPaths';
 import {
@@ -1388,22 +1388,20 @@ export class VRunnerManager {
 			}
 		}
 
-		const built = this.buildExecCommand(finalArgs, useDocker, options?.translateRaw === true);
+		const built = this.buildExecRun(finalArgs, useDocker, options?.translateRaw === true);
 		if ('error' in built) {
 			log.error(`Ошибка при подготовке команды: ${built.error}`);
 			vscode.window.showErrorMessage(built.error);
 			return undefined;
 		}
 
-		const containerName = built.containerName;
 		return createVRunnerTask({
 			name: options?.name || '1C: Platform Tools',
-			command: built.command,
+			command: built.run,
 			cwd,
 			env: this.childEnv(options?.env),
 			definition: options?.definition,
 			exitCallback: options?.exitCallback,
-			onCancel: containerName === undefined ? undefined : () => stopDockerContainer(containerName),
 			appendOutput: options?.output?.append(),
 		});
 	}
@@ -1478,8 +1476,7 @@ export class VRunnerManager {
 			: argsArray.map((args) => this.appendActiveOverrides(args));
 		const cwd = options?.cwd || this.getEffectiveRoot() || os.homedir();
 		const useDocker = await this.shouldUseDocker();
-		let command: string;
-		let containerName: string | undefined = undefined;
+		let command: string | (() => CommandRun);
 
 		if (useDocker) {
 			if (!this.getEffectiveRoot()) {
@@ -1491,10 +1488,7 @@ export class VRunnerManager {
 				return;
 			}
 			try {
-				const dockerImage = this.getDockerImage();
-				const processedArgsArray = finalArgsArray.map((args) => this.processCommandArgsForDocker(args));
-				containerName = dockerContainerName();
-				command = buildDockerCommandSequence(dockerImage, processedArgsArray, this.getEffectiveRoot() ?? '', PROCESS_HOST_SHELL, containerName);
+				command = this.dockerSequenceRun(finalArgsArray);
 			} catch (error) {
 				const errMsg = (error as Error).message;
 				log.error(`Ошибка при подготовке команды Docker: ${errMsg}`);
@@ -1502,18 +1496,8 @@ export class VRunnerManager {
 				return;
 			}
 		} else {
-			const parts: string[] = [];
-			for (const args of finalArgsArray) {
-				const built = this.buildExecCommand(args, false);
-				if ('error' in built) {
-					log.error(`Ошибка при подготовке команды: ${built.error}`);
-					vscode.window.showErrorMessage(built.error);
-					return;
-				}
-				parts.push(built.command);
-			}
 			// && одинаково работает в cmd и sh (оболочки spawn для задач)
-			command = parts.join(' && ');
+			command = finalArgsArray.map((args) => buildProcessCommand(this.getVRunnerPath(), args)).join(' && ');
 		}
 
 		const task = createVRunnerTask({
@@ -1521,10 +1505,25 @@ export class VRunnerManager {
 			command,
 			cwd,
 			env: this.childEnv(options?.env),
-			onCancel: containerName === undefined ? undefined : () => stopDockerContainer(containerName),
 			appendOutput: options?.output?.append(),
 		});
 		await vscode.tasks.executeTask(task);
+	}
+
+	/**
+	 * Запуск последовательности команд vrunner в одном контейнере.
+	 *
+	 * @param argsArray - Наборы аргументов команд vrunner
+	 * @returns Построитель запуска для задачи: новое имя контейнера на каждый запуск
+	 * @throws {Error} Если образ Docker не задан
+	 */
+	private dockerSequenceRun(argsArray: string[][]): () => CommandRun {
+		const dockerImage = this.getDockerImage();
+		const processedArgsArray = argsArray.map((args) => this.processCommandArgsForDocker(args));
+		const root = this.getEffectiveRoot() ?? '';
+		return () => dockerCommandRun((containerName) =>
+			buildDockerCommandSequence(dockerImage, processedArgsArray, root, PROCESS_HOST_SHELL, containerName)
+		);
 	}
 
 	/**
@@ -1548,8 +1547,7 @@ export class VRunnerManager {
 			: argsArray.map((args) => this.appendActiveOverrides(args));
 		const cwd = options?.cwd || this.getEffectiveRoot() || os.homedir();
 		const useDocker = await this.shouldUseDocker();
-		let command: string;
-		let containerName: string | undefined = undefined;
+		let command: string | (() => CommandRun);
 
 		if (useDocker) {
 			if (!this.getEffectiveRoot()) {
@@ -1561,10 +1559,7 @@ export class VRunnerManager {
 				return 1;
 			}
 			try {
-				const dockerImage = this.getDockerImage();
-				const processedArgsArray = finalArgsArray.map((args) => this.processCommandArgsForDocker(args));
-				containerName = dockerContainerName();
-				command = buildDockerCommandSequence(dockerImage, processedArgsArray, this.getEffectiveRoot() ?? '', PROCESS_HOST_SHELL, containerName);
+				command = this.dockerSequenceRun(finalArgsArray);
 			} catch (error) {
 				const errMsg = (error as Error).message;
 				log.error(`Ошибка при подготовке команды Docker: ${errMsg}`);
@@ -1572,17 +1567,7 @@ export class VRunnerManager {
 				return 1;
 			}
 		} else {
-			const parts: string[] = [];
-			for (const args of finalArgsArray) {
-				const built = this.buildExecCommand(args, false);
-				if ('error' in built) {
-					log.error(`Ошибка при подготовке команды: ${built.error}`);
-					vscode.window.showErrorMessage(built.error);
-					return 1;
-				}
-				parts.push(built.command);
-			}
-			command = parts.join(' && ');
+			command = finalArgsArray.map((args) => buildProcessCommand(this.getVRunnerPath(), args)).join(' && ');
 		}
 
 		let resolveExit!: (exitCode: number) => void;
@@ -1595,7 +1580,6 @@ export class VRunnerManager {
 			cwd,
 			env: this.childEnv(options?.env),
 			exitCallback: resolveExit,
-			onCancel: containerName === undefined ? undefined : () => stopDockerContainer(containerName),
 			appendOutput: options?.output?.append(),
 		});
 		await vscode.tasks.executeTask(task);
@@ -1776,15 +1760,16 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Строит полную строку команды vrunner для выполнения в child process
+	 * Строит запуск vrunner в child process
 	 *
 	 * Учитывает режим Docker (docker.enabled): в этом случае команда оборачивается
 	 * в docker run, а пути нормализуются для контейнера.
 	 *
 	 * @param args - Аргументы команды vrunner
-	 * @returns Объект с командой либо с текстом ошибки подготовки
+	 * @returns Построитель запуска (в Docker каждый вызов даёт новое имя контейнера
+	 * и его остановку при отмене) либо текст ошибки подготовки
 	 */
-	private buildExecCommand(args: string[], useDocker: boolean, translateRaw = false): { command: string; containerName?: string } | { error: string } {
+	private buildExecRun(args: string[], useDocker: boolean, translateRaw = false): { run: () => CommandRun } | { error: string } {
 		// Трансляция синтаксиса применяется ТОЛЬКО к «сырым» аргументам задач
 		// пользователя из tasks.json. Планы интентов уже финальные — повторная
 		// обработка недопустима (парсер шима не обязан понимать синтаксис 3.x).
@@ -1797,21 +1782,23 @@ export class VRunnerManager {
 				return docker;
 			}
 			return {
-				command: buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, docker.containerName),
-				containerName: docker.containerName,
+				run: () => dockerCommandRun((containerName) =>
+					buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, containerName)
+				),
 			};
 		}
 
-		return { command: buildProcessCommand(this.getVRunnerPath(), args) };
+		const command = buildProcessCommand(this.getVRunnerPath(), args);
+		return { run: () => ({ command }) };
 	}
 
 	/**
-	 * Части запуска vrunner в Docker: образ, аргументы с путями контейнера, корень проекта и имя контейнера.
+	 * Части запуска vrunner в Docker: образ, аргументы с путями контейнера и корень проекта.
 	 *
 	 * @param args - Аргументы команды vrunner
 	 * @returns Части запуска либо текст ошибки подготовки
 	 */
-	private dockerRunParts(args: string[]): { image: string; args: string[]; root: string; containerName: string } | { error: string } {
+	private dockerRunParts(args: string[]): { image: string; args: string[]; root: string } | { error: string } {
 		const root = this.getEffectiveRoot();
 		if (!root) {
 			return { error: 'Для использования Docker необходимо открыть рабочую область' };
@@ -1821,7 +1808,6 @@ export class VRunnerManager {
 				image: this.getDockerImage(),
 				args: this.processCommandArgsForDocker(args),
 				root,
-				containerName: dockerContainerName(),
 			};
 		} catch (error) {
 			return { error: (error as Error).message };
@@ -1894,9 +1880,10 @@ export class VRunnerManager {
 					resolve({ success: false, stdout: '', stderr: docker.error, exitCode: 1 });
 					return;
 				}
-				logCommand(buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, docker.containerName));
+				const containerName = dockerContainerName();
+				logCommand(buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, containerName));
 				// docker получает аргументы списком, без оболочки
-				execFile('docker', dockerRunArgs(docker.image, docker.args, docker.root, docker.containerName), execOptions, finish);
+				execFile('docker', dockerRunArgs(docker.image, docker.args, docker.root, containerName), execOptions, finish);
 				return;
 			}
 
@@ -1936,7 +1923,7 @@ export class VRunnerManager {
 			args = this.appendActiveOverrides(args);
 		}
 		const useDocker = await this.shouldUseDocker();
-		const built = this.buildExecCommand(args, useDocker);
+		const built = this.buildExecRun(args, useDocker);
 		if ('error' in built) {
 			return {
 				success: false,
@@ -1947,11 +1934,14 @@ export class VRunnerManager {
 			};
 		}
 
-		return runCancellableCommand(built.command, {
+		const run = built.run();
+		return runCancellableCommand(run.command, {
 			cwd: options?.cwd || this.getEffectiveRoot(),
 			env: this.childEnv(options?.env),
 			token: options?.token,
-			onOutput: options?.onOutput
+			onOutput: options?.onOutput,
+			onCancel: run.onCancel,
+			onCancelled: run.onCancelled
 		});
 	}
 

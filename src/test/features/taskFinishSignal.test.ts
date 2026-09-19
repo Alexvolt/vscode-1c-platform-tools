@@ -1,5 +1,6 @@
 import * as assert from 'node:assert';
 import { createVRunnerTaskTerminal } from '../../features/tasks/vrunnerTask';
+import { buildProcessCommand } from '../../utils/commandUtils';
 import {
 	finishMessage,
 	formatDuration,
@@ -136,6 +137,37 @@ suite('vrunnerTask: сигнал по завершении задачи', () => 
 		} finally {
 			unsubscribe();
 		}
+	});
+});
+
+suite('vrunnerTask: остановка задачи', () => {
+	test('запуск строится на каждое исполнение, остановка вызывает его уборку', async () => {
+		const cancelled: number[] = [];
+		let runs = 0;
+		const params = {
+			name: 'Долгая задача',
+			cwd: process.cwd(),
+			command: () => {
+				const run = ++runs;
+				return {
+					command: buildProcessCommand('node', ['-e', 'setTimeout(() => {}, 60000)']),
+					onCancel: () => cancelled.push(run),
+				};
+			},
+		};
+
+		const first = createVRunnerTaskTerminal(params);
+		createVRunnerTaskTerminal(params);
+		assert.strictEqual(runs, 2, 'повтор задачи получил бы запуск прошлого исполнения');
+
+		const exitCode = await new Promise<number>((resolve) => {
+			first.onDidClose?.((code: number | void) => resolve(typeof code === 'number' ? code : -1));
+			first.open(undefined);
+			first.close();
+		});
+
+		assert.deepStrictEqual(cancelled, [1]);
+		assert.notStrictEqual(exitCode, 0);
 	});
 });
 
