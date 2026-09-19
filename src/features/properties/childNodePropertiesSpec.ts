@@ -85,11 +85,12 @@ export function childNodePaletteFields(node: ChildNodeDto | undefined): readonly
 }
 
 /**
- * Поле DTO объекта, в котором лежит узел этого вида.
+ * Поле DTO объекта, в котором лежат свойства узла этого вида.
  *
- * Список полный: md-sparrow читает свойства у всех видов состава. Реквизит
- * табличной части лежит внутри своей части, поэтому у него своего поля нет -
- * его ищет {@link findChildNode} по имени части.
+ * Реквизит табличной части лежит внутри своей части, поэтому у него своего поля
+ * нет - его ищет {@link findChildNode} по имени части. Перерасчёта, таблицы
+ * внешнего источника и куба здесь нет: они описаны своими файлами, в составе
+ * объекта от них только имя, и палитра показывает их без правки.
  */
 const DTO_LIST_BY_NODE_KIND: Readonly<Record<string, string>> = {
 	attribute: 'attributes',
@@ -102,12 +103,9 @@ const DTO_LIST_BY_NODE_KIND: Readonly<Record<string, string>> = {
 	accountingFlag: 'accountingFlags',
 	extDimensionAccountingFlag: 'extDimensionAccountingFlags',
 	addressingAttribute: 'addressingAttributes',
-	recalculation: 'recalculations',
 	operation: 'operations',
 	urlTemplate: 'urlTemplates',
 	channel: 'channels',
-	table: 'tables',
-	cube: 'cubes',
 	function: 'functions',
 };
 

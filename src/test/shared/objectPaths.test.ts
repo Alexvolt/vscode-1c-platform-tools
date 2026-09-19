@@ -22,6 +22,7 @@ import {
 	objectDirectory,
 	objectDirectoryOf,
 	objectFile,
+	renamedObjectFileOf,
 	sourceDirectory,
 	sourcePath,
 	typeDirectory,
@@ -122,6 +123,17 @@ suite('пути по файлу описания объекта', () => {
 		// Каталог назван по файлу: у внешней обработки объект внутри может зваться иначе
 		const external = path.join('C:', 'п', 'tests', 'epf', 'Тест.xml');
 		assert.strictEqual(objectDirectoryOf(external), path.join('C:', 'п', 'tests', 'epf', 'Тест'));
+	});
+
+	test('после переименования файл и каталог объекта называются по новому имени', () => {
+		assert.strictEqual(
+			renamedObjectFileOf(designerObject, 'Деньги'),
+			path.join('C:', 'п', 'src', 'cf', 'Catalogs', 'Деньги.xml')
+		);
+		assert.strictEqual(
+			renamedObjectFileOf(edtObject, 'Деньги'),
+			path.join('C:', 'п', 'ssl31', 'src', 'Catalogs', 'Деньги', 'Деньги.mdo')
+		);
 	});
 
 	test('модули объекта, формы и команды по раскладке формата', () => {

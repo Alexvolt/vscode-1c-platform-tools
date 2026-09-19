@@ -4,6 +4,7 @@
  * @module metadataObjectPropertiesPanel
  */
 
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { registerFormPanel } from '../editors/formPanels';
@@ -19,6 +20,7 @@ import {
 	type ModuleKind,
 } from '../../shared/objectPaths';
 import { ensureMdSparrowRuntime } from './mdSparrowBootstrap';
+import { metadataFileVersion, watchMetadataFile, type MetadataFileWatch } from './metadataFileChanges';
 import { logger } from '../../shared/logger';
 import { mdSparrowSchemaFlagFromConfigurationXml } from './mdSparrowSchemaVersion';
 import {
@@ -2543,6 +2545,7 @@ async function openMetadataObjectPropertiesEditorInner(
 	const runtime = await ensureMdSparrowRuntime(context);
 	const editableType = normalizeObjectType(params.objectType ?? '');
 	const wantsCandidates = Boolean(params.cfgPath) && EDITABLE_CANDIDATE_TYPES.includes(editableType);
+	const version = await metadataFileVersion(params.objectXmlFsPath);
 	const [propsResult, structureResult, candidates, enums] = await Promise.all([
 		runMdSparrowJson<MdObjectPropertiesDto>(
 			runtime,
@@ -2602,6 +2605,8 @@ async function openMetadataObjectPropertiesEditorInner(
 	trackOpenPanel('objectProperties', params.objectXmlFsPath, panel);
 
 	if (viewModel.editable) {
+		const watch = watchMetadataFile(params.objectXmlFsPath, version);
+		panel.onDidDispose(() => watch.dispose());
 		registerEditableSaveHandler(
 			context,
 			panel,
@@ -2611,6 +2616,7 @@ async function openMetadataObjectPropertiesEditorInner(
 			viewModel.editable,
 			candidates,
 			enums,
+			watch,
 			subsystems
 		);
 	}
@@ -2800,6 +2806,7 @@ async function loadEditCandidates(
 
 interface MetadataPanelSaveMessage {
 	type?: string;
+	/** Правленые поля объекта по их путям: остальных свойств в нём нет. */
 	payload?: unknown;
 	structure?: unknown;
 	module?: string;
@@ -2827,16 +2834,29 @@ interface MetadataPanelSaveMessage {
 
 const IDENTIFIER_RE = /^[A-Za-zА-ЯЁа-яё_][A-Za-zА-ЯЁа-яё0-9_]*$/;
 
-/** Правка одной строки структуры из webview: originalName нет — строка новая. */
+/**
+ * Правка одной строки структуры из webview: originalName нет - строка новая,
+ * synonym нет - синоним не правили.
+ */
 interface MetadataStructRowEdit {
 	originalName?: string;
 	name: string;
-	synonym: string;
+	synonym?: string;
 	deleted: boolean;
+}
+
+/** Порядок списка, в котором панель переставляла строки. */
+export interface MetadataStructOrder {
+	/** Имена в том порядке, в каком панель их прочитала. */
+	read: string[];
+	/** Строки в порядке панели без удалённых: прежняя строка узнаётся по имени при чтении. */
+	rows: Array<{ originalName?: string; name: string }>;
 }
 
 interface MetadataTabularSectionEdit extends MetadataStructRowEdit {
 	attributes: MetadataStructRowEdit[];
+	/** Порядок реквизитов табличной части. */
+	order?: MetadataStructOrder;
 }
 
 /** Вид списка состава: поле DTO, в которое пишутся синонимы, и набор операций. */
@@ -2851,12 +2871,16 @@ export type MetadataStructListKind =
 
 interface MetadataStructListEdit {
 	kind: MetadataStructListKind;
+	/** Правленые строки: переименованные, удалённые, новые и с новым синонимом. */
 	rows: MetadataStructRowEdit[];
+	order?: MetadataStructOrder;
 }
 
 interface MetadataStructureEdits {
 	lists: MetadataStructListEdit[];
+	/** Правленые табличные части и те, у которых правили реквизиты. */
 	tabularSections: MetadataTabularSectionEdit[];
+	tabularSectionsOrder?: MetadataStructOrder;
 }
 
 const STRUCT_OPS: Record<
@@ -2929,8 +2953,21 @@ function parseStructRow(value: unknown): MetadataStructRowEdit | null {
 	return {
 		originalName,
 		name: typeof value.name === 'string' ? value.name.trim() : '',
-		synonym: typeof value.synonym === 'string' ? value.synonym : '',
+		synonym: typeof value.synonym === 'string' ? value.synonym : undefined,
 		deleted: value.deleted === true,
+	};
+}
+
+function parseStructOrder(value: unknown): MetadataStructOrder | undefined {
+	if (!isRecord(value) || !Array.isArray(value.read) || !Array.isArray(value.rows)) {
+		return undefined;
+	}
+	return {
+		read: value.read.filter((name): name is string => typeof name === 'string'),
+		rows: value.rows.filter(isRecord).map((row) => ({
+			originalName: typeof row.originalName === 'string' && row.originalName ? row.originalName : undefined,
+			name: typeof row.name === 'string' ? row.name.trim() : '',
+		})),
 	};
 }
 
@@ -2957,7 +2994,7 @@ export function parseStructureEdits(value: unknown): MetadataStructureEdits | nu
 					}
 				}
 			}
-			lists.push({ kind, rows });
+			lists.push({ kind, rows, order: parseStructOrder(rawList.order) });
 		}
 	}
 	const tabularSections: MetadataTabularSectionEdit[] = [];
@@ -2976,10 +3013,14 @@ export function parseStructureEdits(value: unknown): MetadataStructureEdits | nu
 					}
 				}
 			}
-			tabularSections.push({ ...row, attributes: nested });
+			tabularSections.push({
+				...row,
+				attributes: nested,
+				order: isRecord(raw) ? parseStructOrder(raw.order) : undefined,
+			});
 		}
 	}
-	return { lists, tabularSections };
+	return { lists, tabularSections, tabularSectionsOrder: parseStructOrder(value.tabularSectionsOrder) };
 }
 
 /** Строки всех списков состава: проверки имён общие для реквизитов, значений, измерений и ресурсов. */
@@ -3020,6 +3061,80 @@ export function validateStructureEdits(edits: MetadataStructureEdits): string | 
 				return `Дублируется имя «${row.name}» в ТЧ «${ts.name}»`;
 			}
 			nestedSeen.add(key);
+		}
+	}
+	return null;
+}
+
+function recordsOf(value: unknown): Array<Record<string, unknown>> {
+	return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+/** Имена строк списка из DTO; undefined, если такого списка в DTO нет. */
+function namesOf(value: unknown): string[] | undefined {
+	return Array.isArray(value) ? recordsOf(value).map((item) => String(item.name ?? '')) : undefined;
+}
+
+/** Первое расхождение правленых строк списка с именами в файле. */
+function rowsConflict(
+	rows: readonly MetadataStructRowEdit[],
+	current: readonly string[],
+	prefix: string
+): string | null {
+	const present = new Set(current.map((name) => name.toLowerCase()));
+	for (const row of rows) {
+		if (row.originalName && !present.has(row.originalName.toLowerCase())) {
+			return `Строки «${prefix}${row.originalName}» уже нет в объекте. Перечитайте объект или отмените правку этой строки.`;
+		}
+	}
+	// Имя освобождает строка, которую в тех же правках переименовали или удалили
+	const leaving = new Set(
+		rows
+			.filter((row) => row.originalName && (row.deleted || row.name !== row.originalName))
+			.map((row) => String(row.originalName).toLowerCase())
+	);
+	for (const row of rows) {
+		const named = !row.deleted && (!row.originalName || row.name !== row.originalName);
+		const key = row.name.toLowerCase();
+		if (named && present.has(key) && !leaving.has(key)) {
+			return `Имя «${prefix}${row.name}» в объекте уже есть. Перечитайте объект или задайте другое имя.`;
+		}
+	}
+	return null;
+}
+
+/**
+ * Сверяет правки состава с тем, что сейчас в файле: правленые строки должны там быть,
+ * а новые имена не должны быть заняты.
+ *
+ * @param edits Правки состава из панели.
+ * @param dto Свойства объекта из файла.
+ * @returns Текст первого расхождения; null, если правки ложатся на файл.
+ */
+export function structConflict(edits: MetadataStructureEdits, dto: Record<string, unknown>): string | null {
+	for (const list of edits.lists) {
+		const current = namesOf(dto[list.kind]);
+		const conflict = current ? rowsConflict(list.rows, current, '') : null;
+		if (conflict) {
+			return conflict;
+		}
+	}
+	const sections = namesOf(dto.tabularSections);
+	if (!sections) {
+		return null;
+	}
+	const conflict = rowsConflict(edits.tabularSections, sections, '');
+	if (conflict) {
+		return conflict;
+	}
+	for (const ts of edits.tabularSections) {
+		if (ts.deleted || !ts.originalName) {
+			continue;
+		}
+		const section = recordsOf(dto.tabularSections).find((item) => item.name === ts.originalName);
+		const nested = rowsConflict(ts.attributes, namesOf(section?.attributes) ?? [], `${ts.originalName}.`);
+		if (nested) {
+			return nested;
 		}
 	}
 	return null;
@@ -3097,69 +3212,153 @@ export function structOpsFromEdits(edits: MetadataStructureEdits, objectXml: str
 			}
 		}
 	}
-	// Порядок: блоки переставляются между собой по финальным именам (после rename/add/delete).
-	for (const list of edits.lists) {
-		const order = list.rows.filter((row) => !row.deleted).map((row) => row.name);
-		if (order.length > 1) {
-			const reorder = STRUCT_OPS[list.kind].reorder;
-			if (reorder) {
-				ops.push({ op: reorder, ...base, payloadJson: JSON.stringify(order) });
-			}
+	return ops;
+}
+
+/** Строки, которые панель не двигала: наибольшая общая подпоследовательность двух порядков. */
+function unmovedNames(read: readonly string[], order: readonly string[]): Set<string> {
+	const common = Array.from({ length: read.length + 1 }, () => new Array<number>(order.length + 1).fill(0));
+	for (let i = read.length - 1; i >= 0; i--) {
+		for (let j = order.length - 1; j >= 0; j--) {
+			common[i][j] =
+				read[i] === order[j] ? common[i + 1][j + 1] + 1 : Math.max(common[i + 1][j], common[i][j + 1]);
 		}
 	}
-	const tsOrder = edits.tabularSections.filter((ts) => !ts.deleted).map((ts) => ts.name);
-	if (tsOrder.length > 1) {
+	const kept = new Set<string>();
+	let i = 0;
+	let j = 0;
+	while (i < read.length && j < order.length) {
+		if (read[i] === order[j]) {
+			kept.add(read[i]);
+			i++;
+			j++;
+		} else if (common[i + 1][j] >= common[i][j + 1]) {
+			i++;
+		} else {
+			j++;
+		}
+	}
+	return kept;
+}
+
+/**
+ * Порядок строк для записи: перестановки панели поверх того, что сейчас в файле.
+ *
+ * Переставленными считаются новые строки и те, что не входят в наибольшую общую
+ * подпоследовательность прочитанного порядка и порядка панели. Прочие строки, в том числе
+ * добавленные вне панели, остаются на своих местах в файле, а переставленная встаёт за ту,
+ * что стоит перед ней в панели. Строк, которых в файле уже нет, порядок не касается.
+ *
+ * @param current Имена в файле после переименований, удалений и добавлений панели.
+ * @param order Порядок панели.
+ * @returns Имена в новом порядке; null, если порядок в файле менять не нужно.
+ */
+export function mergeStructOrder(current: readonly string[], order: MetadataStructOrder): string[] | null {
+	const kept = unmovedNames(
+		order.read,
+		order.rows.flatMap((row) => (row.originalName ? [row.originalName] : []))
+	);
+	const moved = new Set(
+		order.rows.filter((row) => !row.originalName || !kept.has(row.originalName)).map((row) => row.name)
+	);
+	const result = current.filter((name) => !moved.has(name));
+	order.rows.forEach((row, index) => {
+		if (!moved.has(row.name) || !current.includes(row.name)) {
+			return;
+		}
+		let at = 0;
+		for (let prev = index - 1; prev >= 0; prev--) {
+			const found = result.indexOf(order.rows[prev].name);
+			if (found >= 0) {
+				at = found + 1;
+				break;
+			}
+		}
+		result.splice(at, 0, row.name);
+	});
+	return result.every((name, index) => name === current[index]) ? null : result;
+}
+
+/** Переставляла ли панель строки хотя бы в одном списке. */
+function structOrderEdited(edits: MetadataStructureEdits): boolean {
+	return (
+		edits.lists.some((list) => list.order) ||
+		Boolean(edits.tabularSectionsOrder) ||
+		edits.tabularSections.some((ts) => !ts.deleted && ts.order)
+	);
+}
+
+/**
+ * Операции порядка по тому, что сейчас в файле: только для списков, в которых панель
+ * переставляла строки.
+ *
+ * @param edits Правки состава из панели.
+ * @param dto Свойства объекта из файла после операций состава.
+ */
+export function structReorderOps(
+	edits: MetadataStructureEdits,
+	dto: Record<string, unknown>,
+	objectXml: string,
+	schema: string
+): MdSparrowParams[] {
+	const ops: MdSparrowParams[] = [];
+	const base = { objectXml, schemaVersion: schema };
+	for (const list of edits.lists) {
+		const reorder = STRUCT_OPS[list.kind].reorder;
+		const current = namesOf(dto[list.kind]);
+		const order = reorder && list.order && current ? mergeStructOrder(current, list.order) : null;
+		if (reorder && order) {
+			ops.push({ op: reorder, ...base, payloadJson: JSON.stringify(order) });
+		}
+	}
+	const sections = recordsOf(dto.tabularSections);
+	const tsOrder = edits.tabularSectionsOrder
+		? mergeStructOrder(namesOf(dto.tabularSections) ?? [], edits.tabularSectionsOrder)
+		: null;
+	if (tsOrder) {
 		ops.push({ op: 'cf-md-tabular-section-reorder', ...base, payloadJson: JSON.stringify(tsOrder) });
 	}
 	for (const ts of edits.tabularSections) {
-		if (ts.deleted) {
+		if (ts.deleted || !ts.order) {
 			continue;
 		}
-		const nestedOrder = ts.attributes.filter((row) => !row.deleted).map((row) => row.name);
-		if (nestedOrder.length > 1) {
+		const section = sections.find((item) => item.name === ts.name);
+		const order = section ? mergeStructOrder(namesOf(section.attributes) ?? [], ts.order) : null;
+		if (order) {
 			ops.push({
 				op: 'cf-md-tabular-attribute-reorder',
 				...base,
 				tabularSection: ts.name,
-				payloadJson: JSON.stringify(nestedOrder),
+				payloadJson: JSON.stringify(order),
 			});
 		}
 	}
 	return ops;
 }
 
-/** Переносит синонимы строк структуры из правок в DTO (перечитанный после операций структуры). */
+function setEditedSynonyms(list: unknown, rows: readonly MetadataStructRowEdit[]): void {
+	const synonyms = new Map<string, string>();
+	for (const row of rows) {
+		if (!row.deleted && row.name && row.synonym !== undefined) {
+			synonyms.set(row.name, row.synonym);
+		}
+	}
+	for (const item of recordsOf(list)) {
+		if (typeof item.name === 'string' && synonyms.has(item.name)) {
+			item.synonym = synonyms.get(item.name);
+		}
+	}
+}
+
+/**
+ * Переносит в DTO синонимы, правленые в панели: строки ищутся по финальным именам,
+ * синонимы прочих строк остаются как в файле.
+ */
 export function applySynonymEdits(dto: Record<string, unknown>, edits: MetadataStructureEdits): void {
 	for (const list of edits.lists) {
-		const synonyms = new Map<string, string>();
-		for (const row of list.rows) {
-			if (!row.deleted && row.name) {
-				synonyms.set(row.name, row.synonym);
-			}
-		}
-		const dtoList = dto[list.kind];
-		if (!Array.isArray(dtoList)) {
-			continue;
-		}
-		for (const raw of dtoList) {
-			if (isRecord(raw) && typeof raw.name === 'string' && synonyms.has(raw.name)) {
-				raw.synonym = synonyms.get(raw.name);
-			}
-		}
+		setEditedSynonyms(dto[list.kind], list.rows);
 	}
-	const tsSyn = new Map<string, string>();
-	for (const ts of edits.tabularSections) {
-		if (!ts.deleted && ts.name) {
-			tsSyn.set(ts.name, ts.synonym);
-		}
-	}
-	if (Array.isArray(dto.tabularSections)) {
-		for (const raw of dto.tabularSections) {
-			if (isRecord(raw) && typeof raw.name === 'string' && tsSyn.has(raw.name)) {
-				raw.synonym = tsSyn.get(raw.name);
-			}
-		}
-	}
+	setEditedSynonyms(dto.tabularSections, edits.tabularSections);
 }
 
 /** Виды модулей объекта, которые панель предлагает открыть. */
@@ -3200,6 +3399,13 @@ async function openModuleFile(modulePath: string, createdMessage: string): Promi
 	await vscode.window.showTextDocument(doc, { preview: false });
 }
 
+function fileExists(file: string): Promise<boolean> {
+	return fs.access(file).then(
+		() => true,
+		() => false
+	);
+}
+
 function registerEditableSaveHandler(
 	context: vscode.ExtensionContext,
 	panel: vscode.WebviewPanel,
@@ -3209,12 +3415,26 @@ function registerEditableSaveHandler(
 	editable: MetadataPanelEditableModel,
 	candidates: MetadataEditCandidates,
 	enums: MetadataEnumDictionary,
+	watch: MetadataFileWatch,
 	subsystemsModel?: MetadataPanelSubsystemsModel
 ): void {
 	const enqueue = params.enqueueMutation ?? (<T,>(fn: () => Promise<T>): Promise<T> => fn());
 	let saving = false;
+	let queue: Promise<unknown> = Promise.resolve();
 
-	async function rereadAndPushModel(): Promise<void> {
+	/** Операции панели над объектом идут по очереди, события его файла на это время откладываются. */
+	function inTurn<T>(operation: () => Promise<T>): Promise<T> {
+		const next = queue.then(() => watch.run(operation));
+		queue = next.catch(() => undefined);
+		return next;
+	}
+
+	// Страница перечитывает объект сразу либо спрашивает, если в ней есть несохранённые правки
+	watch.onDidChange(() => void panel.webview.postMessage({ type: 'externalChange' }));
+
+	/** Перечитывает объект и отдаёт модель странице; при неудаче возвращает причину. */
+	async function rereadAndPushModel(): Promise<string | undefined> {
+		await watch.remember();
 		const [propsResult, structureResult, subsystemNodes] = await Promise.all([
 			runMdSparrowJson<MdObjectPropertiesDto>(
 				runtime,
@@ -3229,7 +3449,7 @@ function registerEditableSaveHandler(
 			subsystemsModel ? loadSubsystemNodes(runtime, params, schema) : Promise.resolve(null),
 		]);
 		if (!propsResult.ok) {
-			return;
+			return toUserFacingReadError(propsResult.error).slice(0, ERR_PREVIEW);
 		}
 		const structureDto = structureResult.ok ? structureResult.value : null;
 		const subsystems = buildSubsystemsModel(subsystemNodes, params, propsResult.value, structureDto);
@@ -3274,6 +3494,35 @@ function registerEditableSaveHandler(
 			origin: vm.origin,
 			tabsChanged: true,
 		});
+		return undefined;
+	}
+
+	/**
+	 * Перечитывает объект по просьбе страницы: файл изменился вне панели. Объект,
+	 * переименованный или удалённый из дерева, панель не перечитывает, а уходит вслед за ним.
+	 */
+	async function reload(): Promise<void> {
+		if (await fileExists(params.objectXmlFsPath)) {
+			const error = await rereadAndPushModel();
+			if (error) {
+				log.warn(`панель свойств не перечитана: ${error}`);
+				void panel.webview.postMessage({ type: 'reloadFailed', error });
+			}
+			return;
+		}
+		// Отсутствие файла тоже версия: вернувшийся файл снова будит панель
+		await watch.remember();
+		const move = watch.moved();
+		if (move && (!move.to || (await fileExists(move.to)))) {
+			panel.dispose();
+			if (move.to) {
+				await openMetadataObjectPropertiesEditor(context, { ...params, objectXmlFsPath: move.to });
+			}
+			return;
+		}
+		const error = 'Файл объекта удалён или переименован.';
+		log.warn(`панель свойств не перечитана: ${error}`);
+		void panel.webview.postMessage({ type: 'reloadFailed', error });
 	}
 
 	async function runOneMutation(opParams: MdSparrowParams): Promise<string | null> {
@@ -3344,7 +3593,31 @@ function registerEditableSaveHandler(
 		});
 	}
 
+	/** Свойства объекта в том виде, в каком они сейчас в файле. */
+	async function readCurrent(): Promise<{ dto?: Record<string, unknown>; error?: string }> {
+		const read = await runMdSparrowJson<MdObjectPropertiesDto>(
+			runtime,
+			{ op: 'cf-md-object-get', objectXml: params.objectXmlFsPath, schemaVersion: schema },
+			params.cwd
+		);
+		return read.ok
+			? { dto: read.value as unknown as Record<string, unknown> }
+			: { error: toUserFacingReadError(read.error).slice(0, ERR_PREVIEW) };
+	}
+
 	async function handleSave(msg: MetadataPanelSaveMessage): Promise<void> {
+		// Состав сверяется с файлом до первой записи: при расхождении не пишется ничего
+		const structureEdits = parseStructureEdits(msg.structure);
+		if (structureEdits) {
+			const before = await readCurrent();
+			const error =
+				validateStructureEdits(structureEdits) ??
+				(before.dto ? structConflict(structureEdits, before.dto) : before.error);
+			if (error) {
+				void panel.webview.postMessage({ type: 'saved', ok: false, error });
+				return;
+			}
+		}
 		const roleRightsEdits = parseRoleRightsEdits(msg.roleRights);
 		const roleRightsFlags = parseRoleRightsFlags(msg.roleRightsFlags);
 		if (roleRightsEdits.length > 0 || Object.keys(roleRightsFlags).length > 0) {
@@ -3425,41 +3698,50 @@ function registerEditableSaveHandler(
 				return;
 			}
 		}
-		const structureEdits = parseStructureEdits(msg.structure);
-		if (structureEdits) {
-			const validationError = validateStructureEdits(structureEdits);
-			if (validationError) {
-				void panel.webview.postMessage({ type: 'saved', ok: false, error: validationError });
-				return;
+		let structApplied = false;
+		/** Отказ записи; после части операций состава страница получает объект из файла. */
+		async function fail(error: string): Promise<void> {
+			void panel.webview.postMessage({ type: 'saved', ok: false, error });
+			if (structApplied) {
+				await rereadAndPushModel();
+				void vscode.commands.executeCommand('1c-platform-tools.metadata.refresh');
 			}
 		}
 		const ops = structureEdits ? structOpsFromEdits(structureEdits, params.objectXmlFsPath, schema) : [];
-		let structApplied = false;
 		for (const opParams of ops) {
 			const error = await runOneMutation(opParams);
 			if (error) {
-				void panel.webview.postMessage({ type: 'saved', ok: false, error: `${opParams.op}: ${error}` });
-				if (structApplied) {
-					await rereadAndPushModel();
-					void vscode.commands.executeCommand('1c-platform-tools.metadata.refresh');
-				}
+				await fail(`${opParams.op}: ${error}`);
 				return;
 			}
 			structApplied = true;
 		}
-
-		let baseProps = editable.props;
-		if (ops.length > 0) {
-			const reread = await runMdSparrowJson<MdObjectPropertiesDto>(
-				runtime,
-				{ op: 'cf-md-object-get', objectXml: params.objectXmlFsPath, schemaVersion: schema },
-				params.cwd
-			);
-			if (reread.ok) {
-				baseProps = reread.value;
+		// Порядок строится по файлу после своих операций: строки, добавленные вне панели,
+		// остаются на своих местах
+		if (structureEdits && structOrderEdited(structureEdits)) {
+			const afterOps = await readCurrent();
+			if (!afterOps.dto) {
+				await fail(afterOps.error ?? '');
+				return;
+			}
+			for (const opParams of structReorderOps(structureEdits, afterOps.dto, params.objectXmlFsPath, schema)) {
+				const error = await runOneMutation(opParams);
+				if (error) {
+					await fail(`${opParams.op}: ${error}`);
+					return;
+				}
+				structApplied = true;
 			}
 		}
-		const dto = applyEditedScalars(baseProps as unknown as Record<string, unknown>, msg.payload, editable.tabs);
+
+		// Страница присылает только правленые поля, они ложатся на то, что сейчас в файле:
+		// состав и прочие свойства могли измениться после чтения панелью
+		const current = await readCurrent();
+		if (!current.dto) {
+			await fail(current.error ?? '');
+			return;
+		}
+		const dto = applyEditedScalars(current.dto, msg.payload, editable.tabs);
 		if (structureEdits) {
 			applySynonymEdits(dto, structureEdits);
 		}
@@ -3507,11 +3789,7 @@ function registerEditableSaveHandler(
 			payloadJson: JSON.stringify(dto),
 		});
 		if (error) {
-			void panel.webview.postMessage({ type: 'saved', ok: false, error });
-			if (structApplied) {
-				await rereadAndPushModel();
-				void vscode.commands.executeCommand('1c-platform-tools.metadata.refresh');
-			}
+			await fail(error);
 			return;
 		}
 		void panel.webview.postMessage({ type: 'saved', ok: true });
@@ -3533,18 +3811,23 @@ function registerEditableSaveHandler(
 				if (!name) {
 					return;
 				}
-				const error = await runOneMutation({
-					op: 'cf-form-add',
-					objectXml: params.objectXmlFsPath,
-					schemaVersion: schema,
-					name: name.trim(),
+				const error = await inTurn(async () => {
+					const failed = await runOneMutation({
+						op: 'cf-form-add',
+						objectXml: params.objectXmlFsPath,
+						schemaVersion: schema,
+						name: name.trim(),
+					});
+					if (!failed) {
+						notifyQuiet(`Форма «${name.trim()}» создана`);
+						await rereadAndPushModel();
+					}
+					return failed;
 				});
 				if (error) {
 					void vscode.window.showErrorMessage(`Не удалось создать форму. ${error}`.slice(0, ERR_PREVIEW));
 					return;
 				}
-				notifyQuiet(`Форма «${name.trim()}» создана`);
-				await rereadAndPushModel();
 				void vscode.commands.executeCommand('1c-platform-tools.metadata.refresh');
 				return;
 			}
@@ -3569,18 +3852,24 @@ function registerEditableSaveHandler(
 				if (answer !== 'Удалить') {
 					return;
 				}
-				const error = await runOneMutation({
-					op: 'cf-md-form-delete',
-					objectXml: params.objectXmlFsPath,
-					schemaVersion: schema,
-					name: msg.name,
+				const formName = msg.name;
+				const error = await inTurn(async () => {
+					const failed = await runOneMutation({
+						op: 'cf-md-form-delete',
+						objectXml: params.objectXmlFsPath,
+						schemaVersion: schema,
+						name: formName,
+					});
+					if (!failed) {
+						notifyQuiet(`Форма «${formName}» удалена`);
+						await rereadAndPushModel();
+					}
+					return failed;
 				});
 				if (error) {
 					void vscode.window.showErrorMessage(`Не удалось удалить форму. ${error}`.slice(0, ERR_PREVIEW));
 					return;
 				}
-				notifyQuiet(`Форма «${msg.name}» удалена`);
-				await rereadAndPushModel();
 				void vscode.commands.executeCommand('1c-platform-tools.metadata.refresh');
 				return;
 			}
@@ -3597,12 +3886,16 @@ function registerEditableSaveHandler(
 				}
 				return;
 			}
+			if (msg.type === 'reload') {
+				await inTurn(reload);
+				return;
+			}
 			if (msg.type !== 'save' || saving) {
 				return;
 			}
 			saving = true;
 			try {
-				await handleSave(msg);
+				await inTurn(() => handleSave(msg));
 			} finally {
 				saving = false;
 			}
