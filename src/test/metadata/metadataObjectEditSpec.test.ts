@@ -95,6 +95,23 @@ suite('metadataObjectEditSpec', () => {
 		assert.strictEqual((dto.attributes as unknown[]).length, 1, 'реквизиты не должны затираться');
 	});
 
+	test('правленые поля ложатся на текущий файл, прочее остаётся из файла', () => {
+		const current = catalogProps();
+		current.comment = 'из git';
+		current.commands = [{ name: 'Печать', synonym: 'Печать', comment: '' }];
+		(current.catalog as Record<string, unknown>).codeLength = '11';
+		const tabs = buildCatalogEditTabs({ internalName: 'Номенклатура', formNames: [], commandNames: [] });
+
+		const dto = applyEditedScalars(current, { synonym: 'Товары', catalog: { choiceMode: 'QUICK_CHOICE' } }, tabs);
+
+		const cat = dto.catalog as Record<string, unknown>;
+		assert.strictEqual(dto.synonym, 'Товары');
+		assert.strictEqual(cat.choiceMode, 'QUICK_CHOICE');
+		assert.strictEqual(dto.comment, 'из git', 'неправленое поле берётся из файла');
+		assert.strictEqual(cat.codeLength, '11');
+		assert.deepStrictEqual(dto.commands, current.commands, 'команда, добавленная после чтения, остаётся');
+	});
+
 	test('refList: владельцы редактируются в пределах кандидатов', () => {
 		const raw = catalogProps();
 		const tabs = buildCatalogEditTabs({
@@ -233,13 +250,124 @@ suite('metadataObjectPropertiesPanel structure edits', () => {
 			'cf-md-attribute-delete',
 			'cf-md-attribute-add',
 			'cf-md-tabular-attribute-add',
-			'cf-md-attribute-reorder',
-			'cf-md-tabular-attribute-reorder',
 		]);
-		const attrReorder = allOps.find((op: { op: string }) => op.op === 'cf-md-attribute-reorder');
-		assert.deepStrictEqual(JSON.parse(attrReorder.payloadJson), ['Новый', 'Добавленный'], 'порядок по финальным именам');
 		const renameTs = panel.structOpsFromEdits(edits, 'obj.xml', 'V2_20')[2];
 		assert.strictEqual(renameTs.tabularSection, 'Позиции', 'вложенные операции идут по новому имени ТЧ');
+	});
+
+	test('порядок строится по файлу: чужие строки остаются, пропавшие выпадают', () => {
+		const order = {
+			read: ['А', 'Б', 'В', 'Г'],
+			rows: [
+				{ originalName: 'Г', name: 'Г' },
+				{ originalName: 'А', name: 'А' },
+				{ originalName: 'Б', name: 'Б2' },
+				{ name: 'Новый' },
+			],
+		};
+		// Вне панели удалили В и добавили Д; переименование и добавление панели уже в файле
+		assert.deepStrictEqual(
+			panel.mergeStructOrder(['А', 'Б2', 'Г', 'Д', 'Новый'], order),
+			['Г', 'А', 'Б2', 'Новый', 'Д'],
+			'переставленная и новая строки встают за соседа по панели, Д остаётся в файле'
+		);
+		assert.strictEqual(panel.mergeStructOrder(['Г', 'А', 'Б2', 'Новый'], order), null, 'файл уже в порядке панели');
+		// Вне панели В подняли наверх, в панели поменяли местами А и Б
+		assert.deepStrictEqual(
+			panel.mergeStructOrder(['В', 'А', 'Б'], {
+				read: ['А', 'Б', 'В'],
+				rows: [
+					{ originalName: 'Б', name: 'Б' },
+					{ originalName: 'А', name: 'А' },
+					{ originalName: 'В', name: 'В' },
+				],
+			}),
+			['В', 'Б', 'А'],
+			'чужая перестановка не откатывается'
+		);
+	});
+
+	test('операции порядка только для переставленных списков', () => {
+		const edits = panel.parseStructureEdits({
+			lists: [
+				{
+					kind: 'attributes',
+					rows: [],
+					order: {
+						read: ['А', 'Б'],
+						rows: [
+							{ originalName: 'Б', name: 'Б' },
+							{ originalName: 'А', name: 'А' },
+						],
+					},
+				},
+				{
+					kind: 'commands',
+					rows: [{ originalName: 'Печать', name: 'Печать', synonym: 'Печать', deleted: false }],
+				},
+			],
+			tabularSections: [
+				{
+					originalName: 'Товары',
+					name: 'Товары',
+					deleted: false,
+					attributes: [],
+					order: {
+						read: ['Кол', 'Цена'],
+						rows: [
+							{ originalName: 'Цена', name: 'Цена' },
+							{ originalName: 'Кол', name: 'Кол' },
+						],
+					},
+				},
+			],
+		});
+		const dto = {
+			attributes: [{ name: 'А' }, { name: 'Б' }, { name: 'ИзДерева' }],
+			commands: [{ name: 'Печать' }, { name: 'Отправить' }],
+			tabularSections: [{ name: 'Товары', attributes: [{ name: 'Кол' }, { name: 'Цена' }] }],
+		};
+		const ops = panel.structReorderOps(edits, dto, 'obj.xml', 'V2_20');
+		assert.deepStrictEqual(
+			ops.map((op: { op: string; payloadJson: string }) => [op.op, JSON.parse(op.payloadJson)]),
+			[
+				['cf-md-attribute-reorder', ['Б', 'А', 'ИзДерева']],
+				['cf-md-tabular-attribute-reorder', ['Цена', 'Кол']],
+			]
+		);
+	});
+
+	test('правка строки, которой в файле уже нет, отклоняется до записи', () => {
+		const dto = {
+			attributes: [{ name: 'Организация' }, { name: 'Ответственный' }],
+			tabularSections: [{ name: 'Товары', attributes: [{ name: 'Кол' }] }],
+		};
+		const attributes = (...rows: Array<Record<string, unknown>>) =>
+			panel.structConflict(panel.parseStructureEdits({ lists: [{ kind: 'attributes', rows }], tabularSections: [] }), dto);
+		assert.strictEqual(
+			attributes({ originalName: 'Ответственный', name: 'Ответственный', synonym: 'С', deleted: false }),
+			null
+		);
+		assert.match(attributes({ originalName: 'Подразделение', name: 'Отдел', deleted: false }), /«Подразделение»/);
+		assert.match(
+			attributes({ name: 'организация', deleted: false }),
+			/Имя «организация»/,
+			'имя, добавленное вне панели, занято'
+		);
+		assert.strictEqual(
+			attributes(
+				{ originalName: 'Организация', name: 'Организация', deleted: true },
+				{ name: 'Организация', deleted: false }
+			),
+			null,
+			'имя освобождает удалённая в тех же правках строка'
+		);
+		const price = { originalName: 'Цена', name: 'Цена', synonym: 'Ц', deleted: false };
+		const tabular = panel.parseStructureEdits({
+			lists: [],
+			tabularSections: [{ originalName: 'Товары', name: 'Товары', deleted: false, attributes: [price] }],
+		});
+		assert.match(panel.structConflict(tabular, dto), /«Товары\.Цена»/);
 	});
 
 	test('validateStructureEdits ловит дубли и мусорные имена', () => {
@@ -283,6 +411,33 @@ suite('metadataObjectPropertiesPanel structure edits', () => {
 		assert.strictEqual(attrs[0].comment, 'к', 'комментарий сохраняется');
 		assert.strictEqual(attrs[1].synonym, 'х', 'нетронутые не меняются');
 		assert.strictEqual((dto.tabularSections as Array<Record<string, unknown>>)[0].synonym, 'Позиции заказа');
+	});
+
+	test('applySynonymEdits не трогает синонимы, которые в панели не правили', () => {
+		const dto: Record<string, unknown> = {
+			attributes: [
+				{ name: 'Организация', synonym: 'Организация из палитры' },
+				{ name: 'Ответственный', synonym: 'Ответственный' },
+			],
+			tabularSections: [{ name: 'Товары', synonym: 'Товары' }],
+		};
+		const edits = panel.parseStructureEdits({
+			lists: [
+				{
+					kind: 'attributes',
+					rows: [
+						{ originalName: 'Организация', name: 'Организация', deleted: false },
+						{ originalName: 'Ответственный', name: 'Ответственный', synonym: 'Автор', deleted: false },
+					],
+				},
+			],
+			tabularSections: [{ originalName: 'Товары', name: 'Товары', deleted: false, attributes: [] }],
+		});
+		panel.applySynonymEdits(dto, edits);
+		const attrs = dto.attributes as Array<{ synonym: string }>;
+		assert.strictEqual(attrs[0].synonym, 'Организация из палитры', 'синоним из файла остаётся');
+		assert.strictEqual(attrs[1].synonym, 'Автор');
+		assert.strictEqual((dto.tabularSections as Array<{ synonym: string }>)[0].synonym, 'Товары');
 	});
 });
 
@@ -532,15 +687,9 @@ suite('metadataObjectEditSpec: значения перечисления', () =>
 		const ops = panel.structOpsFromEdits(edits, 'C:/cf/Enums/Статусы.xml', 'V2_20');
 		assert.deepStrictEqual(
 			ops.map((op: { op: string }) => op.op),
-			[
-				'cf-md-enum-value-rename',
-				'cf-md-enum-value-delete',
-				'cf-md-enum-value-add',
-				'cf-md-enum-value-reorder',
-			],
-			'сначала переименования, потом удаления, добавления и порядок'
+			['cf-md-enum-value-rename', 'cf-md-enum-value-delete', 'cf-md-enum-value-add'],
+			'сначала переименования, потом удаления и добавления'
 		);
-		assert.deepStrictEqual(JSON.parse(ops[3].payloadJson), ['Утвержден', 'НаСогласовании']);
 	});
 
 	test('синонимы значений пишутся в enumValues, а не в реквизиты', () => {
@@ -886,16 +1035,9 @@ suite('metadataObjectEditSpec: состав регистра', () => {
 		const ops = panel.structOpsFromEdits(edits, 'C:/cf/InformationRegisters/Графики.xml', 'V2_20');
 		assert.deepStrictEqual(
 			ops.map((op: { op: string }) => op.op),
-			[
-				'cf-md-dimension-rename',
-				'cf-md-resource-delete',
-				'cf-md-dimension-add',
-				'cf-md-attribute-add',
-				'cf-md-dimension-reorder',
-			],
-			'у каждого списка свои операции, порядок общий: переименования, удаления, добавления, порядок'
+			['cf-md-dimension-rename', 'cf-md-resource-delete', 'cf-md-dimension-add', 'cf-md-attribute-add'],
+			'у каждого списка свои операции, порядок общий: переименования, удаления, добавления'
 		);
-		assert.deepStrictEqual(JSON.parse(ops[4].payloadJson), ['ДатаГрафика', 'Склад']);
 	});
 
 	test('синонимы состава пишутся каждый в своё поле DTO', () => {

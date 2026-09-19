@@ -311,7 +311,7 @@ export function registerMetadataPaletteSource(params: MetadataPaletteSourceParam
 			propertyPaletteProvider.show(
 				PALETTE_OWNER,
 				shown,
-				editable ? (edits) => writeProperties(context, target, tabs, dto, schema, edits) : undefined,
+				editable ? (edits) => writeProperties(context, target, tabs, schema, edits) : undefined,
 				editable ? (edits) => previewProperties(context, target, edits) : undefined
 			);
 		} catch (e) {
@@ -516,17 +516,22 @@ async function previewProperties(
 	return state(target, fresh.tabs, fresh.dto);
 }
 
-/** Пишет правки той же операцией, что и панель-вкладка, и отдаёт свойства из перечитанного файла. */
+/**
+ * Пишет правки той же операцией, что и панель-вкладка, и отдаёт свойства из перечитанного файла.
+ *
+ * Правки ложатся на то, что сейчас в файле: показанное могло устареть после правки из дерева.
+ */
 async function writeProperties(
 	context: vscode.ExtensionContext,
 	target: PaletteTarget,
 	tabs: readonly MetadataEditTabSpec[],
-	dto: Record<string, unknown>,
 	schema: string,
 	edits: Readonly<Record<string, string>>
 ): Promise<PropertyPaletteState> {
 	const runtime = await ensureMdSparrowRuntime(context);
-	const next = target.child ? await childObjectDto(context, target, edits) : applyPaletteEdits(dto, tabs, edits);
+	const next = target.child
+		? await childObjectDto(context, target, edits)
+		: applyPaletteEdits(await readJson(runtime, target.readOp, target, schema), tabs, edits);
 	const written = await runMdSparrowParamsMutation(
 		runtime,
 		{

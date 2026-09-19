@@ -61,6 +61,39 @@ body {
 	border-color: var(--vscode-focusBorder);
 }
 
+/* Остаётся видна при прокрутке страницы */
+.external-change {
+	position: sticky;
+	top: 0;
+	z-index: 11;
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin: 0 0 12px 0;
+	padding: 8px 12px;
+	border-left: 3px solid var(--vscode-editorWarning-foreground);
+	border-radius: 4px;
+	background-color: var(--vscode-editor-background);
+	background-image: linear-gradient(
+		color-mix(in srgb, var(--vscode-editorWarning-foreground) 12%, transparent),
+		color-mix(in srgb, var(--vscode-editorWarning-foreground) 12%, transparent)
+	);
+}
+
+.external-change.hidden {
+	display: none;
+}
+
+.external-change-text {
+	flex: 1 1 320px;
+	min-width: 0;
+}
+
+.content[inert] {
+	opacity: 0.6;
+}
+
 .warnings {
 	margin: 0 0 12px 0;
 	padding: 10px 12px;

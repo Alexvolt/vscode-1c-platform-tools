@@ -105,22 +105,34 @@
 		};
 	}
 
+	/** Имена строк в порядке чтения: по ним запись узнаёт, какие строки переставлены. */
+	function readOrderOf(rows) {
+		return rows.map((row) => row.originalName);
+	}
+
 	function structureEditsFromLists(lists) {
 		const items = Array.isArray(lists.lists) ? lists.lists : [];
+		const tabularSections = (Array.isArray(lists.tabularSections) ? lists.tabularSections : []).map(function (t) {
+			const row = structRowFrom(t);
+			row.attributes = (Array.isArray(t.attributes) ? t.attributes : []).map(structRowFrom);
+			row.readOrder = readOrderOf(row.attributes);
+			return row;
+		});
 		return {
 			lists: items
 				.filter((list) => list.editable)
-				.map((list) => ({
-					kind: list.key,
-					title: list.title,
-					addLabel: list.addLabel,
-					rows: (Array.isArray(list.rows) ? list.rows : []).map(structRowFrom),
-				})),
-			tabularSections: (Array.isArray(lists.tabularSections) ? lists.tabularSections : []).map(function (t) {
-				const row = structRowFrom(t);
-				row.attributes = (Array.isArray(t.attributes) ? t.attributes : []).map(structRowFrom);
-				return row;
-			}),
+				.map(function (list) {
+					const rows = (Array.isArray(list.rows) ? list.rows : []).map(structRowFrom);
+					return {
+						kind: list.key,
+						title: list.title,
+						addLabel: list.addLabel,
+						rows,
+						readOrder: readOrderOf(rows),
+					};
+				}),
+			tabularSections,
+			tabularSectionsReadOrder: readOrderOf(tabularSections),
 		};
 	}
 
@@ -218,30 +230,85 @@
 		return '';
 	}
 
+	function structRowOut(row) {
+		const out = {
+			originalName: row.originalName || undefined,
+			name: String(row.name || '').trim(),
+			deleted: Boolean(row.deleted),
+		};
+		if (row.synonym !== row.baselineSynonym) {
+			out.synonym = row.synonym;
+		}
+		return out;
+	}
+
+	/**
+	 * Порядок списка, если строки в нём переставлены: прежние строки идут не так, как
+	 * при чтении, или новая строка стоит не в конце.
+	 */
+	function structOrderOut(rows, readOrder) {
+		// У новой табличной части прочитанного порядка нет: её реквизиты добавляются подряд
+		if (!readOrder) {
+			return undefined;
+		}
+		const existing = rows.filter((row) => row.originalName).map((row) => row.originalName);
+		const lastExisting = rows.map((row) => Boolean(row.originalName)).lastIndexOf(true);
+		const moved =
+			existing.join('\n') !== readOrder.join('\n') ||
+			rows.some((row, index) => !row.originalName && index < lastExisting);
+		if (!moved) {
+			return undefined;
+		}
+		return {
+			read: readOrder,
+			rows: rows
+				.filter((row) => !row.deleted)
+				.map((row) => ({ originalName: row.originalName || undefined, name: String(row.name || '').trim() })),
+		};
+	}
+
+	/**
+	 * Правки состава: только правленые строки и порядок переставленных списков.
+	 * Запись кладёт их поверх того, что сейчас в файле.
+	 */
 	function serializeStructureEdits() {
 		if (!editedStructure || !isStructDirty()) {
 			return null;
 		}
-		const rowOut = function (row) {
-			return {
-				originalName: row.originalName || undefined,
-				name: String(row.name || '').trim(),
-				synonym: row.synonym,
-				deleted: Boolean(row.deleted),
-			};
-		};
-		return {
-			lists: editedStructure.lists.map((list) => ({ kind: list.kind, rows: list.rows.map(rowOut) })),
-			tabularSections: editedStructure.tabularSections.map(function (ts) {
-				const out = rowOut(ts);
-				out.attributes = ts.attributes.map(rowOut);
-				return out;
-			}),
-		};
+		const lists = [];
+		for (const list of editedStructure.lists) {
+			const rows = list.rows.filter(structRowDirty).map(structRowOut);
+			const order = structOrderOut(list.rows, list.readOrder);
+			if (rows.length > 0 || order) {
+				lists.push({ kind: list.kind, rows, order });
+			}
+		}
+		const tabularSections = [];
+		for (const ts of editedStructure.tabularSections) {
+			const attributes = ts.attributes.filter(structRowDirty).map(structRowOut);
+			const order = ts.deleted ? undefined : structOrderOut(ts.attributes, ts.readOrder);
+			if (structRowDirty(ts) || attributes.length > 0 || order) {
+				const out = structRowOut(ts);
+				out.attributes = attributes;
+				out.order = order;
+				tabularSections.push(out);
+			}
+		}
+		const tabularSectionsOrder = structOrderOut(
+			editedStructure.tabularSections,
+			editedStructure.tabularSectionsReadOrder
+		);
+		return { lists, tabularSections, tabularSectionsOrder };
 	}
 	let saving = false;
 	let saveError = '';
 	let savedFlash = false;
+	/** Файл объекта изменился после чтения: правки в панели сделаны по прежней версии. */
+	let externalStale = false;
+	/** Полоса над вкладками: 'changed' ждёт выбора, 'failed' показывает, почему объект не перечитан. */
+	let externalNotice = '';
+	let externalError = '';
+	let reloading = false;
 
 	function deepClone(value) {
 		return JSON.parse(JSON.stringify(value ?? null));
@@ -554,12 +621,49 @@
 		) {
 			return true;
 		}
-		for (const field of editableFields()) {
-			if (normalizeForCompare(getPath(editedProps, field.path)) !== normalizeForCompare(getPath(editable.props, field.path))) {
-				return true;
-			}
+		if (editableFields().some(fieldEdited)) {
+			return true;
 		}
 		return isStructDirty();
+	}
+
+	function fieldEdited(field) {
+		return normalizeForCompare(getPath(editedProps, field.path)) !== normalizeForCompare(getPath(editable.props, field.path));
+	}
+
+	/**
+	 * Правленые поля: запись кладёт их поверх того, что сейчас в файле, остальные
+	 * свойства остаются как в файле.
+	 */
+	function editedFieldValues() {
+		const out = {};
+		for (const field of editableFields()) {
+			if (!fieldEdited(field)) {
+				continue;
+			}
+			putPath(out, field.path, getPath(editedProps, field.path));
+		}
+		return out;
+	}
+
+	/** Кладёт значение по пути, создавая недостающие объекты по дороге. */
+	function putPath(target, path, value) {
+		const parts = String(path).split('.');
+		let current = target;
+		for (let i = 0; i < parts.length; i++) {
+			const part = parts[i];
+			if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
+				return;
+			}
+			if (i === parts.length - 1) {
+				current[part] = value;
+				return;
+			}
+			if (typeof current[part] !== 'object' || current[part] === null) {
+				current[part] = {};
+			}
+			current = current[part];
+		}
 	}
 
 	function fieldEnabled(field) {
@@ -2327,6 +2431,7 @@
 	}
 
 	function renderSaveBar() {
+		renderExternalChange();
 		const bar = document.getElementById('saveBar');
 		const status = document.getElementById('saveStatus');
 		const saveBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('saveBtn'));
@@ -2336,13 +2441,14 @@
 		}
 		const dirty = isDirty();
 		const structError = structValidationError();
-		const visible = Boolean(editable) && (dirty || saving || Boolean(saveError) || savedFlash);
+		// Пока объект изменён вне панели, полоса остаётся и без правок: «Отменить» перечитывает объект
+		const visible = Boolean(editable) && (dirty || saving || Boolean(saveError) || savedFlash || externalStale);
 		bar.classList.toggle('hidden', !visible);
 		if (!visible) {
 			return;
 		}
-		saveBtn.disabled = saving || !dirty || Boolean(structError);
-		resetBtn.disabled = saving || !dirty;
+		saveBtn.disabled = saving || reloading || !dirty || Boolean(structError);
+		resetBtn.disabled = saving || reloading || (!dirty && !externalStale);
 		status.classList.toggle('save-status-error', Boolean(saveError) || Boolean(structError));
 		if (saving) {
 			status.textContent = 'Сохранение…';
@@ -2352,11 +2458,85 @@
 			status.textContent = saveError;
 		} else if (dirty) {
 			status.textContent = 'Есть несохранённые изменения';
+		} else if (externalStale) {
+			status.textContent = 'Объект изменён вне панели';
 		} else if (savedFlash) {
 			status.textContent = 'Сохранено';
 		} else {
 			status.textContent = '';
 		}
+	}
+
+	/** Просит расширение перечитать объект: ответом придёт новая модель или причина неудачи. */
+	function requestReload() {
+		if (!vscodeApi || reloading || saving) {
+			return;
+		}
+		reloading = true;
+		vscodeApi.postMessage({ type: 'reload' });
+	}
+
+	function renderExternalChange() {
+		// Пока объект перечитывается, правки некуда класть: новая модель их заменит
+		if (contentRoot) {
+			contentRoot.toggleAttribute('inert', reloading);
+		}
+		const bar = document.getElementById('externalChange');
+		const text = document.getElementById('externalChangeText');
+		const reloadBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('externalReloadBtn'));
+		const keepBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('externalKeepBtn'));
+		if (!bar || !text || !reloadBtn || !keepBtn) {
+			return;
+		}
+		bar.classList.toggle('hidden', !externalNotice);
+		if (externalNotice === 'failed') {
+			text.textContent = 'Не удалось перечитать объект. ' + externalError;
+			keepBtn.textContent = 'Скрыть';
+		} else {
+			text.textContent =
+				'Объект изменён вне панели, а в панели есть несохранённые правки. Перечитать объект и потерять их?';
+			keepBtn.textContent = 'Оставить правки';
+		}
+		reloadBtn.disabled = reloading || saving;
+		keepBtn.disabled = reloading;
+	}
+
+	function initExternalChange() {
+		const reloadBtn = document.getElementById('externalReloadBtn');
+		const keepBtn = document.getElementById('externalKeepBtn');
+		if (!editable || !vscodeApi || !reloadBtn || !keepBtn) {
+			return;
+		}
+		reloadBtn.addEventListener('click', function () {
+			requestReload();
+			renderSaveBar();
+		});
+		keepBtn.addEventListener('click', function () {
+			externalNotice = '';
+			renderSaveBar();
+		});
+		window.addEventListener('message', function (event) {
+			const msg = event.data;
+			if (msg && msg.type === 'externalChange') {
+				externalStale = true;
+				// Без правок объект перечитывается сразу, с правками решает пользователь
+				if (saving || isDirty()) {
+					externalNotice = 'changed';
+				} else {
+					requestReload();
+				}
+				renderSaveBar();
+				return;
+			}
+			if (msg && msg.type === 'reloadFailed') {
+				reloading = false;
+				// Дальше объект перечитывается только кнопкой
+				externalStale = false;
+				externalNotice = 'failed';
+				externalError = String(msg.error || '');
+				renderSaveBar();
+			}
+		});
 	}
 
 	function currentTabIsEdit() {
@@ -2380,7 +2560,7 @@
 			}
 		});
 		saveBtn.addEventListener('click', function () {
-			if (saving || !isDirty() || structValidationError()) {
+			if (saving || reloading || !isDirty() || structValidationError()) {
 				return;
 			}
 			saving = true;
@@ -2389,7 +2569,7 @@
 			renderSaveBar();
 			vscodeApi.postMessage({
 				type: 'save',
-				payload: editedProps,
+				payload: editedFieldValues(),
 				structure: serializeStructureEdits(),
 				subsystems: [...editedSubsystems.entries()].map(([xmlPath, member]) => ({ xmlPath, member })),
 				commandVisibility:
@@ -2437,6 +2617,12 @@
 			if (saving || !editable) {
 				return;
 			}
+			// Прочитанное устарело: отмена правок возвращает к тому, что сейчас в файле
+			if (externalStale) {
+				requestReload();
+				renderSaveBar();
+				return;
+			}
 			editedProps = deepClone(editable.props);
 			editedStructure = model.structureLists ? structureEditsFromLists(model.structureLists) : null;
 			structBaselineOrderKey = structOrderKey(editedStructure);
@@ -2459,6 +2645,9 @@
 		window.addEventListener('message', function (event) {
 			const msg = event.data;
 			if (msg && msg.type === 'modelUpdated') {
+				externalStale = false;
+				externalNotice = '';
+				reloading = false;
 				if (msg.structureLists && typeof msg.structureLists === 'object') {
 					model.structureLists = msg.structureLists;
 				}
@@ -2530,6 +2719,10 @@
 				}
 			} else {
 				saveError = String(msg.error || 'Не удалось сохранить изменения.');
+				// Данные устарели: после неудачной записи выбор показывается снова
+				if (externalStale) {
+					externalNotice = 'changed';
+				}
 			}
 			renderSaveBar();
 		});
@@ -3010,5 +3203,6 @@
 	renderTabs();
 	renderContent();
 	initSaveBar();
+	initExternalChange();
 	renderSaveBar();
 })();

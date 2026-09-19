@@ -20,7 +20,9 @@ import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { runMdSparrow, type MdSparrowRunResult } from './mdSparrowRunner';
 import { cachedByFiles, forgetCachedReads } from './mdSparrowCache';
+import { notifyMetadataFileMoved, notifyMetadataFilesChanged, type MetadataFileMove } from './metadataFileChanges';
 import type { MdSparrowRuntime } from './mdSparrowBootstrap';
+import { renamedObjectFileOf } from '../../shared/objectPaths';
 
 /** Операция; значения совпадают с именами одиночных подкоманд md-sparrow. */
 export type MdSparrowOp =
@@ -208,6 +210,9 @@ async function writeParamsAndRun(
 /**
  * Выполняет изменение метаданных через `apply-mutation --params <utf8-json>`.
  *
+ * Удачная правка сообщает о файлах из своих параметров: открытые панели перечитывают их,
+ * а панель переименованного или удалённого объекта уходит вслед за ним.
+ *
  * @param runtime Среда выполнения md-sparrow (java + jar).
  * @param params Параметры операции (op и поля); пути, имена и payload идут в JSON, не в argv.
  * @param options cwd и токен отмены, как у {@link runMdSparrow}.
@@ -222,7 +227,29 @@ export async function runMdSparrowParamsMutation(
 ): Promise<MdSparrowRunResult> {
 	// Правка меняет файлы: прочитанное в этом сеансе больше не годится
 	forgetCachedReads();
-	return writeParamsAndRun(runtime, 'apply-mutation', params, options);
+	const result = await writeParamsAndRun(runtime, 'apply-mutation', params, options);
+	if (result.exitCode === 0) {
+		const move = movedObjectFile(params);
+		if (move) {
+			notifyMetadataFileMoved(move);
+		}
+		notifyMetadataFilesChanged([params.objectXml, params.configurationXml, params.formXml]);
+	}
+	return result;
+}
+
+/** Куда ушло описание объекта после переименования или удаления. */
+function movedObjectFile(params: MdSparrowParams): MetadataFileMove | undefined {
+	if (!params.objectXml) {
+		return undefined;
+	}
+	if (params.op === 'cf-md-object-rename' && params.newName) {
+		return { from: params.objectXml, to: renamedObjectFileOf(params.objectXml, params.newName) };
+	}
+	if (params.op === 'cf-md-object-delete') {
+		return { from: params.objectXml };
+	}
+	return undefined;
 }
 
 /**

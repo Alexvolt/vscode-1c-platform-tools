@@ -128,7 +128,7 @@ export function paletteGroupsFromSpec(tabs: readonly MetadataEditTabSpec[], dto:
 /**
  * Правки палитры поверх DTO: значения приводятся к типу поля по спеке.
  *
- * @param dto   DTO, прочитанный перед показом.
+ * @param dto   DTO из файла, поверх которого пишутся правки.
  * @param tabs  Спека, по которой строились строки.
  * @param edits Изменённые значения: ключ строки - путь в DTO.
  * @returns Копия DTO с правками.

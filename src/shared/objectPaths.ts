@@ -223,6 +223,20 @@ export function objectDirectoryOf(objectFile: string): string {
 }
 
 /**
+ * Описание объекта после переименования: каталог и файл называются по новому имени.
+ *
+ * @param objectFile - Полный путь к описанию объекта
+ * @param newName - Новое имя объекта
+ */
+export function renamedObjectFileOf(objectFile: string, newName: string): string {
+	const extension = path.extname(objectFile);
+	if (formatOfFile(objectFile) === 'edt') {
+		return path.join(path.dirname(path.dirname(objectFile)), newName, `${newName}${extension}`);
+	}
+	return path.join(path.dirname(objectFile), `${newName}${extension}`);
+}
+
+/**
  * Полный путь к модулю объекта по файлу его описания.
  *
  * @param objectFile - Полный путь к описанию объекта
