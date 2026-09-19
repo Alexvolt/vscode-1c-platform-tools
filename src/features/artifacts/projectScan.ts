@@ -4,7 +4,9 @@
  * @module projectScan
  */
 
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as vscode from 'vscode';
 import { sameOrUnder } from '../../shared/projectLayout';
 import {
 	currentRoot,
@@ -40,6 +42,103 @@ export function isOutsideScanRoot(scanRoot: ProjectScanRoot, file: string, segme
 	}
 	const relative = `/${projectRelativePath(scanRoot.root, file)}/`;
 	return segments.some((segment) => segment.length > 0 && relative.includes(`/${segment}/`));
+}
+
+/** Символы синтаксиса масок поиска файлов. */
+const GLOB_SYNTAX = /[*?[\]{}!,]/;
+
+/**
+ * Делит маску на каталог без символов маски в начале и остаток.
+ *
+ * @param glob - Маска относительно корня проекта
+ * @returns Каталог через `/`, пустой для корня, и маска относительно него
+ */
+export function splitGlobBase(glob: string): { base: string; pattern: string } {
+	let normalized = glob.replaceAll('\\', '/');
+	while (normalized.startsWith('./')) {
+		normalized = normalized.slice(2);
+	}
+	const segments = normalized.split('/');
+	let fixed = 0;
+	while (fixed < segments.length - 1 && segments[fixed] !== '' && !GLOB_SYNTAX.test(segments[fixed])) {
+		fixed += 1;
+	}
+	return { base: segments.slice(0, fixed).join('/'), pattern: segments.slice(fixed).join('/') };
+}
+
+/**
+ * Маска исключения для поиска от каталога: исключённые сегменты и каталоги, которые
+ * проекту не принадлежат. Путь с символами маски в неё не попадает, его отсекает
+ * проверка найденного.
+ *
+ * @param base - Абсолютный каталог поиска
+ * @param scanRoot - Проект и каталоги, которые ему не принадлежат
+ * @param segments - Исключённые сегменты пути
+ * @returns undefined, когда исключать нечего
+ */
+export function searchExcludeGlob(base: string, scanRoot: ProjectScanRoot, segments: readonly string[]): string | undefined {
+	const bySegment = segments
+		.filter((segment) => /^[^/\\]+(?:\/[^/\\]+)*$/.test(segment) && !GLOB_SYNTAX.test(segment))
+		.map((segment) => `**/${segment}/**`);
+	const byDirectory = scanRoot.excludeDirs
+		.map((dir) => path.relative(base, dir))
+		.filter((relative) => relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative))
+		.map((relative) => relative.split(path.sep).join('/'))
+		.filter((relative) => !GLOB_SYNTAX.test(relative))
+		.map((relative) => `${relative}/**`);
+	const patterns = [...new Set([...bySegment, ...byDirectory])];
+	return patterns.length === 0 ? undefined : `{${patterns.join(',')}}`;
+}
+
+/**
+ * Маска проекта от каталога в начале маски.
+ *
+ * @param root - Корень проекта
+ * @param glob - Маска относительно корня проекта
+ */
+export function projectGlobPattern(root: string, glob: string): vscode.RelativePattern {
+	const { base, pattern } = splitGlobBase(glob);
+	return new vscode.RelativePattern(vscode.Uri.file(path.resolve(root, base)), pattern);
+}
+
+/**
+ * Подходит ли файл под маску проекта так же, как при поиске по ней.
+ *
+ * @param root - Корень проекта
+ * @param glob - Маска относительно корня проекта
+ * @param uri - Файл
+ */
+export function matchesProjectGlob(root: string, glob: string, uri: vscode.Uri): boolean {
+	const candidate = { uri, languageId: '' } as vscode.TextDocument;
+	return vscode.languages.match({ pattern: projectGlobPattern(root, glob) }, candidate) > 0;
+}
+
+/**
+ * Файлы проекта по маске: поиск от каталога в начале маски, без исключённых
+ * сегментов, подпроектов и вложенных папок рабочей области.
+ *
+ * @param scanRoot - Проект и каталоги, которые ему не принадлежат
+ * @param glob - Маска относительно корня проекта
+ * @param segments - Исключённые сегменты пути
+ * @param token - Отмена поиска
+ */
+export async function findProjectFiles(
+	scanRoot: ProjectScanRoot,
+	glob: string,
+	segments: readonly string[],
+	token?: vscode.CancellationToken
+): Promise<vscode.Uri[]> {
+	const include = projectGlobPattern(scanRoot.root, glob);
+	const directory = include.baseUri.fsPath;
+	if (isOutsideScanRoot(scanRoot, directory, segments)) {
+		return [];
+	}
+	const stat = await fs.stat(directory).catch(() => undefined);
+	if (!stat?.isDirectory()) {
+		return [];
+	}
+	const uris = await vscode.workspace.findFiles(include, searchExcludeGlob(directory, scanRoot, segments), undefined, token);
+	return uris.filter((uri) => !isOutsideScanRoot(scanRoot, uri.fsPath, segments));
 }
 
 /**

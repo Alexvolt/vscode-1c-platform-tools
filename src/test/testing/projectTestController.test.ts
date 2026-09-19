@@ -2,7 +2,8 @@ import * as assert from 'node:assert';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AdapterRunPlan, FileTreeLocation, TestFrameworkAdapter } from '../../features/testing/frameworkAdapter';
-import { findProjectTestFiles, TestingController } from '../../features/testing/testController';
+import { findProjectFiles } from '../../features/artifacts/projectScan';
+import { TestingController } from '../../features/testing/testController';
 import type { VRunnerManager } from '../../shared/vrunnerManager';
 import { currentRoot, sameProjectRoot, type ProjectScanRoot } from '../../shared/workspaceProjects';
 
@@ -70,7 +71,7 @@ const isRoot = (expected: string) => (root: string | undefined) => root !== unde
 suite('тестирование: дерево текущего проекта', () => {
 	test('поиск от корня проекта без подпроекта и зависимостей', async function () {
 		this.timeout(60_000);
-		const files = await findProjectTestFiles({ root: PROJECT, excludeDirs: [SUB_PROJECT] }, '**/*.os', ['oscript_modules']);
+		const files = await findProjectFiles({ root: PROJECT, excludeDirs: [SUB_PROJECT] }, '**/*.os', ['oscript_modules']);
 
 		assert.deepStrictEqual(
 			files.map((uri) => path.relative(PROJECT, uri.fsPath).split(path.sep).join('/')),

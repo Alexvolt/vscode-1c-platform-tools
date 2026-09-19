@@ -20,6 +20,7 @@ export function registerArtifactsView(
 			showCollapseAll: true,
 		}
 	);
+	artifactsProvider.setTreeView(artifactsTreeView);
 	context.subscriptions.push(artifactsTreeView);
 
 	return { artifactsProvider, artifactsTreeView };

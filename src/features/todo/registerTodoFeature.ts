@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { sameOrUnder } from '../../shared/projectLayout';
 import {
 	onDidChangeCurrentProject,
 	onDidChangeProjects,
@@ -164,38 +163,30 @@ export function registerTodoFeature(
 		}
 	});
 
-	const todoSaveDebounce = {
-		timer: undefined as ReturnType<typeof setTimeout> | undefined,
-	};
 	const onTodoRelevantSave = vscode.workspace.onDidSaveTextDocument((doc) => {
-		if (!isProjectRef.current) {
-			return;
+		if (isProjectRef.current && doc.uri.scheme === 'file') {
+			todoPanelProvider.documentSaved(doc);
 		}
-		if (!/\.(bsl|os|md|feature)$/i.test(doc.uri.fsPath)) {
-			return;
-		}
-		if (doc.uri.scheme !== 'file' || !projectScanRoots().some((scanRoot) => sameOrUnder(doc.uri.fsPath, scanRoot.root))) {
-			return;
-		}
-		if (todoSaveDebounce.timer) {
-			clearTimeout(todoSaveDebounce.timer);
-		}
-		todoSaveDebounce.timer = setTimeout(() => {
-			todoSaveDebounce.timer = undefined;
-			void todoPanelProvider.refresh();
-		}, 1500);
 	});
+
+	const pathsChanged = (uris: readonly vscode.Uri[], tree: boolean): void => {
+		if (isProjectRef.current) {
+			todoPanelProvider.pathsChanged(uris, tree);
+		}
+	};
+	// Созданный, удалённый или переименованный каталог приходит одним событием без файлов под ним
+	const todoFilesWatcher = vscode.workspace.createFileSystemWatcher('**/*');
+	const onTodoFileCreate = todoFilesWatcher.onDidCreate((uri) => pathsChanged([uri], true));
+	const onTodoFileChange = todoFilesWatcher.onDidChange((uri) => pathsChanged([uri], false));
+	const onTodoFileDelete = todoFilesWatcher.onDidDelete((uri) => pathsChanged([uri], true));
+	const onTodoFilesCreate = vscode.workspace.onDidCreateFiles((event) => pathsChanged(event.files, true));
+	const onTodoFilesDelete = vscode.workspace.onDidDeleteFiles((event) => pathsChanged(event.files, true));
+	const onTodoFilesRename = vscode.workspace.onDidRenameFiles((event) =>
+		pathsChanged(event.files.flatMap((file) => [file.oldUri, file.newUri]), true)
+	);
 
 	const onProjectsChange = onDidChangeProjects(() => todoPanelProvider.projectsChanged());
 	const onCurrentProjectChange = onDidChangeCurrentProject(() => todoPanelProvider.currentProjectChanged());
-
-	const todoDisposeDebounce: vscode.Disposable = {
-		dispose: () => {
-			if (todoSaveDebounce.timer) {
-				clearTimeout(todoSaveDebounce.timer);
-			}
-		},
-	};
 
 	return [
 		todoOpenLocationCommand,
@@ -210,8 +201,15 @@ export function registerTodoFeature(
 		todoPanelProvider.onDidChangeTreeData(updateTodoGroupByContext),
 		onTodoActiveEditorChange,
 		onTodoRelevantSave,
+		todoFilesWatcher,
+		onTodoFileCreate,
+		onTodoFileChange,
+		onTodoFileDelete,
+		onTodoFilesCreate,
+		onTodoFilesDelete,
+		onTodoFilesRename,
 		onProjectsChange,
 		onCurrentProjectChange,
-		todoDisposeDebounce,
+		todoPanelProvider,
 	];
 }

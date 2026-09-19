@@ -4,11 +4,18 @@
  * @module todoScanner
  */
 
+import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import type { ProjectScanRoot } from '../../shared/workspaceProjects';
-import { detectedScanRoots, isOutsideScanRoot } from '../artifacts/projectScan';
+import {
+	detectedScanRoots,
+	findProjectFiles,
+	isOutsideScanRoot,
+	matchesProjectGlob,
+	searchExcludeGlob,
+} from '../artifacts/projectScan';
 
 const log = logger.scope('todo');
 
@@ -87,14 +94,13 @@ async function filesOf(scanRoot: ProjectScanRoot, includePatterns: string[], exc
 	const globs = exts.length === includePatterns.length && exts.length > 0
 		? [`**/*.{${exts.join(',')}}`]
 		: includePatterns;
-	const base = vscode.Uri.file(scanRoot.root);
 	const found = new Map<string, vscode.Uri>();
 	for (const glob of globs) {
-		for (const uri of await vscode.workspace.findFiles(new vscode.RelativePattern(base, glob))) {
+		for (const uri of await findProjectFiles(scanRoot, glob, excludeSegments)) {
 			found.set(uri.fsPath, uri);
 		}
 	}
-	return [...found.values()].filter((uri) => !isOutsideScanRoot(scanRoot, uri.fsPath, excludeSegments));
+	return [...found.values()];
 }
 
 /**
@@ -108,26 +114,108 @@ export function configuredTodoTags(roots: readonly string[]): string[] {
 	return [...new Set(tags)];
 }
 
+/** Настройки todo.include, todo.exclude и todo.tags проекта. */
+function todoSettings(root: string): { includePatterns: string[]; excludeSegments: string[]; regex: RegExp } {
+	const config = projectConfiguration(root);
+	return {
+		includePatterns: config.get<string[]>('todo.include') ?? DEFAULT_INCLUDE,
+		excludeSegments: config.get<string[]>('todo.exclude') ?? DEFAULT_EXCLUDE,
+		regex: buildTagRegex(config.get<string[]>('todo.tags') ?? DEFAULT_TAGS),
+	};
+}
+
+/** Порядок записей: по пути, затем по номеру строки. */
+export function compareTodoEntries(a: TodoEntry, b: TodoEntry): number {
+	const pathCompare = a.uri.fsPath.localeCompare(b.uri.fsPath);
+	return pathCompare === 0 ? a.line - b.line : pathCompare;
+}
+
+/** Файл под масками todo.include проекта. */
+function isIncluded(root: string, includePatterns: readonly string[], uri: vscode.Uri): boolean {
+	return includePatterns.some((glob) => matchesProjectGlob(root, glob, uri));
+}
+
+/** Комментарии-метки файла на диске; непрочитанный файл без меток. */
+async function readTodos(uri: vscode.Uri, regex: RegExp, root: string): Promise<TodoEntry[]> {
+	try {
+		const bytes = await vscode.workspace.fs.readFile(uri);
+		return scanFile(uri, new TextDecoder('utf-8', { fatal: false }).decode(bytes), regex, root);
+	} catch (err) {
+		log.debug(`Не удалось прочитать файл ${uri.fsPath}: ${String(err)}`);
+		return [];
+	}
+}
+
+/**
+ * Комментарии-метки одного документа по настройкам его проекта.
+ *
+ * @param scanRoot - Проект документа
+ * @param document - Документ
+ * @returns undefined, если документ проект не сканирует
+ */
+export function scanTodoDocument(scanRoot: ProjectScanRoot, document: vscode.TextDocument): TodoEntry[] | undefined {
+	const { includePatterns, excludeSegments, regex } = todoSettings(scanRoot.root);
+	if (isOutsideScanRoot(scanRoot, document.uri.fsPath, excludeSegments)) {
+		return undefined;
+	}
+	return isIncluded(scanRoot.root, includePatterns, document.uri)
+		? scanFile(document.uri, document.getText(), regex, scanRoot.root)
+		: undefined;
+}
+
+/** Путь на диске, дела под которым читаются заново. */
+export interface TodoPathChange {
+	uri: vscode.Uri;
+	/** Путь может быть каталогом: тогда читаются все файлы под ним. */
+	tree: boolean;
+}
+
+/**
+ * Комментарии-метки файлов по путям на диске, которые проект сканирует.
+ *
+ * @param scanRoot - Проект путей
+ * @param changes - Пути; отсутствующие на диске пропускаются
+ */
+export async function scanTodoPaths(scanRoot: ProjectScanRoot, changes: readonly TodoPathChange[]): Promise<TodoEntry[]> {
+	const { includePatterns, excludeSegments, regex } = todoSettings(scanRoot.root);
+	const entries: TodoEntry[] = [];
+	for (const { uri, tree } of changes) {
+		if (isOutsideScanRoot(scanRoot, uri.fsPath, excludeSegments)) {
+			continue;
+		}
+		const included = isIncluded(scanRoot.root, includePatterns, uri);
+		if (!included && !tree) {
+			continue;
+		}
+		const stat = await fs.stat(uri.fsPath).catch(() => undefined);
+		if (included && stat?.isFile()) {
+			entries.push(...(await readTodos(uri, regex, scanRoot.root)));
+		} else if (tree && stat?.isDirectory()) {
+			const files = await vscode.workspace.findFiles(
+				new vscode.RelativePattern(uri, '**/*'),
+				searchExcludeGlob(uri.fsPath, scanRoot, excludeSegments)
+			);
+			for (const file of files) {
+				if (!isOutsideScanRoot(scanRoot, file.fsPath, excludeSegments) && isIncluded(scanRoot.root, includePatterns, file)) {
+					entries.push(...(await readTodos(file, regex, scanRoot.root)));
+				}
+			}
+		}
+	}
+	return entries;
+}
+
 /**
  * Комментарии-метки одного проекта по его настройкам todo.include, todo.exclude и todo.tags.
  *
  * @param scanRoot - Проект и каталоги, которые ему не принадлежат
  */
 export async function scanProjectTodos(scanRoot: ProjectScanRoot): Promise<TodoEntry[]> {
-	const config = projectConfiguration(scanRoot.root);
-	const includePatterns = config.get<string[]>('todo.include') ?? DEFAULT_INCLUDE;
-	const excludeSegments = config.get<string[]>('todo.exclude') ?? DEFAULT_EXCLUDE;
-	const regex = buildTagRegex(config.get<string[]>('todo.tags') ?? DEFAULT_TAGS);
+	const { includePatterns, excludeSegments, regex } = todoSettings(scanRoot.root);
 
 	const entries: TodoEntry[] = [];
 	for (const uri of await filesOf(scanRoot, includePatterns, excludeSegments)) {
-		try {
-			const bytes = await vscode.workspace.fs.readFile(uri);
-			const content = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-			entries.push(...scanFile(uri, content, regex, scanRoot.root));
-		} catch (err) {
-			log.debug(`Не удалось прочитать файл ${uri.fsPath}: ${String(err)}`);
-		}
+		entries.push(...(await readTodos(uri, regex, scanRoot.root)));
 	}
 	return entries;
 }
@@ -143,9 +231,6 @@ export async function scanWorkspaceForTodos(roots?: readonly ProjectScanRoot[]):
 	for (const scanRoot of scanRoots) {
 		entries.push(...(await scanProjectTodos(scanRoot)));
 	}
-	entries.sort((a, b) => {
-		const pathCompare = a.uri.fsPath.localeCompare(b.uri.fsPath);
-		return pathCompare === 0 ? a.line - b.line : pathCompare;
-	});
+	entries.sort(compareTodoEntries);
 	return { roots: scanRoots.map((scanRoot) => scanRoot.root), entries };
 }

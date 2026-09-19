@@ -31,7 +31,7 @@ import {
 	sameProjectRoot,
 	type ProjectScanRoot
 } from '../../shared/workspaceProjects';
-import { isOutsideScanRoot } from '../artifacts/projectScan';
+import { findProjectFiles, isOutsideScanRoot } from '../artifacts/projectScan';
 
 const log = logger.scope('testing');
 
@@ -51,35 +51,8 @@ function getExcludeSegments(root: string): string[] {
 	return [...new Set([...segments, '.git'])];
 }
 
-/**
- * Glob-исключение для vscode.workspace.findFiles из сегментов настройки
- */
-function buildExcludeGlob(segments: readonly string[]): string {
-	return `**/{${segments.join(',')}}/**`;
-}
-
 function sameRoot(left: string | undefined, right: string | undefined): boolean {
 	return left === undefined || right === undefined ? left === right : sameProjectRoot(left, right);
-}
-
-/**
- * Файлы проекта по маске: поиск от корня проекта, без подпроектов, вложенных
- * папок рабочей области и исключённых сегментов.
- *
- * @param scanRoot - Проект и каталоги, которые ему не принадлежат
- * @param glob - Маска относительно корня проекта
- * @param excludeSegments - Исключённые сегменты пути
- */
-export async function findProjectTestFiles(
-	scanRoot: ProjectScanRoot,
-	glob: string,
-	excludeSegments: readonly string[]
-): Promise<vscode.Uri[]> {
-	const uris = await vscode.workspace.findFiles(
-		new vscode.RelativePattern(vscode.Uri.file(scanRoot.root), glob),
-		buildExcludeGlob(excludeSegments)
-	);
-	return uris.filter((uri) => !isOutsideScanRoot(scanRoot, uri.fsPath, excludeSegments));
 }
 
 /**
@@ -382,9 +355,8 @@ export class TestingController implements vscode.Disposable {
 		const excludeSegments = getExcludeSegments(root);
 		const startedAt = Date.now();
 
-		// Каждый (адаптер, glob) — независимый обход workspace. На больших
-		// конфигурациях именно эти findFiles доминируют над временем сборки, поэтому
-		// все обходы и классификацию запускаем параллельно — БЕЗ мутаций дерева.
+		// Каждый (адаптер, glob) — отдельный поиск, поиски и классификацию
+		// запускаем параллельно — БЕЗ мутаций дерева.
 		// Дерево обновляется ниже единым последовательным дифом, чтобы пользователь
 		// не видел «прыгающие» узлы во время refresh.
 		const enabled = await Promise.all(this.adapters.map((adapter) => adapter.isEnabled()));
@@ -401,7 +373,7 @@ export class TestingController implements vscode.Disposable {
 
 		const discovered = await Promise.all(
 			jobs.map(async ({ adapter, glob }) => {
-				const uris = await findProjectTestFiles(scanRoot, glob, excludeSegments);
+				const uris = await findProjectFiles(scanRoot, glob, excludeSegments);
 				const classified = await Promise.all(
 					uris.map(async (uri) => ({ uri, location: await this.classifyTestFile(adapter, uri, scanRoot) }))
 				);
