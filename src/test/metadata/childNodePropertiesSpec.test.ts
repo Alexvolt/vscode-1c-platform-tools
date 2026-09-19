@@ -28,6 +28,19 @@ suite('Свойства узлов состава объекта', () => {
 		assert.strictEqual(childNodeKindLabel('tabularAttribute'), 'Реквизит табличной части');
 	});
 
+	test('перерасчёт, таблица и куб описаны своими файлами: правки в палитре у них нет', () => {
+		for (const kind of ['recalculation', 'table', 'cube']) {
+			assert.strictEqual(childNodeDtoList(kind), undefined, kind);
+		}
+		assert.strictEqual(childNodeDtoList('command'), 'commands', 'команда лежит в составе целиком');
+		const fields = childNodeTabs(false).flatMap((tab) => tab.groups.flatMap((group) => group.fields));
+		assert.deepStrictEqual(
+			fields.map((field) => [field.path, field.readonly]),
+			[['name', true]],
+			'видно только имя'
+		);
+	});
+
 	test('узел находится по имени, один тип идёт значением для списка', () => {
 		const node = findChildNode(objectDto, 'attributes', 'Наценка');
 
