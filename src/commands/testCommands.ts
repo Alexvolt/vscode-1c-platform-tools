@@ -15,7 +15,7 @@ import {
 	getDecompileTestEpfCommandName,
 	getYAxUnitTestsCommandName
 } from '../features/tools/commandNames';
-import { collectAllureResultDirs } from '../utils/allureResults';
+import { collectAllureResultDirs, uniqueResultDirs, type DeclaredResultDir } from '../utils/allureResults';
 import { configurationScope } from '../shared/activeConfiguration';
 import { VRUNNER_FEATURES, isAtLeast } from '../shared/vrunnerVersion';
 import type { CommandExecutionOptions, StructuredCommandResult, SyntaxCheckError } from '../shared/commandExecutionTypes';
@@ -75,10 +75,8 @@ export class TestCommands extends BaseCommand {
 		opts?: CommandExecutionOptions
 	): Promise<{ settings: Record<string, unknown>; schema: 'v2' | 'v3' }> {
 		if (opts?.settingsFile) {
-			const settings = (await this.vrunner.readEnvJson(opts.settingsFile)) as Record<string, unknown>;
-			// Схема определяется по самому файлу: он может быть другого формата,
-			// чем активный профиль (корневой ключ vrunner — формат 3.x)
-			return { settings, schema: 'vrunner' in settings ? 'v3' : 'v2' };
+			// Схема определяется по самому файлу: он может быть другого формата, чем активный профиль
+			return this.vrunner.readSettingsLayers(opts.settingsFile);
 		}
 		return this.vrunner.readActiveSettings();
 	}
@@ -590,29 +588,29 @@ export class TestCommands extends BaseCommand {
 	 * @returns Абсолютные пути существующих каталогов результатов
 	 */
 	private async declaredResultDirs(workspaceRoot: string): Promise<string[]> {
-		const declared: Array<{ value: string; kind: 'file' | 'dir' }> = [];
+		const declared: Array<{ value: string; kind: 'file' | 'dir'; run?: string; junit?: boolean }> = [];
 		try {
 			const { settings, schema } = await this.vrunner.readActiveSettings();
 
 			const reportsXunit = reportsXunitFromEnv(settings, schema);
 			if (reportsXunit) {
 				// оба генератора указывают на файл отчёта
-				for (const value of [
-					extractJUnitPathFromReportsXunit(reportsXunit),
-					extractAllurePathFromReportsXunit(reportsXunit)
-				]) {
-					if (value) {
-						declared.push({ value, kind: 'file' });
-					}
+				const junit = extractJUnitPathFromReportsXunit(reportsXunit);
+				if (junit) {
+					declared.push({ value: junit, kind: 'file', run: 'xunit', junit: true });
+				}
+				const allure = extractAllurePathFromReportsXunit(reportsXunit);
+				if (allure) {
+					declared.push({ value: allure, kind: 'file', run: 'xunit' });
 				}
 			}
 
 			const syntaxJUnit = syntaxCheckJUnitPathFromEnv(settings, schema);
 			if (syntaxJUnit) {
-				declared.push({ value: syntaxJUnit, kind: 'file' });
+				declared.push({ value: syntaxJUnit, kind: 'file', run: 'syntax-check', junit: true });
 			}
 			for (const value of syntaxCheckAllurePathsFromEnv(settings, schema)) {
-				declared.push({ value, kind: 'dir' });
+				declared.push({ value, kind: 'dir', run: 'syntax-check' });
 			}
 
 			const vaSettingsRel = vanessaSettingsPathFromEnv(settings, schema);
@@ -641,21 +639,21 @@ export class TestCommands extends BaseCommand {
 			declared.push({ value: yaxunitTarget.path, kind: 'file' });
 		}
 
-		const dirs = new Set<string>();
-		for (const { value, kind } of declared) {
+		const found: DeclaredResultDir[] = [];
+		for (const { value, kind, run, junit } of declared) {
 			const dir = kind === 'file'
 				? path.dirname(resolveConfigPath(value, workspaceRoot))
 				: resolveConfigPath(value, workspaceRoot);
 			// Каталога нет — прогон в него ещё не писал; Allure на пустом источнике падает
 			try {
 				if ((await fs.stat(dir)).isDirectory()) {
-					dirs.add(dir);
+					found.push({ dir, run, junit });
 				}
 			} catch {
 				log.debug(`Каталог результатов ${dir} не существует, пропущен`);
 			}
 		}
-		return [...dirs];
+		return uniqueResultDirs(found);
 	}
 
 	/**

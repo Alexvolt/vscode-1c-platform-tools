@@ -10,12 +10,21 @@ const V3_SECTION_PATH: Record<string, string[]> = {
 	'syntax-check': ['validate', 'syntax-check'],
 };
 
+/** Свойство объекта JSON; у значений другого вида свойств нет. */
+function jsonProperty(node: unknown, key: string): unknown {
+	return typeof node === 'object' && node !== null && !Array.isArray(node)
+		? (node as Record<string, unknown>)[key]
+		: undefined;
+}
+
 /**
  * Читает значение опции команды из файла настроек с учётом схемы vanessa-runner.
  *
  * В 2.x (env.json) опции лежат плоско: `<секция>["--<опция>"]`. В 3.x
- * (autumn-properties.json) — вложенно: `vrunner.<путь секции>.<опция>` без
- * префикса `--`. Возвращает значение как оно записано в файле.
+ * (autumn-properties.json) — вложенно, без префикса `--`, и vanessa-runner
+ * ищет опцию каскадом: `vrunner.<путь секции>.<опция>`, затем на каждом
+ * уровне выше до `vrunner.<опция>`; команда получает первое найденное.
+ * Возвращает значение как оно записано в файле.
  *
  * @param settings - Разобранное содержимое файла настроек
  * @param schema - Схема настроек (по версии vrunner)
@@ -30,16 +39,15 @@ export function settingValue(
 	option: string
 ): unknown {
 	if (schema === 'v3') {
-		let current: unknown = settings['vrunner'];
-		for (const segment of V3_SECTION_PATH[section] ?? [section]) {
-			if (typeof current !== 'object' || current === null) {
-				return undefined;
+		const sectionPath = V3_SECTION_PATH[section] ?? [section];
+		for (let depth = sectionPath.length; depth >= 0; depth--) {
+			const node = sectionPath.slice(0, depth).reduce(jsonProperty, settings['vrunner']);
+			const value = jsonProperty(node, option);
+			if (value !== undefined && value !== null) {
+				return value;
 			}
-			current = (current as Record<string, unknown>)[segment];
 		}
-		return typeof current === 'object' && current !== null
-			? (current as Record<string, unknown>)[option]
-			: undefined;
+		return undefined;
 	}
 	const sectionValue = settings[section];
 	return typeof sectionValue === 'object' && sectionValue !== null
@@ -58,7 +66,7 @@ export function settingValue(
 export interface YaxunitProfileSection {
 	/** Готовый конфиг YAxUnit как записан в профиле. */
 	configPath?: string;
-	/** Путь jUnit-отчёта из секции 3.x: без готового конфига раннер пишет отчёт туда. */
+	/** Путь jUnit-отчёта из настроек 3.x: без готового конфига раннер пишет отчёт туда. */
 	report?: string;
 	/** Режим клиента для `vrunner run` (2.x). */
 	ordinaryApp?: string;
@@ -101,11 +109,12 @@ export function yaxunitSectionFromEnv(
 		return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 	};
 	if (schema === 'v3') {
-		const format = text('report-format');
+		// Отчёт за прогон один. Отчёт другого формата панель не прочитает: путь остаётся раннеру
+		const formats = reportFormats(settingValue(settings, schema, 'yaxunit', 'report-format'));
+		const junit = formats.length === 0 || (formats.length === 1 && formats[0] === 'junit');
 		return {
 			configPath: text('yaxunit-config'),
-			// Отчёт другого формата панель не прочитает: путь остаётся раннеру
-			report: format === undefined || format.toLowerCase() === 'junit' ? text('report') : undefined,
+			report: junit ? text('report-path') ?? text('report') : undefined,
 		};
 	}
 	const command = text('command');
@@ -320,10 +329,56 @@ export function reportsXunitFromEnv(
 }
 
 /**
+ * Форматы отчёта из значения `report-format`: строка или список, без повторов.
+ *
+ * @param value - Значение опции как записано в настройках
+ * @returns Форматы в нижнем регистре
+ */
+function reportFormats(value: unknown): string[] {
+	const listed = (Array.isArray(value) ? value : [value])
+		.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+		.map((item) => item.trim().toLowerCase());
+	return [...new Set(listed)];
+}
+
+/**
+ * Путь отчёта формата из пары `report-format` / `report-path` секции 3.x.
+ *
+ * С одним форматом `report-path` и есть путь отчёта, с несколькими это
+ * каталог, где отчёт лежит под именем `nameInDir`. Без `report-format`
+ * отчёт пишется в формате junit.
+ *
+ * @param settings - Разобранные настройки в формате 3.x
+ * @param section - Секция команды (см. settingValue)
+ * @param format - Формат отчёта в нижнем регистре
+ * @param nameInDir - Имя отчёта внутри каталога
+ * @returns Путь как записан в конфиге или undefined, если отчёт не запрошен
+ */
+function reportPathFromSettings(
+	settings: Record<string, unknown>,
+	section: string,
+	format: string,
+	nameInDir: string
+): string | undefined {
+	const reportPath = settingValue(settings, 'v3', section, 'report-path');
+	if (typeof reportPath !== 'string' || reportPath.trim().length === 0) {
+		return undefined;
+	}
+	const listed = reportFormats(settingValue(settings, 'v3', section, 'report-format'));
+	const formats = listed.length > 0 ? listed : ['junit'];
+	if (!formats.includes(format)) {
+		return undefined;
+	}
+	const trimmed = reportPath.trim();
+	return formats.length === 1 ? trimmed : `${trimmed.replace(/[\\/]+$/, '')}/${nameInDir}`;
+}
+
+/**
  * Извлекает путь jUnit-отчёта синтаксического контроля из env.json (секция syntax-check)
  *
- * Схемо-зависимо: 2.x — `syntax-check["--junitpath"]`, 3.x —
- * `vrunner.validate.syntax-check.junitpath` (см. settingValue).
+ * Схемо-зависимо: 2.x — `syntax-check["--junitpath"]`, 3.x — пара
+ * `report-format` / `report-path` команды `validate syntax-check`, а без
+ * junit в паре `junitpath`.
  *
  * @param envJson - Разобранное содержимое env.json
  * @returns Путь как записан в конфиге (относительный/с $workspaceRoot) или undefined
@@ -332,6 +387,12 @@ export function syntaxCheckJUnitPathFromEnv(
 	settings: Record<string, unknown>,
 	schema: SettingsSchema = 'v2'
 ): string | undefined {
+	const reported = schema === 'v3'
+		? reportPathFromSettings(settings, 'syntax-check', 'junit', 'junit.xml')
+		: undefined;
+	if (reported) {
+		return reported;
+	}
 	const value = settingValue(settings, schema, 'syntax-check', 'junitpath');
 	return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
@@ -339,8 +400,9 @@ export function syntaxCheckJUnitPathFromEnv(
 /**
  * Каталоги Allure-результатов синтаксического контроля из env.json
  *
- * У проверки две разные опции, и заданы они могут быть обе:
- * `--allure-results` (Allure, xml) и `--allure-results2` (Allure2, json).
+ * В 2.x у проверки две опции, заданы могут быть обе: `--allure-results`
+ * (Allure, xml) и `--allure-results2` (Allure2, json). В 3.x каталог задаёт
+ * пара `report-format` / `report-path`, а без allure в паре `allure-results`.
  *
  * @param settings - Разобранные настройки активного профиля
  * @param schema - Схема файла настроек (2.x или 3.x)
@@ -350,8 +412,14 @@ export function syntaxCheckAllurePathsFromEnv(
 	settings: Record<string, unknown>,
 	schema: SettingsSchema = 'v2'
 ): string[] {
+	if (schema === 'v3') {
+		const reported = reportPathFromSettings(settings, 'syntax-check', 'allure', 'allure');
+		if (reported) {
+			return [reported];
+		}
+	}
 	const paths: string[] = [];
-	for (const option of ['allure-results', 'allure-results2']) {
+	for (const option of schema === 'v3' ? ['allure-results'] : ['allure-results', 'allure-results2']) {
 		const value = settingValue(settings, schema, 'syntax-check', option);
 		if (typeof value === 'string' && value.length > 0) {
 			paths.push(value);

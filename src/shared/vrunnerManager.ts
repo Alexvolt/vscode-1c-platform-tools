@@ -24,6 +24,7 @@ import { runCancellableCommand, CancellableProcessResult, type CommandRun } from
 import { DEFAULT_PATHS, DEFAULT_VRUNNER, DEFAULT_ENV } from './pathDefaults';
 import { getOvmBinaryPath, getOvmBinDir, getOvmRootDir, getOpmBinaryCandidates, getOpmScriptPath, withBinDirFirst } from './ovmPaths';
 import {
+	BASE_AUTUMN_FILE,
 	BASE_ENV_FILE,
 	LOCAL_OVERRIDES_FILE,
 	SettingsSchema,
@@ -39,6 +40,7 @@ import {
 	resolveActiveEnvFileName,
 	detectSettingsFormat,
 } from './envProfiles';
+import { DEFAULT_IB_CONNECTION } from './ibConnectionPath';
 import { containsGitBranchVariable, GIT_BRANCH_VARIABLE, substituteGitBranch } from './launchVariables';
 import { readGitBranchDirName } from './gitHead';
 import {
@@ -52,7 +54,7 @@ import {
 } from './vrunnerVersion';
 import { VRunnerIntent } from './vrunnerCli';
 import { planIntents, SettingsFileFormat } from './vrunnerCli/planner';
-import { parseSettingsJson, readSettingsJson, readSettingsJsonSync } from './settingsJson';
+import { overlaySettings, parseSettingsJson, readSettingsJson, readSettingsJsonSync } from './settingsJson';
 import { translateArgsToV3 } from './vrunnerCommandMap';
 import { createVRunnerTask, type TaskOutputChain } from '../features/tasks/vrunnerTask';
 import { decodeProcessOutput } from './processOutput';
@@ -815,22 +817,79 @@ export class VRunnerManager {
 		if (!root) {
 			return undefined;
 		}
-		const settingsFile = this.getActiveEnvFile();
-		const absolutePath = path.isAbsolute(settingsFile)
-			? settingsFile
-			: path.join(root, settingsFile);
-		try {
-			const parsed = readSettingsJsonSync(absolutePath) as SettingsDocument;
-			const value = this.activeSettingsSchema() === 'v3'
-				? parsed?.vrunner?.[option]
-				: parsed?.default?.[`--${option}`];
-			if (typeof value === 'string' && value.trim()) {
-				return this.substituteLaunchValue(value.trim());
-			}
-		} catch {
-			// файл недоступен или не JSON
+		const schema = this.activeSettingsSchema();
+		return this.profileOptionValue(this.readSettingsLayersSync(root, this.getActiveEnvFile(), schema), schema, option);
+	}
+
+	/**
+	 * Значение опции общего уровня из настроек с подстановкой `${gitBranch}`:
+	 * `default["--<опция>"]` в env.json (2.x) или `vrunner.<опция>` в
+	 * autumn-properties.json (3.x).
+	 *
+	 * @param settings - Настройки профиля
+	 * @param schema - Схема настроек
+	 * @param option - Имя опции без префикса (например 'ibconnection')
+	 * @returns Значение опции или undefined
+	 */
+	private profileOptionValue(settings: SettingsDocument, schema: SettingsSchema, option: string): string | undefined {
+		const value = schema === 'v3' ? settings.vrunner?.[option] : settings.default?.[`--${option}`];
+		return typeof value === 'string' && value.trim() ? this.substituteLaunchValue(value.trim()) : undefined;
+	}
+
+	/**
+	 * Файлы, из которых vanessa-runner складывает настройки при запуске с этим
+	 * файлом, от важного к общему: 3.x накладывает его на autumn-properties.json
+	 * проекта, 2.x читает только его.
+	 *
+	 * @param settingsFile - Файл настроек: абсолютный путь или путь от корня проекта
+	 * @param schema - Схема настроек
+	 * @returns Сам файл и, для 3.x, файл проекта, в том виде, как их передавать от корня
+	 */
+	public settingsLayerFiles(settingsFile: string, schema: SettingsSchema = this.activeSettingsSchema()): string[] {
+		const root = this.getEffectiveRoot();
+		if (schema !== 'v3' || !root) {
+			return [settingsFile];
 		}
-		return undefined;
+		const own = path.resolve(root, settingsFile);
+		return path.relative(own, path.join(root, BASE_AUTUMN_FILE)) === ''
+			? [settingsFile]
+			: [settingsFile, BASE_AUTUMN_FILE];
+	}
+
+	private readSettingsLayersSync(root: string, settingsFile: string, schema: SettingsSchema): SettingsDocument {
+		return overlaySettings(
+			this.settingsLayerFiles(settingsFile, schema).map((file) => {
+				try {
+					return readSettingsJsonSync(path.resolve(root, file));
+				} catch {
+					return undefined;
+				}
+			})
+		) as SettingsDocument;
+	}
+
+	/**
+	 * Настройки, которые vanessa-runner видит при запуске с этим файлом (см.
+	 * {@link settingsLayerFiles}). Непрочитанные файлы пропускаются.
+	 *
+	 * @param settingsFile - Файл настроек: абсолютный путь или путь от корня проекта
+	 * @param schema - Схема настроек; без неё берётся по самому файлу
+	 * @returns Слитые настройки (пустой объект, если ничего не прочитано) и схема
+	 * @throws {Error} Если рабочая область не открыта
+	 */
+	public async readSettingsLayers(
+		settingsFile: string,
+		schema?: SettingsSchema
+	): Promise<{ settings: Record<string, unknown>; schema: SettingsSchema }> {
+		const root = this.getEffectiveRoot();
+		if (!root) {
+			throw new Error('Рабочая область не открыта');
+		}
+		const read = (file: string) => readSettingsJson(path.resolve(root, file)).catch(() => undefined);
+		const own = await read(settingsFile);
+		const fileSchema: SettingsSchema = schema ?? (detectSettingsFormat(own) === 'v3' ? 'v3' : 'v2');
+		const lower = await Promise.all(this.settingsLayerFiles(settingsFile, fileSchema).slice(1).map(read));
+		return { settings: overlaySettings([own, ...lower]), schema: fileSchema };
 	}
 
 	/**
@@ -2089,19 +2148,17 @@ export class VRunnerManager {
 	 * @throws {Error} Если рабочая область не открыта
 	 */
 	/**
-	 * Читает файл настроек активного профиля и возвращает его вместе со схемой.
+	 * Настройки активного профиля вместе со схемой.
 	 *
 	 * Схема определяется по установленной версии vrunner: env.json (2.x) или
 	 * autumn-properties.json (3.x). Значения опций внутри читаются с учётом
 	 * схемы (см. settingValue в projectTestConfig).
 	 *
-	 * @returns Разобранное содержимое (пустой объект при ошибке) и схема
+	 * @returns Настройки, как их видит vanessa-runner (см. {@link readSettingsLayers}), и схема
 	 */
 	public async readActiveSettings(): Promise<{ settings: Record<string, unknown>; schema: SettingsSchema }> {
 		await this.getVRunnerVersion();
-		const schema = this.activeSettingsSchema();
-		const settings = (await this.readEnvJson(this.getActiveEnvFile())) as Record<string, unknown>;
-		return { settings, schema };
+		return this.readSettingsLayers(this.getActiveEnvFile(), this.activeSettingsSchema());
 	}
 
 	public async readEnvJson(fileName: string = BASE_ENV_FILE): Promise<any> {
@@ -2368,22 +2425,16 @@ export class VRunnerManager {
 		if (!root) {
 			return {};
 		}
-		const settingsFile = this.getActiveEnvFile();
-		const absolutePath = path.isAbsolute(settingsFile) ? settingsFile : path.join(root, settingsFile);
-		try {
-			const parsed = readSettingsJsonSync(absolutePath);
-			// секции default (2.x) / vrunner (3.x) разбирает parseLocalOverrides
-			const { overrides } = parseLocalOverrides(parsed);
-			const withVariables: EnvOverrides = {};
-			for (const [field, value] of Object.entries(overrides) as [keyof EnvOverrides, string][]) {
-				if (containsGitBranchVariable(value)) {
-					withVariables[field] = value;
-				}
+		const settings = this.readSettingsLayersSync(root, this.getActiveEnvFile(), this.activeSettingsSchema());
+		// секции default (2.x) / vrunner (3.x) разбирает parseLocalOverrides
+		const { overrides } = parseLocalOverrides(settings);
+		const withVariables: EnvOverrides = {};
+		for (const [field, value] of Object.entries(overrides) as [keyof EnvOverrides, string][]) {
+			if (containsGitBranchVariable(value)) {
+				withVariables[field] = value;
 			}
-			return withVariables;
-		} catch {
-			return {};
 		}
+		return withVariables;
 	}
 
 	/**
@@ -2504,7 +2555,7 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Читает значение опции из файла настроек активного профиля с учётом схемы:
+	 * Читает значение опции из настроек активного профиля с учётом схемы:
 	 * `default["--<опция>"]` в env.json (2.x) или `vrunner.<опция>` в
 	 * autumn-properties.json (3.x).
 	 *
@@ -2519,32 +2570,19 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Читает значение опции из файла настроек по схеме установленного vrunner.
+	 * Читает значение опции из настроек, которые vanessa-runner видит с этим
+	 * файлом, по схеме установленного vrunner.
 	 *
 	 * @param settingsFile - Файл настроек: абсолютный путь или путь от корня проекта
 	 * @param option - Имя опции без префикса (например 'ibconnection')
 	 * @returns Значение опции или undefined
 	 */
 	private async readSettingsFileOption(settingsFile: string, option: string): Promise<string | undefined> {
-		const root = this.getEffectiveRoot();
-		if (!root) {
+		if (!this.getEffectiveRoot()) {
 			return undefined;
 		}
-		const absolutePath = path.isAbsolute(settingsFile)
-			? settingsFile
-			: path.join(root, settingsFile);
-		try {
-			const parsed = (await readSettingsJson(absolutePath)) as SettingsDocument;
-			const value = this.activeSettingsSchema() === 'v3'
-				? parsed?.vrunner?.[option]
-				: parsed?.default?.[`--${option}`];
-			if (typeof value === 'string' && value.trim()) {
-				return this.substituteLaunchValue(value.trim());
-			}
-		} catch {
-			// файл недоступен или не JSON — значение не определено
-		}
-		return undefined;
+		const { settings, schema } = await this.readSettingsLayers(settingsFile, this.activeSettingsSchema());
+		return this.profileOptionValue(settings, schema, option);
 	}
 
 	/**
@@ -2555,11 +2593,7 @@ export class VRunnerManager {
 	 * @returns Строка подключения (например '/F./build/ib')
 	 */
 	public async getActiveIbConnectionValue(): Promise<string> {
-		const override = this.getEffectiveEnvOverrides()?.ibConnection;
-		if (override) {
-			return override;
-		}
-		return (await this.readActiveProfileSetting('ibconnection')) ?? '/F./build/ib';
+		return (await this.getConfiguredIbConnection()) ?? DEFAULT_IB_CONNECTION;
 	}
 
 	/**
@@ -2571,10 +2605,21 @@ export class VRunnerManager {
 	 * @returns Строка подключения (например '/F./build/ib')
 	 */
 	public async getIbConnectionValue(settingsFile?: string): Promise<string> {
-		if (!settingsFile) {
-			return this.getActiveIbConnectionValue();
+		return (await this.getConfiguredIbConnection(settingsFile)) ?? DEFAULT_IB_CONNECTION;
+	}
+
+	/**
+	 * Строка подключения к ИБ, заданная для команды, без значения по умолчанию:
+	 * без неё vanessa-runner собирает и разбирает файлы во временной базе.
+	 *
+	 * @param settingsFile - Файл настроек вызова
+	 * @returns Строка подключения или undefined, если её не задают ни перекрытия, ни файл настроек
+	 */
+	public async getConfiguredIbConnection(settingsFile?: string): Promise<string | undefined> {
+		if (settingsFile) {
+			return this.readSettingsFileOption(settingsFile, 'ibconnection');
 		}
-		return (await this.readSettingsFileOption(settingsFile, 'ibconnection')) ?? '/F./build/ib';
+		return this.getEffectiveEnvOverrides()?.ibConnection || (await this.readActiveProfileSetting('ibconnection'));
 	}
 
 	/**

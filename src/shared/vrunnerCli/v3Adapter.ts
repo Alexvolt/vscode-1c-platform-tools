@@ -8,7 +8,7 @@
  *
  * Использует нативные возможности 3.x там, где они лучше двухшаговых
  * потоков 2.x: разборка .cfe-файла выполняется одной командой
- * `cfe decompile --cfe-file` во временной ИБ, не затрагивая рабочую базу.
+ * `cfe decompile --cfe-file`.
  *
  * Флаг `--ibcmd` адаптер не добавляет: это настройка проекта и задаётся
  * пользователем в файле настроек vanessa-runner (vrunner.ibcmd в
@@ -28,11 +28,66 @@ import {
 /** Путь встроенных дымовых тестов vanessa-add (макрос раскрывает vrunner). */
 const DEFAULT_XUNIT_TESTS_PATH = '$addRoot/tests/smoke';
 
-function common(intent: { common?: CommonArgs }): string[] {
-	return [...(intent.common ?? [])];
+/**
+ * Команды без собственной опции `--settings`. Файл настроек vanessa-runner
+ * читает до разбора команды, а корневая команда объявляет `--settings` своей
+ * опцией, поэтому таким командам он передаётся перед группой.
+ */
+const COMMANDS_WITHOUT_SETTINGS = new Set(['infobase extensions list']);
+
+/** Команды запуска 1С: только у них есть опция `--additional`. */
+const LAUNCH_COMMANDS = new Set(['run enterprise', 'run designer', 'test vanessa', 'test xunit', 'test yaxunit']);
+
+/** Опции подключения и платформы, которых нет у `validate edt`. */
+const CONNECTION_OPTIONS = ['--ibconnection', '--db-user', '--db-pwd', '--v8version'];
+
+/**
+ * Сквозные опции, которых нет у команды. Перекрытия профиля планировщик
+ * добавляет ко всем командам, а незнакомую опцию разбор 3.x не принимает.
+ */
+function unsupportedCommonOptions(command: string): string[] {
+	const result = LAUNCH_COMMANDS.has(command) ? [] : ['--additional'];
+	if (command === 'validate edt') {
+		result.push(...CONNECTION_OPTIONS);
+	} else if (command.startsWith('cluster ')) {
+		// Базу кластера задают опции кластера, строки подключения у этих команд нет
+		result.push('--ibconnection');
+	}
+	return result;
 }
 
-/** Собирает команду: группа + опции + позиционные (опции всегда первыми). */
+/** Убирает из опций перечисленные вместе со значениями. */
+function withoutOptions(options: string[], names: string[]): string[] {
+	const result: string[] = [];
+	for (let index = 0; index < options.length; index++) {
+		const token = options[index];
+		if (names.includes(token)) {
+			index++;
+		} else if (!names.some((name) => token.startsWith(`${name}=`))) {
+			result.push(token);
+		}
+	}
+	return result;
+}
+
+/**
+ * Опция со значением. Значение с ведущим дефисом разбор 3.x через пробел
+ * принимает за следующую опцию, поэтому оно идёт через знак равенства.
+ */
+function valued(name: string, value: string): string[] {
+	return value.startsWith('-') ? [`${name}=${value}`] : [name, value];
+}
+
+/** Сквозные опции: пары «опция, значение». */
+function common(intent: { common?: CommonArgs }): string[] {
+	const args = intent.common ?? [];
+	const result: string[] = [];
+	for (let index = 0; index < args.length; index += 2) {
+		result.push(...(index + 1 < args.length ? valued(args[index], args[index + 1]) : [args[index]]));
+	}
+	return result;
+}
+
 /**
  * Переводит отбор сеансов из записи 2.x в опции 3.x.
  *
@@ -89,7 +144,17 @@ function sessionFilterOptions(filter?: string, mode?: string): string[] {
 	return options;
 }
 
-function cmd(group: string[], options: string[], positionals: string[]): string[] {
+/** Собирает команду: группа + опции + позиционные (опции всегда первыми). */
+function cmd(group: string[], allOptions: string[], positionals: string[]): string[] {
+	const command = group.join(' ');
+	const options = withoutOptions(allOptions, unsupportedCommonOptions(command));
+	if (COMMANDS_WITHOUT_SETTINGS.has(command)) {
+		const index = options.findIndex((token) => token === '--settings' || token.startsWith('--settings='));
+		if (index !== -1) {
+			const settings = options.splice(index, options[index] === '--settings' ? 2 : 1);
+			return [...settings, ...group, ...options, ...positionals];
+		}
+	}
 	return [...group, ...options, ...positionals];
 }
 
@@ -175,10 +240,10 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 			case 'cfe.unloadIbToCfe':
 				return [cmd(['cfe', 'unload'], ['--extension-name', intent.extensionName, ...common(intent)], [intent.out])];
 			case 'cfe.decompileCfeFile': {
-				// Нативный поток 3.x: одна команда во ВРЕМЕННОЙ ИБ. Сквозные опции
-				// намеренно не передаются: с --ibconnection файл грузился бы в
-				// рабочую базу (поведение 2.x), а без него используется временная.
-				const options = ['--cfe-file', intent.file, '--extension-name', intent.extensionName];
+				// Одна команда 3.x. Временную ИБ vanessa-runner создаёт, только когда
+				// база не задана ни в вызове, ни в файле настроек; иначе файл грузится
+				// в эту базу, поэтому профиль и перекрытия идут как у остальных команд.
+				const options = ['--cfe-file', intent.file, '--extension-name', intent.extensionName, ...common(intent)];
 				return [cmd(['cfe', 'decompile'], options, [intent.out])];
 			}
 
@@ -193,7 +258,7 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 			case 'run.enterprise': {
 				const options: string[] = [];
 				if (intent.command !== undefined) {
-					options.push('--command', intent.command);
+					options.push(...valued('--command', intent.command));
 				}
 				if (intent.execute !== undefined) {
 					options.push('--execute', intent.execute);
@@ -206,7 +271,7 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 			case 'run.designer': {
 				const options: string[] = [];
 				if (intent.additional !== undefined) {
-					options.push('--additional', intent.additional);
+					options.push(...valued('--additional', intent.additional));
 				}
 				if (intent.noWait) {
 					options.push('--no-wait');
@@ -253,7 +318,9 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 					options.push('--tests', intent.filter.tests.join(','));
 				}
 				if (intent.report !== undefined) {
-					options.push('--report', intent.report, '--report-format', 'jUnit');
+					// Пара опций из командной строки перекрывает пару из настроек,
+					// а устаревшую --report перекрыл бы report-path из настроек
+					options.push('--report-format', 'jUnit', '--report-path', intent.report);
 				}
 				if (intent.ordinaryApp !== undefined) {
 					options.push('--ordinaryapp', intent.ordinaryApp);
@@ -262,7 +329,7 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 					options.push('--exitcode', intent.exitCodePath);
 				}
 				if (intent.additional !== undefined) {
-					options.push('--additional', intent.additional);
+					options.push(...valued('--additional', intent.additional));
 				}
 				if (intent.noWait) {
 					options.push('--no-wait');
@@ -274,7 +341,7 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 			case 'validate.edt': {
 				const options = [
 					...(intent.src !== undefined ? ['--src', intent.src] : []),
-					...(intent.junitPath !== undefined ? ['--junitpath', intent.junitPath] : []),
+					...(intent.junitPath !== undefined ? ['--report-format', 'junit', '--report-path', intent.junitPath] : []),
 				];
 				return [cmd(['validate', 'edt'], [...options, ...common(intent)], [])];
 			}
@@ -285,17 +352,17 @@ export class V3CliAdapter implements VRunnerCliAdapter {
 			case 'session.lock': {
 				const options: string[] = [];
 				if (intent.accessCode) {
-					options.push('--uccode', intent.accessCode);
+					options.push(...valued('--uccode', intent.accessCode));
 				}
 				if (intent.deniedMessage) {
-					options.push('--denied-message', intent.deniedMessage);
+					options.push(...valued('--denied-message', intent.deniedMessage));
 				}
 				return [cmd(['cluster', 'session', 'lock'], [...options, ...common(intent)], [])];
 			}
 			case 'session.unlock': {
 				const options: string[] = [];
 				if (intent.accessCode) {
-					options.push('--uccode', intent.accessCode);
+					options.push(...valued('--uccode', intent.accessCode));
 				}
 				return [cmd(['cluster', 'session', 'unlock'], [...options, ...common(intent)], [])];
 			}

@@ -82,10 +82,8 @@ export function exclusiveInfobaseLogLine(project: string, profile: string, conne
  * Виды намерений, которым нужен монопольный доступ к базе: платформа открывает
  * базу проекта своим процессом, а занятую другим процессом она не откроет.
  *
- * Сборка и разборка файлов (`cf.build`, `cf.decompileFile`, `cfe.buildCfe`)
- * сюда не входит: vanessa-runner выполняет их во временной базе, базу проекта
- * такие команды не трогают. Команды кластера (`session.*`, `jobs.*`) работают
- * с серверными базами, к файловой они неприменимы.
+ * Команды кластера (`session.*`, `jobs.*`) работают с серверными базами, к
+ * файловой они неприменимы.
  */
 const EXCLUSIVE_INTENT_KINDS: ReadonlySet<VRunnerIntent['kind']> = new Set([
 	'infobase.init',
@@ -103,9 +101,6 @@ const EXCLUSIVE_INTENT_KINDS: ReadonlySet<VRunnerIntent['kind']> = new Set([
 	'cfe.loadFromCfeFile',
 	'cfe.dumpIbToSrc',
 	'cfe.unloadIbToCfe',
-	'cfe.decompileCfeFile',
-	'epf.build',
-	'epf.decompile',
 	'run.designer',
 	'run.enterprise',
 	'test.vanessa',
@@ -114,12 +109,52 @@ const EXCLUSIVE_INTENT_KINDS: ReadonlySet<VRunnerIntent['kind']> = new Set([
 ]);
 
 /**
+ * Сборка и разборка файлов: vanessa-runner выполняет их в базе из строки
+ * подключения, а без строки создаёт временную.
+ */
+const FILE_INTENT_KINDS: ReadonlySet<VRunnerIntent['kind']> = new Set([
+	'cf.build',
+	'cf.decompileFile',
+	'cfe.buildCfe',
+	'cfe.decompileCfeFile',
+	'epf.build',
+	'epf.decompile',
+]);
+
+/** Сборка cf и cfe и разборка cf-файла, которые CLI 2.x всегда ведёт во временной базе. */
+const CLI2_TEMPORARY_INTENT_KINDS: ReadonlySet<VRunnerIntent['kind']> = new Set([
+	'cf.build',
+	'cf.decompileFile',
+	'cfe.buildCfe',
+]);
+
+/** Установленный vanessa-runner и подключение команды. */
+export interface InfobaseRun {
+	/** Команды строятся для CLI 3.x. */
+	readonly cli3: boolean;
+	/** Строка подключения задана вызовом, перекрытием профиля или файлом настроек. */
+	readonly connectionSet: boolean;
+}
+
+/**
  * Нужен ли намерению монопольный доступ к информационной базе.
  *
+ * Разбор cfe-файла CLI 2.x выполняет загрузкой расширения в базу проекта.
+ *
  * @param kind - Вид намерения vrunner
+ * @param run - Установленный vanessa-runner и подключение команды
  * @returns true, если на время выполнения базу нужно освободить
  */
-export function needsExclusiveInfobase(kind: VRunnerIntent['kind']): boolean {
+export function needsExclusiveInfobase(kind: VRunnerIntent['kind'], run: InfobaseRun): boolean {
+	if (!run.cli3 && CLI2_TEMPORARY_INTENT_KINDS.has(kind)) {
+		return false;
+	}
+	if (!run.cli3 && kind === 'cfe.decompileCfeFile') {
+		return true;
+	}
+	if (FILE_INTENT_KINDS.has(kind)) {
+		return run.connectionSet;
+	}
 	return EXCLUSIVE_INTENT_KINDS.has(kind);
 }
 
@@ -127,10 +162,11 @@ export function needsExclusiveInfobase(kind: VRunnerIntent['kind']): boolean {
  * Нужен ли монопольный доступ хотя бы одному намерению цепочки.
  *
  * @param intents - Намерения, которые выполнит команда
+ * @param run - Установленный vanessa-runner и подключение команды
  * @returns true, если базу нужно освободить на время всей цепочки
  */
-export function anyNeedsExclusiveInfobase(intents: readonly VRunnerIntent[]): boolean {
-	return intents.some((intent) => needsExclusiveInfobase(intent.kind));
+export function anyNeedsExclusiveInfobase(intents: readonly VRunnerIntent[], run: InfobaseRun): boolean {
+	return intents.some((intent) => needsExclusiveInfobase(intent.kind, run));
 }
 
 /**

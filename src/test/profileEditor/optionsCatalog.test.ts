@@ -69,4 +69,12 @@ suite('profileEditor: каталог опций', () => {
 		assert.ok(yaxunit, 'должна быть секция vrunner.test.yaxunit');
 		assert.ok(yaxunit.options.some((option) => option.key === 'yaxunit-config'));
 	});
+
+	test('v3: секция команды лежит по пути команды vanessa-runner', () => {
+		const { sections } = loadEditorSections(extensionPath, 'v3');
+		const jsonPath = (id: string) => sections.find((section) => section.id === id)?.jsonPath;
+		assert.deepStrictEqual(jsonPath('vrunner.validate.syntax-check'), ['vrunner', 'validate', 'syntax-check']);
+		assert.deepStrictEqual(jsonPath('vrunner.cluster.session.kill'), ['vrunner', 'cluster', 'session', 'kill']);
+		assert.deepStrictEqual(jsonPath('vrunner.infobase.extensions.list'), ['vrunner', 'infobase', 'extensions', 'list']);
+	});
 });

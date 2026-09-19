@@ -51,6 +51,7 @@
 			"label": "Исходники 1С:EDT",
 			"keys": [
 				"src-format",
+				"edt-path",
 				"edt-version",
 				"edt-workspace",
 				"edt-timeout",
@@ -120,6 +121,7 @@
 				"exception-file",
 				"groupbymetadata",
 				"testsuitename",
+				"allure-results",
 				"allure-results2"
 			]
 		},

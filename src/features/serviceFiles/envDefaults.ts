@@ -28,7 +28,7 @@ export const ENV_DEFAULTS = {
  * Рукописный v3-шаблон (не конвертация env.json): vanessa-runner 3 — отдельный
  * инструмент со своим форматом, каскад `vrunner.<команда>.<опция>`, глобальные
  * опции на `vrunner.<опция>`. Перенос существующих настроек 2.x выполняет сам
- * пользователь официальным `tools/migrate26to30.os` из состава vanessa-runner.
+ * пользователь скриптом из пакета vanessa-runner (см. {@link settingsMigrationCommand}).
  */
 export const AUTUMN_DEFAULTS = {
 	vrunner: {
@@ -44,6 +44,22 @@ export const AUTUMN_DEFAULTS = {
 		ordinaryapp: '-1',
 	},
 };
+
+/** Скрипт переноса настроек 2.x внутри пакета vanessa-runner. */
+export const SETTINGS_MIGRATION_SCRIPT = 'tools/migrate26to30.os';
+
+/**
+ * Строка запуска переноса env.json в autumn-properties.json.
+ *
+ * Скрипт лежит в пакете vanessa-runner, а не в проекте, и без `--input` читает
+ * vrunner.json; результат пишет в autumn-properties.json.
+ *
+ * @param packageDir - Каталог пакета от корня проекта, когда пакет установлен в проект
+ * @returns Команда для запуска из корня проекта
+ */
+export function settingsMigrationCommand(packageDir?: string): string {
+	return `oscript ${packageDir ?? '<каталог vanessa-runner>'}/${SETTINGS_MIGRATION_SCRIPT} --input env.json`;
+}
 
 const VANESSA_ADDITIONAL = '/DisplayAllFunctions /L ru';
 

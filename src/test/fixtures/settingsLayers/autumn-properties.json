@@ -1,0 +1,12 @@
+{
+	"vrunner": {
+		"ibconnection": "/F./build/base",
+		"v8version": "8.3.23",
+		"db-user": "user-${gitBranch}",
+		"validate": {
+			"syntax-check": {
+				"report-format": ["allure"]
+			}
+		}
+	}
+}

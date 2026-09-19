@@ -29,5 +29,6 @@ export const EPF_NAMES = {
 export const EPF_COMMANDS = {
 	UPDATE_DATABASE: 'ЗапуститьОбновлениеИнформационнойБазы;ЗавершитьРаботуСистемы;',
 	BLOCK_EXTERNAL_RESOURCES: 'ЗапретитьРаботуСВнешнимиРесурсами;ЗавершитьРаботуСистемы',
-	LOAD_EXTENSION: (cfeFilePath: string) => `Путь=${cfeFilePath};ЗавершитьРаботуСистемы;`
+	/** Без флага Перезаписывать обработка РаботаСРасширениями не трогает уже установленное расширение */
+	LOAD_EXTENSION: (cfeFilePath: string) => `Путь=${cfeFilePath};Перезаписывать;ЗавершитьРаботуСистемы;`
 } as const;

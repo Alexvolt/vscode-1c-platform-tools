@@ -5,6 +5,8 @@ import {
 	AUTUMN_OPTIONAL_SECTIONS,
 	mergeAutumnSections,
 } from '../../features/serviceFiles/envSections';
+import { settingsMigrationCommand } from '../../features/serviceFiles/envDefaults';
+import { syntaxCheckJUnitPathFromEnv } from '../../features/testing/projectTestConfig';
 
 suite('serviceFiles/envSections', () => {
 	const base = { $schema: 'x', default: { '--v8version': '8.3' } };
@@ -43,6 +45,17 @@ suite('serviceFiles/envSections', () => {
 		assert.strictEqual(result.vrunner.test.yaxunit['yaxunit-config'], 'tools/yaxunit.json');
 	});
 
+	test('перенос env.json запускает скрипт из пакета vanessa-runner и читает env.json', () => {
+		assert.strictEqual(
+			settingsMigrationCommand('oscript_modules/vanessa-runner'),
+			'oscript oscript_modules/vanessa-runner/tools/migrate26to30.os --input env.json'
+		);
+		assert.strictEqual(
+			settingsMigrationCommand(),
+			'oscript <каталог vanessa-runner>/tools/migrate26to30.os --input env.json'
+		);
+	});
+
 	suite('autumn (v3)', () => {
 		const autumnBase = { vrunner: { ibconnection: '/F./build/ib' } };
 
@@ -77,6 +90,12 @@ suite('serviceFiles/envSections', () => {
 			assert.ok(String(xunit.section.reportsxunit).includes('jUnit{'), 'генератор jUnit{}');
 			const syntax = AUTUMN_OPTIONAL_SECTIONS.find((s) => s.id === 'syntax-check')!;
 			assert.ok((syntax.section.mode as string[]).every((m) => !m.startsWith('-')), 'режимы без ведущего -');
+			assert.deepStrictEqual(syntax.section['report-format'], ['junit', 'allure'], 'отчёты парой report-format/report-path');
+			assert.strictEqual(
+				syntaxCheckJUnitPathFromEnv(mergeAutumnSections({ vrunner: {} }, ['syntax-check']), 'v3'),
+				'build/out/syntax-check/junit.xml',
+				'панель находит jUnit-отчёт созданной секции'
+			);
 		});
 	});
 });

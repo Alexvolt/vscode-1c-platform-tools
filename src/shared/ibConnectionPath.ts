@@ -1,5 +1,8 @@
 import * as path from 'node:path';
 
+/** Строка подключения, когда её не задают ни вызов, ни профиль: база, которую vanessa-runner берёт сам. */
+export const DEFAULT_IB_CONNECTION = '/F./build/ib';
+
 const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[/\\]/;
 
 function isWindowsStylePath(p: string): boolean {
@@ -57,9 +60,7 @@ export function resolveFileIbConnectionString(connectionString: string, workspac
 /**
  * Заключает путь файловой ИБ в кавычки: `/F<путь>` -> `/F"<путь>"`.
  *
- * vanessa-runner 3 разбирает строку подключения по пробелам, поэтому путь с
- * пробелом без кавычек доходит до платформы обрезанным. Кавычки принимают обе
- * версии. Строки `/S…`, пути без пробелов и уже закавыченные значения не меняются.
+ * Строки `/S…`, пути без пробелов и уже закавыченные значения не меняются.
  *
  * @param connectionString - Строка подключения
  * @returns Строка подключения, безопасная для передачи в vanessa-runner

@@ -12,7 +12,7 @@ import {
 	infobaseHolder,
 	keepsInfobaseAfterRun,
 } from '../shared/exclusiveInfobase';
-import { resolveFileIbAbsolutePath } from '../shared/ibConnectionPath';
+import { DEFAULT_IB_CONNECTION, resolveFileIbAbsolutePath } from '../shared/ibConnectionPath';
 import { currentRoot, runWithProject } from '../shared/workspaceProjects';
 import { projectLabel, projectRelativePath } from './projectScope';
 import { configurationScope } from '../shared/activeConfiguration';
@@ -568,11 +568,17 @@ export abstract class BaseCommand {
 		intents: readonly VRunnerIntent[],
 		opts: CommandExecutionOptions | undefined
 	): Promise<{ restore?: () => Promise<void> } | 'blocked'> {
-		if (!anyNeedsExclusiveInfobase(intents)) {
+		const configured =
+			opts?.ibConnection?.trim() || (await this.vrunner.getConfiguredIbConnection(opts?.settingsFile));
+		const run = {
+			cli3: await this.vrunner.supportsVRunnerFeature('cli3'),
+			connectionSet: configured !== undefined,
+		};
+		if (!anyNeedsExclusiveInfobase(intents, run)) {
 			return {};
 		}
 		const root = currentRoot();
-		const connection = opts?.ibConnection?.trim() || (await this.vrunner.getIbConnectionValue(opts?.settingsFile));
+		const connection = configured ?? DEFAULT_IB_CONNECTION;
 		log.info(
 			exclusiveInfobaseLogLine(
 				root === undefined ? '-' : projectLabel(root),

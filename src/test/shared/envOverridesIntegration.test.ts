@@ -189,4 +189,20 @@ suite('строка подключения команды с явным файл
 			}
 		});
 	});
+
+	test('строка подключения не задана, пока её нет ни в профиле, ни в перекрытиях', async () => {
+		writeJson(root, 'env.json', { default: { '--v8version': '8.3.27' } });
+
+		await vrunner.runWithProjectRoot(root, async () => {
+			assert.strictEqual(await vrunner.getConfiguredIbConnection(), undefined);
+			assert.strictEqual(await vrunner.getIbConnectionValue(), '/F./build/ib');
+			await vrunner.setActiveEnvOverrides({ ibConnection: '/F./build/временная' });
+			try {
+				assert.strictEqual(await vrunner.getConfiguredIbConnection(), '/F./build/временная');
+				assert.strictEqual(await vrunner.getConfiguredIbConnection('env.json'), undefined);
+			} finally {
+				await vrunner.setActiveEnvOverrides(undefined);
+			}
+		});
+	});
 });

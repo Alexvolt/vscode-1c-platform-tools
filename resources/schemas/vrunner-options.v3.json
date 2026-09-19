@@ -1,7 +1,7 @@
 {
 	"schema": "v3",
 	"source": "vanessa-runner 3.0.0 (src/cli + docs/product/команды + схема 2.x)",
-	"generatedAt": "2026-09-14",
+	"generatedAt": "2026-09-18",
 	"sets": {
 		"НаборОпцийEDT": [
 			{
@@ -800,7 +800,7 @@
 			]
 		},
 		{
-			"path": "cluster.jobs-lock",
+			"path": "cluster.jobs.lock",
 			"options": [],
 			"sets": [
 				"НаборОпцийКластера",
@@ -811,7 +811,7 @@
 			]
 		},
 		{
-			"path": "cluster.jobs-unlock",
+			"path": "cluster.jobs.unlock",
 			"options": [],
 			"sets": [
 				"НаборОпцийКластера",
@@ -851,7 +851,7 @@
 			]
 		},
 		{
-			"path": "cluster.session-closed",
+			"path": "cluster.session.closed",
 			"options": [
 				{
 					"key": "timeout",
@@ -869,7 +869,7 @@
 			]
 		},
 		{
-			"path": "cluster.session-kill",
+			"path": "cluster.session.kill",
 			"options": [
 				{
 					"key": "no-lock",
@@ -897,7 +897,7 @@
 			]
 		},
 		{
-			"path": "cluster.session-list",
+			"path": "cluster.session.list",
 			"options": [
 				{
 					"key": "connections",
@@ -915,7 +915,7 @@
 			]
 		},
 		{
-			"path": "cluster.session-lock",
+			"path": "cluster.session.lock",
 			"options": [
 				{
 					"key": "denied-message",
@@ -932,7 +932,7 @@
 			]
 		},
 		{
-			"path": "cluster.session-unlock",
+			"path": "cluster.session.unlock",
 			"options": [],
 			"sets": [
 				"НаборОпцийКластера",
@@ -1037,7 +1037,7 @@
 			"sets": []
 		},
 		{
-			"path": "infobase.extensions-check",
+			"path": "infobase.extensions.check",
 			"options": [],
 			"sets": [
 				"НаборОпцийПодключения",
@@ -1046,7 +1046,7 @@
 			]
 		},
 		{
-			"path": "infobase.extensions-create",
+			"path": "infobase.extensions.create",
 			"options": [
 				{
 					"key": "overwrite",
@@ -1061,7 +1061,7 @@
 			]
 		},
 		{
-			"path": "infobase.extensions-delete",
+			"path": "infobase.extensions.delete",
 			"options": [],
 			"sets": [
 				"НаборОпцийПодключения",
@@ -1070,7 +1070,7 @@
 			]
 		},
 		{
-			"path": "infobase.extensions-list",
+			"path": "infobase.extensions.list",
 			"options": [
 				{
 					"key": "verbose",
@@ -1090,7 +1090,7 @@
 			]
 		},
 		{
-			"path": "infobase.extensions-set-options",
+			"path": "infobase.extensions.set-options",
 			"options": [
 				{
 					"key": "active",
@@ -1185,7 +1185,7 @@
 			"sets": []
 		},
 		{
-			"path": "infobase.scheduled-job-disable",
+			"path": "infobase.scheduled-job.disable",
 			"options": [],
 			"sets": [
 				"НаборОпцийПодключения",
@@ -1194,7 +1194,7 @@
 			]
 		},
 		{
-			"path": "infobase.scheduled-job-enable",
+			"path": "infobase.scheduled-job.enable",
 			"options": [],
 			"sets": [
 				"НаборОпцийПодключения",
@@ -1777,7 +1777,7 @@
 			]
 		},
 		{
-			"path": "validate.syntaxcheck",
+			"path": "validate.syntax-check",
 			"options": [
 				{
 					"key": "mode",
