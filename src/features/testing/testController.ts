@@ -1265,9 +1265,11 @@ export class TestingController implements vscode.Disposable {
 				this.vrunner.executeVRunnerCancellable(args, { env, token, onOutput, appendOverrides: false })
 			);
 		}
+		// Обёртки раннеров запускают oscript по имени: движок задаёт PATH
+		const processEnv = await runWithProject(root, () => this.vrunner.oneScriptEnv(env));
 		return runCancellableCommand(args[0], {
 			cwd: root,
-			env,
+			env: processEnv,
 			token,
 			onOutput
 		});

@@ -1,10 +1,13 @@
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { AdapterRunPlan, FileTreeLocation, TestFrameworkAdapter } from '../../features/testing/frameworkAdapter';
 import { findProjectFiles } from '../../features/artifacts/projectScan';
 import { TestingController } from '../../features/testing/testController';
 import type { VRunnerManager } from '../../shared/vrunnerManager';
+import { buildProcessCommand } from '../../utils/commandUtils';
 import { currentRoot, sameProjectRoot, type ProjectScanRoot } from '../../shared/workspaceProjects';
 
 /** Проект с подпроектом и зависимостями. */
@@ -39,6 +42,17 @@ class RecordingAdapter implements TestFrameworkAdapter {
 	public async buildRunPlan(): Promise<AdapterRunPlan> {
 		this.runRoots.push(currentRoot());
 		throw new Error('процесс в проверке не запускается');
+	}
+}
+
+/** Адаптер, чей прогон исполняет готовую команду оболочки. */
+class ShellAdapter extends RecordingAdapter {
+	constructor(private readonly command: string, private readonly report: string) {
+		super();
+	}
+
+	public override async buildRunPlan(): Promise<AdapterRunPlan> {
+		return { tool: 'shell', args: [this.command], reportTarget: { format: 'junit', path: this.report } };
 	}
 }
 
@@ -123,6 +137,43 @@ suite('тестирование: дерево текущего проекта', 
 			assert.strictEqual(adapter.runRoots.length, 1);
 			assert.ok(isRoot(PROJECT)(adapter.runRoots[0]));
 		} finally {
+			cancellation.dispose();
+			testing.dispose();
+		}
+	});
+
+	test('раннер OneScript получает окружение выбранного движка', async function () {
+		this.timeout(60_000);
+		const output = path.join(os.tmpdir(), `1cpt-onescript-env-${process.pid}.txt`);
+		const envRoots: (string | undefined)[] = [];
+		const vrunner = {
+			oneScriptEnv: async (extra?: NodeJS.ProcessEnv) => {
+				envRoots.push(currentRoot());
+				return { ...process.env, ...extra, ONESCRIPT_ENGINE: 'выбранный' };
+			},
+		} as unknown as VRunnerManager;
+		const adapter = new ShellAdapter(
+			buildProcessCommand('node', ['-e', `require('fs').writeFileSync(${JSON.stringify(output)}, process.env.ONESCRIPT_ENGINE ?? '')`]),
+			`${output}.xml`
+		);
+		const testing = new TestingController([adapter], vrunner, { current: true }, {
+			id: '1c-platform-tools-tests-engine-env',
+			scanRootOf,
+		});
+		const internals = testing as unknown as ControllerInternals;
+		const cancellation = new vscode.CancellationTokenSource();
+		try {
+			testing.setProject(PROJECT);
+			await testing.enqueueRebuild();
+			const [item] = fileItems(internals.controller);
+			assert.ok(item);
+
+			await internals.runHandler(new vscode.TestRunRequest([item]), cancellation.token);
+
+			assert.strictEqual(fs.readFileSync(output, 'utf8'), 'выбранный');
+			assert.ok(envRoots.length === 1 && isRoot(PROJECT)(envRoots[0]));
+		} finally {
+			fs.rmSync(output, { force: true });
 			cancellation.dispose();
 			testing.dispose();
 		}

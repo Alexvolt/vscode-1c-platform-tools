@@ -98,3 +98,39 @@ export function withBinDirFirst(env: NodeJS.ProcessEnv, binDir: string | undefin
 	result[pathKey] = current ? `${binDir}${path.delimiter}${current}` : binDir;
 	return result;
 }
+
+/**
+ * Имя переменной в окружении: на Windows регистр имён не важен, и прежнее имя
+ * сохраняется, иначе у процесса оказались бы две переменные.
+ *
+ * @param env - Окружение
+ * @param name - Искомое имя
+ * @returns Имя, под которым переменная уже есть, либо искомое
+ */
+export function envName(env: NodeJS.ProcessEnv, name: string): string {
+	const existing = process.platform === 'win32'
+		? Object.keys(env).find((key) => key.toUpperCase() === name.toUpperCase())
+		: undefined;
+	return existing ?? name;
+}
+
+/**
+ * Окружение дочернего процесса с выбранной установкой OneScript.
+ *
+ * Мало поставить её каталог первым в PATH: `ovm use` оставляет автозапуск cmd
+ * `set PATH=%OVM_OSCRIPTBIN%;%PATH%`, и вложенный `cmd /c oscript`, которым
+ * обёртки раннеров и vrunner запускают движок, взял бы установку из OVM. Та же
+ * переменная, указывающая на выбранный каталог, автозапуск обезвреживает.
+ *
+ * @param env - Исходное окружение
+ * @param binDir - Каталог bin выбранной установки (undefined — не менять)
+ * @returns Окружение для exec, spawn и задач
+ */
+export function withSelectedEngine(env: NodeJS.ProcessEnv, binDir: string | undefined): NodeJS.ProcessEnv {
+	if (binDir === undefined || binDir === '') {
+		return env;
+	}
+	const result = withBinDirFirst(env, binDir);
+	result[envName(result, 'OVM_OSCRIPTBIN')] = binDir;
+	return result;
+}

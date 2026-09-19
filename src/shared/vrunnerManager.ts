@@ -22,7 +22,7 @@ import { setTerminalOscriptBinDir } from './terminalEnv';
 import { dockerCommandRun, dockerContainerName } from './dockerRun';
 import { runCancellableCommand, CancellableProcessResult, type CommandRun } from './cancellableProcess';
 import { DEFAULT_PATHS, DEFAULT_VRUNNER, DEFAULT_ENV } from './pathDefaults';
-import { getOvmBinaryPath, getOvmBinDir, getOvmRootDir, getOpmBinaryCandidates, getOpmScriptPath, withBinDirFirst } from './ovmPaths';
+import { getOvmBinaryPath, getOvmBinDir, getOvmRootDir, getOpmBinaryCandidates, getOpmScriptPath, withSelectedEngine } from './ovmPaths';
 import {
 	BASE_AUTUMN_FILE,
 	BASE_ENV_FILE,
@@ -1376,7 +1376,7 @@ export class VRunnerManager {
 
 	/**
 	 * Окружение дочернего процесса: каталог выбранной установки OneScript идёт
-	 * в PATH первым.
+	 * в PATH первым и ставится в OVM_OSCRIPTBIN.
 	 *
 	 * Обёртки `opm.bat` и `vrunner.bat` запускают `oscript` по имени, поэтому без
 	 * этого движок взялся бы из той установки, что стоит в PATH раньше, а это не
@@ -1387,7 +1387,19 @@ export class VRunnerManager {
 	 * @returns Окружение для exec, spawn и задач
 	 */
 	private childEnv(extra?: NodeJS.ProcessEnv, binDir = this.oscriptBinDir()): NodeJS.ProcessEnv {
-		return withBinDirFirst({ ...process.env, ...extra }, binDir);
+		return withSelectedEngine({ ...process.env, ...extra }, binDir);
+	}
+
+	/**
+	 * Окружение процесса, который запускает инструменты OneScript по имени, с
+	 * тем же движком, что у команд vrunner и opm.
+	 *
+	 * @param extra - Дополнительные переменные окружения
+	 * @returns Окружение для spawn и задач
+	 */
+	public async oneScriptEnv(extra?: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+		await this.checkOscriptAvailable();
+		return this.childEnv(extra);
 	}
 
 	/**
