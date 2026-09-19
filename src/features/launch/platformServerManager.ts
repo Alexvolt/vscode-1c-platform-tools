@@ -21,7 +21,8 @@ import { VRunnerManager } from '../../shared/vrunnerManager';
 import { resolveFileIbAbsolutePath } from '../../shared/ibConnectionPath';
 import { logger } from '../../shared/logger';
 import { ProcessOutputDecoder } from '../../shared/processOutput';
-import { resolvePlatformBinary, defaultPlatformBasePaths } from '../../shared/platformBinary';
+import { PLATFORM_PATH_SETTING_TITLE, resolvePlatformBinaryInRoots } from '../../shared/platformBinary';
+import { projectPlatformRoots } from '../../shared/platformSettings';
 import {
 	PublicationOptions,
 	ServerUrls,
@@ -87,7 +88,6 @@ export interface ServerArgsSettings {
 
 /** Разобранные настройки сервера. */
 interface ServerSettings extends ServerArgsSettings {
-	platformPath: string;
 	platformVersion: string;
 	host: string;
 	port: number;
@@ -105,33 +105,6 @@ const READINESS_POLL_INTERVAL_MS = 500;
 const STOP_EXIT_TIMEOUT_MS = 8_000;
 /** Таймаут ожидания освобождения порта при остановке, мс. */
 const STOP_PORT_TIMEOUT_MS = 8_000;
-
-/**
- * Находит ibsrv в настроенном каталоге либо в каталогах установки по умолчанию.
- *
- * Возвращает найденный путь к бинарю и перебранные базовые каталоги (для
- * сообщения об ошибке).
- *
- * @param platformPath - Значение настройки `server.platformPath` (пусто — автоопределение)
- * @param requestedVersion - Запрошенная версия или её префикс
- * @returns Путь к ibsrv (или undefined) и список проверенных каталогов
- */
-function findServerBinary(
-	platformPath: string,
-	requestedVersion: string
-): { binary: string | undefined; bases: string[] } {
-	const configured = platformPath.trim();
-	const bases = configured ? [configured] : defaultPlatformBasePaths();
-	for (const base of bases) {
-		const binary = resolvePlatformBinary(base, 'ibsrv', {
-			requestedVersion: requestedVersion || undefined,
-		});
-		if (binary) {
-			return { binary, bases };
-		}
-	}
-	return { binary: undefined, bases };
-}
 
 /**
  * Собирает аргументы запуска ibsrv.
@@ -292,11 +265,13 @@ export class PlatformServerManager {
 		// Версия платформы: настройка сервера → --v8version активного профиля → наибольшая.
 		const requestedVersion = settings.platformVersion || (await this.vrunner.getActiveV8Version()) || '';
 
-		const { binary, bases } = findServerBinary(settings.platformPath, requestedVersion);
+		const bases = projectPlatformRoots(workspaceRoot);
+		const binary = resolvePlatformBinaryInRoots(bases, 'ibsrv', { requestedVersion: requestedVersion || undefined });
 		if (!binary) {
+			const version = requestedVersion ? ` версии ${requestedVersion}` : '';
 			vscode.window.showErrorMessage(
-				`Не найден ibsrv. Проверьте настройку «server.platformPath» (проверены: ${bases.join(', ')})` +
-				`${requestedVersion ? ` и версию «${requestedVersion}»` : ''}.`
+				`Не найден ibsrv${version}. Проверены каталоги: ${bases.join(', ')}. ` +
+				`Укажите каталог установки платформы в настройке ${PLATFORM_PATH_SETTING_TITLE}.`
 			);
 			return;
 		}
@@ -491,7 +466,6 @@ export class PlatformServerManager {
 	private readSettings(workspaceRoot: string | undefined): ServerSettings {
 		const config = projectConfiguration(workspaceRoot);
 		return {
-			platformPath: config.get<string>('server.path.platform', ''),
 			platformVersion: config.get<string>('server.platformVersion', ''),
 			host: config.get<string>('server.host', 'localhost'),
 			port: config.get<number>('server.port', 8314),

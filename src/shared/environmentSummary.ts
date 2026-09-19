@@ -27,6 +27,14 @@ export interface EnvironmentComponentInfo {
 	autoloadOff: boolean;
 }
 
+/** Каталог установки платформы и версии в нём. */
+export interface EnvironmentPlatformInstallation {
+	/** Каталог установки. */
+	root: string;
+	/** Версии от новых к старым; пусто, если каталогов версий нет. */
+	versions: string[];
+}
+
 /** Данные сводки: форматтер не ходит в файловую систему и не читает настройки. */
 export interface EnvironmentSummary {
 	/** Тип и выпуск ОС, без архитектуры. */
@@ -53,8 +61,10 @@ export interface EnvironmentSummary {
 	vrunner: EnvironmentToolInfo;
 	/** Загруженные компоненты. */
 	components: EnvironmentComponentInfo[];
-	/** Найденные версии платформы с rac. */
-	platformVersions: string[];
+	/** Найденные установки платформы. */
+	platformInstallations: EnvironmentPlatformInstallation[];
+	/** Путь к 1cestart. */
+	cestartPath?: string;
 	/** Путь к rac. */
 	racPath?: string;
 	/** Найденные версии 1С:EDT. */
@@ -101,9 +111,8 @@ export function formatEnvironmentSummary(summary: EnvironmentSummary): string {
 			lines.push(`  - ${formatComponentLine(component)}`);
 		}
 	}
-	lines.push(
-		`- Платформа 1С: ${summary.platformVersions.length > 0 ? summary.platformVersions.join(', ') : 'не найдена'}`
-	);
+	lines.push(`- Платформа 1С: ${formatPlatformInstallations(summary.platformInstallations)}`);
+	lines.push(`- 1cestart: ${summary.cestartPath ?? 'не найден'}`);
 	lines.push(`- rac: ${summary.racPath ?? 'не найден'}`);
 	lines.push(
 		`- 1С:EDT: ${summary.edtVersions.length > 0 ? summary.edtVersions.join(', ') : 'не найдена'}`
@@ -113,6 +122,21 @@ export function formatEnvironmentSummary(summary: EnvironmentSummary): string {
 	}
 	lines.push(formatIpcLine(summary));
 	return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Установки платформы: версии и каталог каждой установки.
+ *
+ * @param installations - Найденные установки
+ * @returns Текст после подписи
+ */
+export function formatPlatformInstallations(installations: readonly EnvironmentPlatformInstallation[]): string {
+	if (installations.length === 0) {
+		return 'не найдена';
+	}
+	return installations
+		.map((item) => (item.versions.length > 0 ? `${item.versions.join(', ')} в ${item.root}` : item.root))
+		.join('; ');
 }
 
 /**

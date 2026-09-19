@@ -14,6 +14,7 @@
 
 import { execFile } from 'node:child_process';
 import { logger } from '../../shared/logger';
+import { projectPlatformRoots } from '../../shared/platformSettings';
 import { DEFAULT_RAC_TIMEOUT_MS } from './constants';
 import { describeRacNotFound, findRac } from './racLocator';
 import {
@@ -68,7 +69,7 @@ export class RacClient {
 	 */
 	async run(args: string[], options: RacRunOptions = {}): Promise<RacResult> {
 		const settings = readClustersSettings();
-		const lookup = findRac(settings.platformPath, options.platformVersion);
+		const lookup = findRac(projectPlatformRoots(), options.platformVersion);
 		if (!lookup.binary) {
 			const message = describeRacNotFound(lookup);
 			log.error(message);

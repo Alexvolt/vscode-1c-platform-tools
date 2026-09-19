@@ -278,7 +278,6 @@ async function startServerDebug(manager: PlatformServerManager): Promise<void> {
 		type: DEBUG_TYPE,
 		request: 'attach',
 		name: 'Отладка 1С (автономный сервер)',
-		platformPath: process.platform === 'win32' ? '${env:PROGRAMFILES}/1cv8' : '/opt/1C/v8.3/x86_64',
 		rootProject: path.resolve(root, configuration),
 		debugServerHost: host,
 		debugServerPort: debugPort,

@@ -2,8 +2,8 @@
  * Поиск установленной 1С:EDT.
  *
  * EDT ставится своим установщиком с releases.1c.ru, поэтому расширение её не
- * загружает, а находит: настройка задаёт каталог установки, иначе перебираются
- * стандартные каталоги. Версия читается из имени каталога, а установок бывает
+ * загружает, а находит: настройка задаёт каталог установки, иначе EDT ищется
+ * там, куда её ставят 1C:EDT Start и установщик без интернета. Установок бывает
  * несколько - они не взаимозаменяемы, старшая версия проект младшей откроет,
  * наоборот нет.
  *
@@ -11,11 +11,13 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
+import { envValue, subdirectoryNames, uniquePaths } from './installPaths';
 
 /** Найденная установка EDT. */
 export interface EdtInstallation {
-	/** Версия из имени каталога: `2026.1`. */
+	/** Версия: `2026.1`. */
 	version: string;
 	/** Каталог установки, в котором лежит исполняемый файл. */
 	directory: string;
@@ -33,6 +35,24 @@ export interface EdtLookup {
 	bases: string[];
 }
 
+/** Окружение поиска: в тестах подставляется. */
+export interface EdtSearchOptions {
+	/** Операционная система (по умолчанию process.platform). */
+	readonly platform?: NodeJS.Platform;
+	/** Окружение (по умолчанию process.env). */
+	readonly env?: NodeJS.ProcessEnv;
+	/** Домашний каталог (по умолчанию os.homedir()). */
+	readonly home?: string;
+}
+
+/** Установка из реестра 1C:EDT Start. */
+export interface EdtRegisteredProduct {
+	/** Путь к исполняемому файлу среды. */
+	readonly location: string;
+	/** Версия из реестра, если есть. */
+	readonly version?: string;
+}
+
 /** Имя исполняемого файла консоли EDT. */
 function cliFileName(platform: NodeJS.Platform): string {
 	return platform === 'win32' ? '1cedtcli.exe' : '1cedtcli';
@@ -44,17 +64,172 @@ function guiFileName(platform: NodeJS.Platform): string {
 }
 
 /**
- * Каталоги, где установщик EDT размещает версии.
+ * Каталог данных 1C:EDT Start: настройки, реестр сред, установки, рабочие области.
  *
  * @param platform - Операционная система
- * @returns Каталоги, внутри которых лежат установки версий
+ * @param env - Окружение
+ * @param home - Домашний каталог
+ * @returns Путь к каталогу `1cedtstart`
  */
-export function defaultEdtBasePaths(platform: NodeJS.Platform = process.platform): string[] {
+export function edtStartDataDirectory(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+	home: string = os.homedir()
+): string {
 	if (platform === 'win32') {
-		const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-		return [path.join(localAppData, '1C', '1cedtstart', 'installations')];
+		const userProfile = envValue(env, 'USERPROFILE') ?? home;
+		const localAppData = envValue(env, 'LOCALAPPDATA') ?? path.join(userProfile, 'AppData', 'Local');
+		return path.join(localAppData, '1C', '1cedtstart');
 	}
-	return ['/opt/1C/1CE/components', path.join(process.env.HOME || '', '.local', 'share', '1C', '1cedtstart', 'installations')];
+	if (platform === 'darwin') {
+		return path.join(home, 'Library', 'Application Support', '1C', '1cedtstart');
+	}
+	return path.join(home, '.local', 'share', '1C', '1cedtstart');
+}
+
+/**
+ * Каталоги компонентов установщика 1С: туда ставятся EDT без интернета и сам 1C:EDT Start.
+ *
+ * @param platform - Операционная система
+ * @param env - Окружение
+ * @returns Каталоги `1C/1CE/components`
+ */
+export function edtComponentRoots(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env
+): string[] {
+	if (platform === 'win32') {
+		const programFiles = [envValue(env, 'ProgramW6432'), envValue(env, 'ProgramFiles') ?? 'C:\\Program Files'];
+		return uniquePaths(
+			programFiles.filter((dir): dir is string => dir !== undefined).map((dir) => path.join(dir, '1C', '1CE', 'components')),
+			platform
+		);
+	}
+	if (platform === 'darwin') {
+		return ['/Applications/1C/1CE/components'];
+	}
+	return ['/opt/1C/1CE/components'];
+}
+
+/**
+ * Реестры установленных сред 1C:EDT Start: свой у пользователя и общий, если стартер
+ * ставит среды для всех пользователей.
+ *
+ * @param platform - Операционная система
+ * @param env - Окружение
+ * @param home - Домашний каталог
+ * @returns Пути к `products.json`
+ */
+export function edtStartRegistries(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+	home: string = os.homedir()
+): string[] {
+	const own = path.join(edtStartDataDirectory(platform, env, home), 'products.json');
+	const programData = platform === 'win32' ? envValue(env, 'ProgramData') ?? envValue(env, 'ALLUSERSPROFILE') : undefined;
+	return programData ? [own, path.join(programData, '1C', '1CE', '1cedtstart', 'products.json')] : [own];
+}
+
+/**
+ * Установки из реестра 1C:EDT Start (`products.json`).
+ *
+ * @param text - Содержимое реестра
+ * @returns Исполняемые файлы сред с версиями; при ошибке разбора пусто
+ */
+export function edtProductsFromRegistry(text: string): EdtRegisteredProduct[] {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return [];
+	}
+	const data = (parsed as { data?: unknown } | null)?.data;
+	if (!Array.isArray(data)) {
+		return [];
+	}
+	const out: EdtRegisteredProduct[] = [];
+	for (const item of data as unknown[]) {
+		const product = item as { location?: unknown; installedVersion?: { label?: unknown; name?: unknown } } | null;
+		if (typeof product?.location !== 'string' || product.location.trim() === '') {
+			continue;
+		}
+		const label = product.installedVersion?.label;
+		const name = product.installedVersion?.name;
+		const version =
+			(typeof label === 'string' ? edtVersionFromDirectory(label) : undefined) ??
+			(typeof name === 'string' ? edtVersionFromDirectory(name) : undefined);
+		out.push({ location: product.location, ...(version ? { version } : {}) });
+	}
+	return out;
+}
+
+/**
+ * Каталог сред разработки из настроек 1C:EDT Start (поле `productsRoot`).
+ *
+ * @param text - Содержимое `preferences.json`
+ * @param platform - Операционная система
+ * @returns Путь или undefined
+ */
+export function productsRootFromPreferences(text: string, platform: NodeJS.Platform = process.platform): string | undefined {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	const root = (parsed as { productsRoot?: unknown } | null)?.productsRoot;
+	return typeof root === 'string' && root.trim() !== '' ? fileUrlToPath(root.trim(), platform) : undefined;
+}
+
+/**
+ * Путь из ссылки `file:` в записи целевой платформы, а не той, где идёт код.
+ *
+ * @param url - `file:///C:/Program%20Files/Java/bin/` либо уже путь
+ * @param platform - Операционная система
+ */
+export function fileUrlToPath(url: string, platform: NodeJS.Platform): string {
+	if (!url.startsWith('file:')) {
+		return url;
+	}
+	const decoded = decodeURIComponent(url.replace(/^file:\/\/\/?/, ''));
+	if (platform === 'win32') {
+		return decoded.replace(/\//g, '\\');
+	}
+	return `/${decoded.replace(/^\/+/, '')}`;
+}
+
+/** Текст файла или undefined, если его нет. */
+function readText(filePath: string): string | undefined {
+	try {
+		return fs.readFileSync(filePath, 'utf8');
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Каталоги, внутри которых лежат установки версий EDT.
+ *
+ * Каталог сред разработки из настроек 1C:EDT Start, его каталог по умолчанию и
+ * каталоги компонентов установщика.
+ *
+ * @param options - Операционная система и окружение
+ * @returns Каталоги без повторов
+ */
+export function defaultEdtBasePaths(options: EdtSearchOptions = {}): string[] {
+	const platform = options.platform ?? process.platform;
+	const env = options.env ?? process.env;
+	const dataDirectory = edtStartDataDirectory(platform, env, options.home ?? os.homedir());
+	const preferences = readText(path.join(dataDirectory, 'preferences.json'));
+	const productsRoot = preferences === undefined ? undefined : productsRootFromPreferences(preferences, platform);
+	return uniquePaths(
+		[
+			...(productsRoot ? [productsRoot] : []),
+			path.join(dataDirectory, 'installations'),
+			...edtComponentRoots(platform, env),
+		],
+		platform
+	);
 }
 
 /**
@@ -71,21 +246,29 @@ export function edtVersionFromDirectory(name: string): string | undefined {
 }
 
 /**
+ * Версия по пути к каталогу установки: у 1C:EDT Start исполняемые файлы лежат
+ * в подкаталоге `1cedt`, а версия в имени каталога над ним.
+ */
+function versionFromPath(directory: string): string {
+	return edtVersionFromDirectory(path.basename(directory)) ?? edtVersionFromDirectory(path.basename(path.dirname(directory))) ?? '';
+}
+
+/**
  * Сравнивает версии EDT: `2026.1` новее `2025.2`.
  *
  * @returns Отрицательное, если a старше b
  */
 export function compareEdtVersions(a: string, b: string): number {
-	const [aYear, aRelease] = a.split('.').map(Number);
-	const [bYear, bRelease] = b.split('.').map(Number);
-	return aYear !== bYear ? aYear - bYear : (aRelease || 0) - (bRelease || 0);
+	const [aYear = 0, aRelease = 0] = a.split('.').map((part) => Number(part) || 0);
+	const [bYear = 0, bRelease = 0] = b.split('.').map((part) => Number(part) || 0);
+	return aYear !== bYear ? aYear - bYear : aRelease - bRelease;
 }
 
 /**
  * Ищет `1cedtcli` в каталоге установки.
  *
  * Исполняемый файл лежит либо в самом каталоге, либо в подкаталоге `1cedt`:
- * так раскладывает установщик на Windows.
+ * так раскладывает 1C:EDT Start.
  */
 function cliInDirectory(directory: string, platform: NodeJS.Platform): { cli: string; gui?: string } | undefined {
 	for (const candidate of [directory, path.join(directory, '1cedt')]) {
@@ -102,53 +285,60 @@ function cliInDirectory(directory: string, platform: NodeJS.Platform): { cli: st
 /**
  * Находит установленные версии EDT.
  *
- * Настроенный каталог главнее: он проверяется и как каталог одной установки, и
- * как каталог со списком версий. Установка без `1cedtcli` пропускается: список
- * версий у установщика переживает удаление самой EDT.
+ * Настроенный каталог единственный: он проверяется и как каталог одной установки,
+ * и как каталог со списком версий. Без настройки сначала читаются реестры
+ * 1C:EDT Start, затем каталоги установок. Установка без `1cedtcli` пропускается:
+ * каталог версии переживает удаление самой EDT.
  *
- * @param configuredPath - Настройка каталога установки; пусто - стандартные каталоги
- * @param platform - Операционная система
+ * @param configuredPath - Настройка каталога установки; пусто - стандартные места
+ * @param options - Операционная система и окружение
  * @returns Найденные установки и перебранные каталоги
  */
-export function findEdtInstallations(
-	configuredPath = '',
-	platform: NodeJS.Platform = process.platform
-): EdtLookup {
+export function findEdtInstallations(configuredPath = '', options: EdtSearchOptions = {}): EdtLookup {
+	const platform = options.platform ?? process.platform;
+	const env = options.env ?? process.env;
+	const home = options.home ?? os.homedir();
 	const configured = configuredPath.trim();
-	const bases = configured ? [configured] : defaultEdtBasePaths(platform);
-	const installations: EdtInstallation[] = [];
+	const bases = configured ? [configured] : defaultEdtBasePaths({ platform, env, home });
+	const found = new Map<string, EdtInstallation>();
+	const add = (installation: EdtInstallation): void => {
+		const key = platform === 'win32' ? installation.cli.toLowerCase() : installation.cli;
+		if (!found.has(key)) {
+			found.set(key, installation);
+		}
+	};
+
+	const registered = configured
+		? []
+		: edtStartRegistries(platform, env, home).flatMap((registry) => {
+				const text = readText(registry);
+				return text === undefined ? [] : edtProductsFromRegistry(text);
+			});
+	for (const product of registered) {
+		const directory = path.dirname(product.location);
+		const own = cliInDirectory(directory, platform);
+		if (own) {
+			add({ version: product.version ?? versionFromPath(directory), directory: path.dirname(own.cli), ...own });
+		}
+	}
 
 	for (const base of bases) {
 		const own = cliInDirectory(base, platform);
 		if (own) {
-			installations.push({
-				version: edtVersionFromDirectory(path.basename(base)) ?? '',
-				directory: path.dirname(own.cli),
-				...own,
-			});
+			add({ version: versionFromPath(path.dirname(own.cli)), directory: path.dirname(own.cli), ...own });
 			continue;
 		}
 
-		let entries: fs.Dirent[];
-		try {
-			entries = fs.readdirSync(base, { withFileTypes: true });
-		} catch {
-			continue;
-		}
-
-		for (const entry of entries) {
-			if (!entry.isDirectory()) {
-				continue;
-			}
-			const version = edtVersionFromDirectory(entry.name);
-			const found = cliInDirectory(path.join(base, entry.name), platform);
-			if (version && found) {
-				installations.push({ version, directory: path.dirname(found.cli), ...found });
+		for (const name of subdirectoryNames(base)) {
+			const version = edtVersionFromDirectory(name);
+			const installation = cliInDirectory(path.join(base, name), platform);
+			if (version && installation) {
+				add({ version, directory: path.dirname(installation.cli), ...installation });
 			}
 		}
 	}
 
-	installations.sort((a, b) => compareEdtVersions(b.version, a.version));
+	const installations = [...found.values()].sort((a, b) => compareEdtVersions(b.version, a.version));
 	return { installations, bases };
 }
 

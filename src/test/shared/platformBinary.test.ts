@@ -102,9 +102,17 @@ suite('platformBinary', () => {
 			'/opt/1cv8/x86_64',
 			'/opt/1C/v8.3/x86_64',
 		]);
-		const win = defaultPlatformBasePaths('win32');
-		assert.strictEqual(win.length, 1);
-		assert.ok(win[0].endsWith(path.join('', '1cv8')));
+		const env = {
+			ProgramFiles: path.join('C:', 'Program Files'),
+			'ProgramFiles(x86)': path.join('C:', 'Program Files (x86)'),
+			LOCALAPPDATA: path.join('C:', 'Users', 'user', 'AppData', 'Local'),
+		};
+		assert.deepStrictEqual(defaultPlatformBasePaths('win32', 'x64', env), [
+			path.join(env.ProgramFiles, '1cv8'),
+			path.join(env['ProgramFiles(x86)'], '1cv8'),
+			path.join(env.LOCALAPPDATA, 'Programs', '1cv8_x64'),
+			path.join(env.LOCALAPPDATA, 'Programs', '1cv8'),
+		]);
 	});
 
 	test('defaultPlatformBasePaths: каталог своей архитектуры идёт первым', () => {

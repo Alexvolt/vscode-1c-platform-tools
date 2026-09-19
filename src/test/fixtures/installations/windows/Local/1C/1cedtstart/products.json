@@ -1,0 +1,15 @@
+{
+  "version" : "1.1",
+  "data" : [ {
+    "id" : "7b6d7883-ce07-4026-8c47-64c1edcc1d30",
+    "label" : "1C:EDT",
+    "location" : "Z:\\1C\\Среды\\installations\\1C_EDT 2024.2\\1cedt\\1cedt.exe",
+    "name" : "epp.package.1cedt",
+    "installedVersion" : {
+      "id" : "7b6d7883-ce07-4026-8c47-64c1edcc1d30",
+      "label" : "2024.2",
+      "name" : "2024.2.6"
+    },
+    "local" : false
+  } ]
+}

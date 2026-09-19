@@ -5,9 +5,13 @@ import * as path from 'node:path';
 import {
 	compareEdtVersions,
 	defaultEdtBasePaths,
+	edtComponentRoots,
+	edtProductsFromRegistry,
+	edtStartDataDirectory,
 	edtVersionFromDirectory,
 	findEdtInstallations,
 	pickEdtInstallation,
+	productsRootFromPreferences,
 } from '../../shared/edtLocator';
 
 /** Каталог с установками EDT: имя каталога, наличие исполняемого файла. */
@@ -44,7 +48,7 @@ suite('поиск установленной EDT', () => {
 			{ name: '1C_EDT 2025.1', withCli: false, nested: true },
 		]);
 
-		const found = findEdtInstallations(base, 'win32');
+		const found = findEdtInstallations(base, { platform: 'win32' });
 
 		assert.deepStrictEqual(
 			found.installations.map((item) => item.version),
@@ -61,7 +65,7 @@ suite('поиск установленной EDT', () => {
 			{ name: '1C_EDT 2024.1', withCli: true, nested: true },
 		]);
 
-		const found = findEdtInstallations(base, 'win32');
+		const found = findEdtInstallations(base, { platform: 'win32' });
 
 		assert.deepStrictEqual(
 			found.installations.map((item) => item.version),
@@ -72,7 +76,7 @@ suite('поиск установленной EDT', () => {
 	test('настройка может указывать прямо на установку', () => {
 		const base = installations([{ name: '1C_EDT 2026.1', withCli: true }]);
 
-		const found = findEdtInstallations(path.join(base, '1C_EDT 2026.1'), 'win32');
+		const found = findEdtInstallations(path.join(base, '1C_EDT 2026.1'), { platform: 'win32' });
 
 		assert.strictEqual(found.installations.length, 1);
 		assert.strictEqual(found.installations[0].version, '2026.1');
@@ -83,7 +87,7 @@ suite('поиск установленной EDT', () => {
 			{ name: '1C_EDT 2026.1', withCli: true, nested: true },
 			{ name: '1C_EDT 2025.2', withCli: true, nested: true },
 		]);
-		const { installations: found } = findEdtInstallations(base, 'win32');
+		const { installations: found } = findEdtInstallations(base, { platform: 'win32' });
 
 		assert.strictEqual(pickEdtInstallation(found)?.version, '2026.1');
 		assert.strictEqual(pickEdtInstallation(found, '2025')?.version, '2025.2');
@@ -91,8 +95,69 @@ suite('поиск установленной EDT', () => {
 		assert.strictEqual(pickEdtInstallation(found, '2019'), undefined);
 	});
 
-	test('каталоги поиска зависят от системы', () => {
-		assert.ok(defaultEdtBasePaths('win32').some((base) => base.includes('1cedtstart')));
-		assert.ok(defaultEdtBasePaths('linux').some((base) => base.startsWith('/opt/1C')));
+	test('каталоги данных 1C:EDT Start и компонентов установщика зависят от системы', () => {
+		assert.strictEqual(
+			edtStartDataDirectory('linux', {}, '/home/user'),
+			path.join('/home/user', '.local', 'share', '1C', '1cedtstart')
+		);
+		assert.strictEqual(
+			edtStartDataDirectory('darwin', {}, '/Users/user'),
+			path.join('/Users/user', 'Library', 'Application Support', '1C', '1cedtstart')
+		);
+		assert.deepStrictEqual(edtComponentRoots('linux'), ['/opt/1C/1CE/components']);
+		assert.deepStrictEqual(edtComponentRoots('darwin'), ['/Applications/1C/1CE/components']);
+	});
+});
+
+suite('EDT на машине Windows из фикстуры', () => {
+	const windows = path.join(__dirname, '..', '..', '..', 'src', 'test', 'fixtures', 'installations', 'windows');
+	const dataDirectory = path.join(windows, 'Local', '1C', '1cedtstart');
+	const components = path.join(windows, 'ProgramFiles', '1C', '1CE', 'components');
+	const options = {
+		platform: 'win32' as const,
+		env: {
+			LOCALAPPDATA: path.join(windows, 'Local'),
+			ProgramW6432: path.join(windows, 'ProgramFiles'),
+			ProgramFiles: path.join(windows, 'ProgramFiles'),
+			ProgramData: path.join(windows, 'ProgramData'),
+		},
+		home: windows,
+	};
+
+	test('реестр 1C:EDT Start отдаёт исполняемый файл среды и её версию', () => {
+		const text = fs.readFileSync(path.join(dataDirectory, 'products.json'), 'utf8');
+		assert.deepStrictEqual(edtProductsFromRegistry(text), [
+			{ location: 'Z:\\1C\\Среды\\installations\\1C_EDT 2024.2\\1cedt\\1cedt.exe', version: '2024.2' },
+		]);
+		assert.deepStrictEqual(edtProductsFromRegistry('не json'), []);
+	});
+
+	test('каталог сред разработки берётся из настроек 1C:EDT Start', () => {
+		const text = fs.readFileSync(path.join(dataDirectory, 'preferences.json'), 'utf8');
+		assert.strictEqual(productsRootFromPreferences(text, 'win32'), 'Z:\\1C\\Среды\\installations\\');
+		assert.deepStrictEqual(defaultEdtBasePaths(options), [
+			'Z:\\1C\\Среды\\installations',
+			path.join(dataDirectory, 'installations'),
+			components,
+		]);
+	});
+
+	test('находятся и установки 1C:EDT Start, и EDT из каталога компонентов', () => {
+		const { installations } = findEdtInstallations('', options);
+
+		assert.deepStrictEqual(
+			installations.map((item) => [item.version, item.cli]),
+			[
+				['2026.1', path.join(dataDirectory, 'installations', '1C_EDT 2026.1', '1cedt', '1cedtcli.exe')],
+				['2025.1', path.join(components, '1c-edt-2025.1.4+15-x86_64', '1cedtcli.exe')],
+			]
+		);
+		assert.strictEqual(installations[1].gui, path.join(components, '1c-edt-2025.1.4+15-x86_64', '1cedt.exe'));
+	});
+
+	test('заданный каталог единственный', () => {
+		const { installations } = findEdtInstallations(components, options);
+
+		assert.deepStrictEqual(installations.map((item) => item.version), ['2025.1']);
 	});
 });

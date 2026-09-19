@@ -1,11 +1,17 @@
 import * as assert from 'node:assert';
+import * as path from 'node:path';
 import {
 	edtStartArgs,
 	edtStartFromRegistryOutput,
-	fileUrlToPath,
+	findEdtStart,
 	jvmFromPreferences,
 	launchEdtStart,
 } from '../../features/ibases/edtStart';
+import { edtComponentRoots, fileUrlToPath } from '../../shared/edtLocator';
+
+const COMPONENTS = path.join(
+	__dirname, '..', '..', '..', 'src', 'test', 'fixtures', 'installations', 'windows', 'ProgramFiles'
+);
 
 const URL = 'e1cedt://start/open?projectId=1&projectName=%D0%91%D0%B0%D0%B7%D0%B0&infobaseId=1&platformVersion=8.3';
 
@@ -77,6 +83,28 @@ suite('Запуск 1cedtstart по ссылке базы', () => {
 		});
 		assert.ok(result.ok);
 		assert.deepStrictEqual(spawned, [{ command: exe, args: [] }]);
+	});
+
+	test('без обработчика схемы стартер находится в каталоге компонентов установщика', () => {
+		const roots = edtComponentRoots('win32', { ProgramW6432: COMPONENTS, ProgramFiles: COMPONENTS });
+		assert.deepStrictEqual(roots, [path.join(COMPONENTS, '1C', '1CE', 'components')]);
+		assert.strictEqual(
+			findEdtStart({ platform: 'win32', registryQuery: () => '', componentRoots: roots }),
+			path.join(roots[0], '1c-edt-start-0.9.0+213-x86_64', '1cedtstart.exe')
+		);
+	});
+
+	test('на macOS стартер в каталоге компонентов не ищется', () => {
+		const roots = edtComponentRoots('win32', { ProgramW6432: COMPONENTS, ProgramFiles: COMPONENTS });
+		assert.strictEqual(findEdtStart({ platform: 'darwin', componentRoots: roots, exists: () => true }), undefined);
+		const result = launchEdtStart(URL, {
+			platform: 'darwin',
+			componentRoots: roots,
+			exists: () => true,
+			spawn: () => assert.fail('на macOS запускать нечего'),
+		});
+		assert.ok(!result.ok);
+		assert.ok(result.message.includes('macOS'));
 	});
 
 	test('без стартера запуск отвечает сообщением, а не падает', () => {

@@ -33,21 +33,21 @@ suite('поиск утилиты rac', () => {
 		const expected = path.join(base, '8.3.27.1936', 'bin', RAC_FILE);
 		touch(expected);
 
-		assert.strictEqual(findRac(base).binary, expected);
+		assert.strictEqual(findRac([base]).binary, expected);
 	});
 
 	test('раскладка пакетов Linux: бинарь прямо в каталоге версии', () => {
 		const expected = path.join(base, '8.3.27.1936', RAC_FILE);
 		touch(expected);
 
-		assert.strictEqual(findRac(base).binary, expected);
+		assert.strictEqual(findRac([base]).binary, expected);
 	});
 
 	test('раскладка установщика: бинарь в самом каталоге установки', () => {
 		const expected = path.join(base, RAC_FILE);
 		touch(expected);
 
-		assert.strictEqual(findRac(base).binary, expected);
+		assert.strictEqual(findRac([base]).binary, expected);
 	});
 
 	test('без запроса версии берётся наибольшая', () => {
@@ -55,7 +55,7 @@ suite('поиск утилиты rac', () => {
 		const newest = path.join(base, '8.3.27.1936', 'bin', RAC_FILE);
 		touch(newest);
 
-		assert.strictEqual(findRac(base).binary, newest);
+		assert.strictEqual(findRac([base]).binary, newest);
 	});
 
 	test('запрошенная версия учитывается, префикс тоже', () => {
@@ -63,18 +63,18 @@ suite('поиск утилиты rac', () => {
 		touch(older);
 		touch(path.join(base, '8.3.27.1936', 'bin', RAC_FILE));
 
-		assert.strictEqual(findRac(base, '8.3.24.1548').binary, older);
-		assert.strictEqual(findRac(base, '8.3.24').binary, older);
+		assert.strictEqual(findRac([base], '8.3.24.1548').binary, older);
+		assert.strictEqual(findRac([base], '8.3.24').binary, older);
 	});
 
 	test('версия, которой нет, не подменяется другой', () => {
 		touch(path.join(base, '8.3.27.1936', 'bin', RAC_FILE));
 
-		assert.strictEqual(findRac(base, '8.3.22').binary, undefined);
+		assert.strictEqual(findRac([base], '8.3.22').binary, undefined);
 	});
 
 	test('каталог без утилиты возвращает пустой результат и перечисляет, где искали', () => {
-		const lookup = findRac(base);
+		const lookup = findRac([base]);
 
 		assert.strictEqual(lookup.binary, undefined);
 		assert.deepStrictEqual(lookup.bases, [base]);

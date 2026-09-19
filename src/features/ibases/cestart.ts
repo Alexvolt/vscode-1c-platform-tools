@@ -9,7 +9,7 @@
 import { spawn, type SpawnOptions } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { defaultPlatformBasePaths } from '../../shared/platformBinary';
+import { PLATFORM_PATH_SETTING_TITLE, platformInstallRoots } from '../../shared/platformBinary';
 
 /** Режим запуска стартера. */
 export type CestartMode = 'ENTERPRISE' | 'DESIGNER';
@@ -24,14 +24,12 @@ export interface CestartLookup {
 
 /** Опции поиска 1cestart. */
 export interface FindCestartOptions {
-	/** Дополнительные корни установки (например `clusters.path.platform`). */
-	readonly extraRoots?: readonly string[];
+	/** Каталоги установки платформы; по умолчанию найденные расширением. */
+	readonly roots?: readonly string[];
 	/** Платформа ОС. */
 	readonly platform?: NodeJS.Platform;
 	/** Проверка файла: в тестах подставляется, чтобы не трогать диск. */
 	readonly exists?: (filePath: string) => boolean;
-	/** Корни установки по умолчанию. */
-	readonly defaultRoots?: readonly string[];
 }
 
 /** Процесс, которому достаточно отпустить родительский. */
@@ -132,26 +130,6 @@ export function shouldPassIbName(name: string, names: readonly string[]): boolea
 }
 
 /**
- * Корни установки, в которых лежит `common/1cestart`.
- *
- * @param options - Корни и ОС
- * @returns Уникальные каталоги в порядке проверки
- */
-function searchRoots(options: FindCestartOptions): string[] {
-	const platform = options.platform ?? process.platform;
-	const configured = (options.extraRoots ?? []).map((root) => root.trim()).filter(Boolean);
-	const defaults = options.defaultRoots ?? defaultPlatformBasePaths(platform);
-	const extra: string[] = [];
-	if (platform === 'win32') {
-		const x86 = process.env['ProgramFiles(x86)'];
-		if (x86) {
-			extra.push(path.join(x86, '1cv8'));
-		}
-	}
-	return [...new Set([...configured, ...defaults, ...extra])];
-}
-
-/**
  * Кандидаты пути к 1cestart для одного корня установки.
  *
  * Стартер живёт в `common` рядом с каталогами версий. Если в настройке указали
@@ -191,7 +169,7 @@ export function findCestart(options: FindCestartOptions = {}): CestartLookup {
 	const platform = options.platform ?? process.platform;
 	const fileName = cestartFileName(platform);
 	const exists = options.exists ?? ((filePath: string) => fs.existsSync(filePath));
-	const bases = searchRoots(options);
+	const bases = [...(options.roots ?? platformInstallRoots({ platform }))];
 	for (const base of bases) {
 		for (const candidate of cestartCandidates(base, fileName)) {
 			if (exists(candidate)) {
@@ -271,6 +249,9 @@ export function spawnDetached(
 	child.unref();
 }
 
+/** Ответ, когда стартер не найден. */
+export const CESTART_NOT_FOUND_MESSAGE = `Не найден 1cestart. Укажите каталог установки платформы в настройке ${PLATFORM_PATH_SETTING_TITLE}.`;
+
 /** Исход запуска базы. */
 export type LaunchInfobaseResult =
 	| { readonly ok: true; readonly binary: string; readonly args: readonly string[] }
@@ -278,7 +259,7 @@ export type LaunchInfobaseResult =
 
 /** Зависимости запуска — чтобы команда не ходила в файловую систему в тестах. */
 export interface LaunchInfobaseDeps {
-	readonly extraRoots?: readonly string[];
+	readonly roots?: readonly string[];
 	readonly find?: (options: FindCestartOptions) => CestartLookup;
 	readonly spawn?: (command: string, args: readonly string[]) => void;
 	readonly connect?: string;
@@ -304,12 +285,9 @@ export function launchInfobase(
 		return { ok: false, message: 'Не выбрана информационная база.' };
 	}
 	const find = deps.find ?? findCestart;
-	const lookup = find({ extraRoots: deps.extraRoots });
+	const lookup = find({ roots: deps.roots });
 	if (!lookup.binary) {
-		return {
-			ok: false,
-			message: 'Не найден 1cestart. Укажите каталог установки платформы в настройках.',
-		};
+		return { ok: false, message: CESTART_NOT_FOUND_MESSAGE };
 	}
 	const missingIb = missingFileInfobase(deps.connect, deps.exists);
 	if (missingIb) {
@@ -334,13 +312,10 @@ export function launchInfobase(
  * @param deps - Поиск стартера и запуск процесса
  * @returns Успех с командой либо сообщение, почему не вышло
  */
-export function launchStartWindow(deps: Pick<LaunchInfobaseDeps, 'extraRoots' | 'find' | 'spawn'> = {}): LaunchInfobaseResult {
-	const lookup = (deps.find ?? findCestart)({ extraRoots: deps.extraRoots });
+export function launchStartWindow(deps: Pick<LaunchInfobaseDeps, 'roots' | 'find' | 'spawn'> = {}): LaunchInfobaseResult {
+	const lookup = (deps.find ?? findCestart)({ roots: deps.roots });
 	if (!lookup.binary) {
-		return {
-			ok: false,
-			message: 'Не найден 1cestart. Укажите каталог установки платформы в настройках.',
-		};
+		return { ok: false, message: CESTART_NOT_FOUND_MESSAGE };
 	}
 	const run = deps.spawn ?? ((command: string, spawnArgs: readonly string[]) => spawnDetached(command, spawnArgs));
 	run(lookup.binary, []);
