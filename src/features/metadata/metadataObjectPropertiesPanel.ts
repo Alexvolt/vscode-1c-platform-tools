@@ -128,6 +128,10 @@ interface MdObjectStructureDto {
 	recalculations?: unknown[];
 	addressingAttributes?: unknown[];
 	standardAttributes?: unknown[];
+	/** Подписи стандартных реквизитов: имя → подпись. */
+	standardAttributeSynonyms?: Record<string, string>;
+	/** Стандартные табличные части: имя, подпись и подписи их стандартных реквизитов. */
+	standardTabularSections?: unknown[];
 	operations?: unknown[];
 	urlTemplates?: unknown[];
 	channels?: unknown[];
@@ -140,7 +144,20 @@ interface MetadataPanelTab {
 	id: string;
 	title: string;
 	count?: number;
-	render: 'overview' | 'named' | 'tabular' | 'list' | 'kv' | 'json' | 'subsystemContent' | 'subsystems' | 'refContent' | 'commandInterface' | 'roleRights' | 'edit';
+	render:
+		| 'overview'
+		| 'named'
+		| 'tabular'
+		| 'list'
+		| 'kv'
+		| 'json'
+		| 'subsystemContent'
+		| 'subsystems'
+		| 'refContent'
+		| 'commandInterface'
+		| 'roleRights'
+		| 'objectRights'
+		| 'edit';
 	data?: unknown;
 }
 
@@ -280,6 +297,25 @@ interface MetadataPanelRoleRightsModel {
 	objects: Array<{ name: string; rights: Array<{ name: string; value: boolean }> }>;
 	/** Все объекты конфигурации по видам: строки кросс-таблицы. */
 	allObjects: Record<string, string[]>;
+}
+
+/** Права ролей на объект от md-sparrow: набор прав вида, связи между ними и права каждой роли. */
+interface MetadataPanelObjectRightsModel {
+	object: string;
+	kind: string;
+	rights: string[];
+	/** Право -> права, которые выдаются вместе с ним. */
+	requires: Record<string, string[]>;
+	editable: boolean;
+	roles: Array<{
+		name: string;
+		synonym?: string;
+		setForNewObjects: boolean;
+		granted: string[];
+		restrictions: Record<string, Array<{ fields: string[]; condition: string }>>;
+		children: Array<{ name: string; rights: Record<string, boolean> }>;
+		readonlyReason?: string;
+	}>;
 }
 
 interface MetadataPanelViewModel {
@@ -1219,7 +1255,8 @@ function buildTabs(
 	subsystems?: MetadataPanelSubsystemsModel,
 	refContent?: MetadataPanelRefContentModel,
 	commandInterface?: MetadataPanelCommandInterfaceModel,
-	roleRights?: MetadataPanelRoleRightsModel
+	roleRights?: MetadataPanelRoleRightsModel,
+	objectRights = false
 ): MetadataPanelTab[] {
 	const profileTabs = buildProfileTabs(objectType, props, structure).filter(
 		// Дерево состава с флажками замещает вкладку-просмотр состава
@@ -1244,7 +1281,54 @@ function buildTabs(
 	if (roleRights) {
 		out.push({ id: 'roleRights', title: 'Права', render: 'roleRights' });
 	}
+	if (objectRights) {
+		// Права ролей панель запрашивает, когда вкладку открыли
+		out.push({ id: 'objectRights', title: 'Права', render: 'objectRights', data: objectRightsCaptions(structure) });
+	}
 	return out;
+}
+
+/** Подпись табличной части и подписи её стандартных реквизитов. */
+interface SectionCaptions {
+	caption: string;
+	standardAttributes: Record<string, string>;
+}
+
+/**
+ * Подписи, которыми вкладка прав называет права подчинённых: стандартные реквизиты объекта,
+ * его табличных частей и стандартных табличных частей.
+ */
+function objectRightsCaptions(structure: MdObjectStructureDto | null | undefined): {
+	standardAttributes: Record<string, string>;
+	tabularSections: Record<string, SectionCaptions>;
+	standardTabularSections: Record<string, SectionCaptions>;
+} {
+	return {
+		standardAttributes: structure?.standardAttributeSynonyms ?? {},
+		tabularSections: sectionCaptions(structure?.tabularSections),
+		standardTabularSections: sectionCaptions(structure?.standardTabularSections),
+	};
+}
+
+function sectionCaptions(sections: unknown[] | undefined): Record<string, SectionCaptions> {
+	const out: Record<string, SectionCaptions> = {};
+	for (const section of sections ?? []) {
+		if (!isRecord(section) || typeof section.name !== 'string' || !section.name) {
+			continue;
+		}
+		out[section.name] = {
+			caption: typeof section.synonym === 'string' ? section.synonym : '',
+			standardAttributes: isRecord(section.standardAttributeSynonyms)
+				? (section.standardAttributeSynonyms as Record<string, string>)
+				: {},
+		};
+	}
+	return out;
+}
+
+/** Есть ли у объекта права в ролях: виды с правами называет md-sparrow. */
+function hasObjectRights(objectType: string, labels: EnumValueLabels = valueLabels): boolean {
+	return (labels.rightsByKind?.[objectType]?.length ?? 0) > 0;
 }
 
 function rawNameList(value: unknown): string[] {
@@ -1782,13 +1866,24 @@ function simpleKindProps(props: MdObjectPropertiesDto): Record<string, unknown> 
 export function buildMetadataObjectPropertiesTabsForTest(
 	objectType: string,
 	props: unknown,
-	structure: unknown
+	structure: unknown,
+	labels: EnumValueLabels = {}
 ): MetadataPanelTab[] {
 	const normalizedType = normalizeObjectType(objectType);
 	const propsDto = isRecord(props) ? (props as unknown as MdObjectPropertiesDto) : null;
 	const structureDto = isRecord(structure) ? (structure as unknown as MdObjectStructureDto) : null;
 	const editable = buildEditableModel(propsDto, structureDto, propsDto?.internalName ?? '');
-	return buildTabs(propsDto, structureDto, normalizedType, editable);
+	return buildTabs(
+		propsDto,
+		structureDto,
+		normalizedType,
+		editable,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		hasObjectRights(normalizedType, labels)
+	);
 }
 
 function buildViewModel(
@@ -1820,7 +1915,17 @@ function buildViewModel(
 		comment: props?.comment ?? '',
 		objectXmlPath: params.objectXmlFsPath,
 		warnings,
-		tabs: buildTabs(props, structure, objectType, editable, subsystems, refContent, commandInterface, roleRights),
+		tabs: buildTabs(
+			props,
+			structure,
+			objectType,
+			editable,
+			subsystems,
+			refContent,
+			commandInterface,
+			roleRights,
+			hasObjectRights(objectType)
+		),
 		editable,
 		structureLists,
 		subsystems,
@@ -1844,14 +1949,19 @@ export function buildMetadataObjectPropertiesEditableForTest(
 	objectType: string,
 	props: unknown,
 	structure: unknown,
-	candidates?: Partial<MetadataEditCandidates>
+	candidates?: Partial<MetadataEditCandidates>,
+	support?: MetadataPanelOriginModel['support']
 ): MetadataPanelEditableModel | undefined {
 	const propsDto = isRecord(props) ? (props as unknown as MdObjectPropertiesDto) : null;
 	const structureDto = isRecord(structure) ? (structure as unknown as MdObjectStructureDto) : null;
-	return buildEditableModel(propsDto, structureDto, propsDto?.internalName ?? '', {
-		...EMPTY_CANDIDATES,
-		...candidates,
-	});
+	return buildEditableModel(
+		propsDto,
+		structureDto,
+		propsDto?.internalName ?? '',
+		{ ...EMPTY_CANDIDATES, ...candidates },
+		{},
+		{ adopted: false, support }
+	);
 }
 
 export function buildStructureListsForTest(props: unknown, structure: unknown): MetadataPanelStructureLists {
@@ -2320,6 +2430,43 @@ async function loadRoleRightsModel(
 	};
 }
 
+/** Права всех ролей на объект: ответ webview на открытие вкладки «Права». */
+async function loadObjectRights(
+	runtime: Awaited<ReturnType<typeof ensureMdSparrowRuntime>>,
+	params: OpenMetadataObjectPropertiesParams
+): Promise<{ type: 'objectRights'; model?: MetadataPanelObjectRightsModel; error?: string }> {
+	let error: string;
+	try {
+		const res = await runMdSparrowJson<MetadataPanelObjectRightsModel>(
+			runtime,
+			{ op: 'cf-object-rights-get', objectXml: params.objectXmlFsPath },
+			params.cwd
+		);
+		if (res.ok) {
+			return { type: 'objectRights', model: res.value };
+		}
+		error = res.error;
+	} catch (e) {
+		error = e instanceof Error ? e.message : String(e);
+	}
+	log.warn(`права ролей на объект: ${error.slice(0, ERR_PREVIEW)}`);
+	return { type: 'objectRights', error: error.slice(0, ERR_PREVIEW) };
+}
+
+/** Разбирает правки прав ролей на объект из сообщения webview: роль, право, выдано или снято. */
+function parseObjectRightsEdits(raw: unknown): Array<{ role: string; right: string; value: boolean }> {
+	if (!Array.isArray(raw)) {
+		return [];
+	}
+	const out: Array<{ role: string; right: string; value: boolean }> = [];
+	for (const item of raw) {
+		if (isRecord(item) && typeof item.role === 'string' && typeof item.right === 'string' && typeof item.value === 'boolean') {
+			out.push({ role: item.role, right: item.right, value: item.value });
+		}
+	}
+	return out;
+}
+
 /** Узел ответа cf-md-subsystem-tree. */
 interface SubsystemTreeNodeDto {
 	name: string;
@@ -2603,6 +2750,15 @@ async function openMetadataObjectPropertiesEditorInner(
 	});
 	registerFormPanel(panel);
 	trackOpenPanel('objectProperties', params.objectXmlFsPath, panel);
+	panel.webview.onDidReceiveMessage(
+		async (msg: { type?: string } | null) => {
+			if (msg?.type === 'loadObjectRights') {
+				void panel.webview.postMessage(await loadObjectRights(runtime, params));
+			}
+		},
+		undefined,
+		context.subscriptions
+	);
 
 	if (viewModel.editable) {
 		const watch = watchMetadataFile(params.objectXmlFsPath, version);
@@ -2830,6 +2986,8 @@ interface MetadataPanelSaveMessage {
 	roleRights?: unknown;
 	/** Изменённые флаги прав по умолчанию роли. */
 	roleRightsFlags?: unknown;
+	/** Изменённые права ролей на объект. */
+	objectRights?: unknown;
 }
 
 const IDENTIFIER_RE = /^[A-Za-zА-ЯЁа-яё_][A-Za-zА-ЯЁа-яё0-9_]*$/;
@@ -3406,6 +3564,14 @@ function fileExists(file: string): Promise<boolean> {
 	);
 }
 
+/**
+ * Писать ли описание самого объекта. Права ролей, подсистемы и прочие вкладки пишут свои файлы,
+ * а объект пишется, когда правки меняют то, что сейчас в файле.
+ */
+export function objectPropsNeedWrite(current: unknown, dto: unknown): boolean {
+	return JSON.stringify(dto) !== JSON.stringify(current);
+}
+
 function registerEditableSaveHandler(
 	context: vscode.ExtensionContext,
 	panel: vscode.WebviewPanel,
@@ -3632,6 +3798,18 @@ function registerEditableSaveHandler(
 				return;
 			}
 		}
+		const objectRightsEdits = parseObjectRightsEdits(msg.objectRights);
+		if (objectRightsEdits.length > 0) {
+			const error = await runOneMutation({
+				op: 'cf-object-rights-set',
+				objectXml: params.objectXmlFsPath,
+				payloadJson: JSON.stringify({ edits: objectRightsEdits }),
+			});
+			if (error) {
+				void panel.webview.postMessage({ type: 'saved', ok: false, error: `Права: ${error}` });
+				return;
+			}
+		}
 		const visibilityEdits = parseCommandVisibilityEdits(msg.commandVisibility);
 		if (visibilityEdits) {
 			const error = await runOneMutation({
@@ -3782,15 +3960,17 @@ function registerEditableSaveHandler(
 			}
 			dto[edit.key] = [...refs];
 		}
-		const error = await runOneMutation({
-			op: 'cf-md-object-set',
-			objectXml: params.objectXmlFsPath,
-			schemaVersion: schema,
-			payloadJson: JSON.stringify(dto),
-		});
-		if (error) {
-			await fail(error);
-			return;
+		if (objectPropsNeedWrite(current.dto, dto)) {
+			const error = await runOneMutation({
+				op: 'cf-md-object-set',
+				objectXml: params.objectXmlFsPath,
+				schemaVersion: schema,
+				payloadJson: JSON.stringify(dto),
+			});
+			if (error) {
+				await fail(error);
+				return;
+			}
 		}
 		void panel.webview.postMessage({ type: 'saved', ok: true });
 		await rereadAndPushModel();

@@ -1,9 +1,11 @@
 import * as assert from 'node:assert';
+import { applyEditedScalars } from '../../features/metadata/metadataObjectEditSpec';
 import {
 	buildMetadataObjectPropertiesEditableForTest,
 	buildRefContentSectionsForTest,
 	buildMetadataObjectPropertiesTabsForTest,
 	buildStructureListsForTest,
+	objectPropsNeedWrite,
 	withEditLanguage,
 } from '../../features/metadata/metadataObjectPropertiesPanel';
 
@@ -540,5 +542,103 @@ suite('язык многоязычных свойств в подписи', () =
 
 		assert.strictEqual(tab.groups[0].fields[0].label, 'Представление объекта (de)');
 		assert.strictEqual(tab.groups[0].fields[1].label, 'Иерархический');
+	});
+});
+
+suite('metadataObjectPropertiesPanel: права ролей на объект', () => {
+	const labels = { rightsByKind: { Report: ['Use', 'View'] } };
+	const report = { kind: 'report', internalName: 'ДинамикаФайлов', report: { useStandardCommands: false } };
+	const reportStructure = { kind: 'report', forms: [], commands: [] };
+
+	test('вкладка «Права» идёт последней у вида, права которого знает md-sparrow', () => {
+		const tabs = buildMetadataObjectPropertiesTabsForTest('Report', report, reportStructure, labels);
+
+		assert.deepStrictEqual(
+			tabs.filter((tab) => tab.render === 'objectRights').map((tab) => tab.title),
+			['Права']
+		);
+		assert.strictEqual(tabs[tabs.length - 1].render, 'objectRights');
+	});
+
+	test('у вида без прав в ролях вкладки нет', () => {
+		const props = { kind: 'commonModule', internalName: 'ОбщегоНазначения', commonModule: { server: true } };
+
+		const tabs = buildMetadataObjectPropertiesTabsForTest(
+			'CommonModule',
+			props,
+			{ kind: 'commonModule', forms: [], commands: [] },
+			labels
+		);
+
+		assert.ok(!tabs.some((tab) => tab.render === 'objectRights'));
+	});
+
+	test('без словаря md-sparrow вкладки нет', () => {
+		const tabs = buildMetadataObjectPropertiesTabsForTest('Report', report, reportStructure);
+
+		assert.ok(!tabs.some((tab) => tab.render === 'objectRights'));
+	});
+
+	test('вкладка несёт подписи стандартных реквизитов и стандартных табличных частей', () => {
+		const accounts = { kind: 'chartOfAccounts', internalName: 'Основной', synonym: 'Основной', comment: '' };
+		const structure = {
+			kind: 'chartOfAccounts',
+			internalName: 'Основной',
+			standardAttributeSynonyms: { Code: 'Код', PredefinedDataName: 'Имя предопределенных данных' },
+			tabularSections: [{ name: 'Состав', synonym: 'Состав', standardAttributeSynonyms: { LineNumber: 'N' } }],
+			standardTabularSections: [
+				{
+					name: 'ExtDimensionTypes',
+					synonym: 'Виды субконто',
+					standardAttributeSynonyms: { TurnoversOnly: 'Только обороты' },
+				},
+			],
+		};
+
+		const tabs = buildMetadataObjectPropertiesTabsForTest('ChartOfAccounts', accounts, structure, {
+			rightsByKind: { ChartOfAccounts: ['Read'] },
+		});
+
+		assert.deepStrictEqual(tabs.find((tab) => tab.render === 'objectRights')?.data, {
+			standardAttributes: { Code: 'Код', PredefinedDataName: 'Имя предопределенных данных' },
+			tabularSections: { Состав: { caption: 'Состав', standardAttributes: { LineNumber: 'N' } } },
+			standardTabularSections: {
+				ExtDimensionTypes: { caption: 'Виды субконто', standardAttributes: { TurnoversOnly: 'Только обороты' } },
+			},
+		});
+	});
+
+	const language = {
+		kind: 'language',
+		internalName: 'Русский',
+		synonym: 'Русский',
+		comment: '',
+		scalars: { LanguageCode: 'ru' },
+		scalarMeta: { LanguageCode: { type: 'string' } },
+	};
+
+	test('сохранение одних прав у объекта на поддержке без изменения сам объект не пишет', () => {
+		const model = buildMetadataObjectPropertiesEditableForTest('Language', language, null, undefined, 'locked');
+		assert.ok(model);
+		assert.strictEqual(model.readonly, true);
+
+		const rightsOnly = applyEditedScalars(language, {}, model.tabs);
+		const lockedField = applyEditedScalars(language, { synonym: 'Русский язык' }, model.tabs);
+
+		assert.strictEqual(objectPropsNeedWrite(language, rightsOnly), false);
+		assert.strictEqual(objectPropsNeedWrite(language, lockedField), false);
+	});
+
+	test('объект пишется, только когда правки меняют то, что в файле', () => {
+		const model = buildMetadataObjectPropertiesEditableForTest('Language', language, null);
+		assert.ok(model);
+
+		const rightsOnly = applyEditedScalars(language, {}, model.tabs);
+		const same = applyEditedScalars(language, { synonym: 'Русский' }, model.tabs);
+		const edited = applyEditedScalars(language, { synonym: 'Русский язык' }, model.tabs);
+
+		assert.strictEqual(objectPropsNeedWrite(language, rightsOnly), false);
+		assert.strictEqual(objectPropsNeedWrite(language, same), false);
+		assert.strictEqual(objectPropsNeedWrite(language, edited), true);
 	});
 });

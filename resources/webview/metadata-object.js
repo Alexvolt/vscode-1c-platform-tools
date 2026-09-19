@@ -617,7 +617,8 @@
 			orderListDirty(editedSubsystemsOrder, model.commandInterface && model.commandInterface.subsystemsOrder) ||
 			orderListDirty(editedGroupsOrder, model.commandInterface && model.commandInterface.groupsOrder) ||
 			editedRoleRights.size > 0 ||
-			editedRoleFlags.size > 0
+			editedRoleFlags.size > 0 ||
+			editedObjectRights.size > 0
 		) {
 			return true;
 		}
@@ -856,6 +857,9 @@
 				return;
 			case 'roleRights':
 				renderRoleRightsTab();
+				return;
+			case 'objectRights':
+				renderObjectRightsTab(tab.data || {});
 				return;
 			default:
 				contentRoot.innerHTML = '<div class="empty">Нет данных.</div>';
@@ -1659,6 +1663,367 @@
 			renderTable();
 		});
 		renderTable();
+	}
+
+	/** Права ролей на объект: приходят от расширения, когда вкладку открыли. */
+	const objectRightsState = { model: null, loading: false, error: '' };
+
+	/** Состояние фильтров вкладки прав ролей: живёт, пока открыта панель. */
+	const objectRightsView = { query: '', onlyGranted: true, selected: '' };
+
+	/** Изменённые права ролей на объект: «роль право» → выдано. */
+	const editedObjectRights = new Map();
+
+	function requestObjectRights() {
+		if (!vscodeApi || objectRightsState.loading) {
+			return;
+		}
+		objectRightsState.loading = true;
+		objectRightsState.error = '';
+		vscodeApi.postMessage({ type: 'loadObjectRights' });
+	}
+
+	window.addEventListener('message', function (event) {
+		const msg = event.data;
+		if (!msg || msg.type !== 'objectRights') {
+			return;
+		}
+		objectRightsState.loading = false;
+		objectRightsState.model = msg.model || null;
+		objectRightsState.error = msg.model ? '' : String(msg.error || 'Не удалось прочитать права ролей.');
+		const tab = tabs.find((item) => item.id === activeTabId);
+		if (tab && tab.render === 'objectRights') {
+			renderContent();
+		}
+	});
+
+	function objectRightKey(role, right) {
+		return role + ' ' + right;
+	}
+
+	function objectRightBaseline(role, right) {
+		return role.granted.includes(right);
+	}
+
+	function objectRightChecked(role, right) {
+		const key = objectRightKey(role.name, right);
+		return editedObjectRights.has(key) ? editedObjectRights.get(key) : objectRightBaseline(role, right);
+	}
+
+	/** Право тянет за собой те, без которых не действует, а снятое снимает зависящие. */
+	function toggleObjectRight(role, right, value) {
+		const requires = (objectRightsState.model && objectRightsState.model.requires) || {};
+		const linked = [right];
+		if (value) {
+			linked.push(...(requires[right] || []));
+		} else {
+			for (const other of Object.keys(requires)) {
+				if ((requires[other] || []).includes(right)) {
+					linked.push(other);
+				}
+			}
+		}
+		for (const name of linked) {
+			const key = objectRightKey(role.name, name);
+			if (value === objectRightBaseline(role, name)) {
+				editedObjectRights.delete(key);
+			} else {
+				editedObjectRights.set(key, value);
+			}
+		}
+	}
+
+	function roleCaption(role) {
+		return role.synonym || role.name;
+	}
+
+	/** Роль с правами или ограничениями на объект либо с неотправленной правкой: снятый флажок не прячет строку. */
+	function roleHasRights(role) {
+		if (role.granted.length > 0 || Object.keys(role.restrictions || {}).length > 0) {
+			return true;
+		}
+		const prefix = role.name + ' ';
+		return [...editedObjectRights.keys()].some((key) => key.startsWith(prefix));
+	}
+
+	/**
+	 * Путь подчинённого из пар «вид.имя» одними именами: «TabularSection.Состав.Attribute.Количество» → «Состав.Количество».
+	 * Стандартные реквизиты и стандартные табличные части названы подписями:
+	 * «StandardTabularSection.ExtDimensionTypes.StandardAttribute.TurnoversOnly» → «Виды субконто.Только обороты».
+	 */
+	function childCaption(name, captions) {
+		const parts = String(name).split('.');
+		const out = [];
+		let section = null;
+		for (let i = 0; i + 1 < parts.length; i += 2) {
+			const kind = parts[i];
+			const item = parts[i + 1];
+			if (kind === 'StandardAttribute') {
+				const labels = i === 0 ? captions.standardAttributes : section && section.standardAttributes;
+				out.push((labels && labels[item]) || item);
+				continue;
+			}
+			if (i === 0 && (kind === 'TabularSection' || kind === 'StandardTabularSection')) {
+				const sections = kind === 'TabularSection' ? captions.tabularSections : captions.standardTabularSections;
+				section = (sections && sections[item]) || null;
+			}
+			out.push(kind === 'StandardTabularSection' && section && section.caption ? section.caption : item);
+		}
+		return out.length > 0 ? out.join('.') : String(name);
+	}
+
+	/** Права ролей на объект: строки - роли, колонки - права вида, внизу ограничения выбранной роли. */
+	function renderObjectRightsTab(captions) {
+		if (!contentRoot) {
+			return;
+		}
+		const model_ = objectRightsState.model;
+		if (!model_) {
+			if (!objectRightsState.loading && !objectRightsState.error) {
+				requestObjectRights();
+			}
+			contentRoot.innerHTML = objectRightsState.error
+				? '<div class="empty">Права ролей не прочитаны: ' + escapeHtml(objectRightsState.error) + '</div>'
+				: '<div class="empty">Читаем права ролей…</div>';
+			return;
+		}
+		const rights = Array.isArray(model_.rights) ? model_.rights : [];
+		const roles = (Array.isArray(model_.roles) ? model_.roles : []).slice().sort(function (a, b) {
+			return roleCaption(a).localeCompare(roleCaption(b), 'ru');
+		});
+		// Права пишутся в файлы ролей: правку закрывает поддержка роли, а не объекта
+		const canEdit = Boolean(editable) && model_.editable === true;
+		contentRoot.textContent = '';
+
+		const controls = document.createElement('div');
+		controls.className = 'rights-controls';
+		const filter = document.createElement('input');
+		filter.type = 'text';
+		filter.className = 'list-filter';
+		filter.placeholder = 'Поиск роли';
+		filter.value = objectRightsView.query;
+		controls.appendChild(filter);
+		const toggle = document.createElement('label');
+		toggle.className = 'rights-toggle';
+		const toggleBox = document.createElement('input');
+		toggleBox.type = 'checkbox';
+		toggleBox.checked = objectRightsView.onlyGranted;
+		toggle.appendChild(toggleBox);
+		toggle.appendChild(document.createTextNode(' Только роли с правами'));
+		controls.appendChild(toggle);
+		const counter = document.createElement('span');
+		counter.className = 'object-rights-counter';
+		controls.appendChild(counter);
+		const legend = document.createElement('span');
+		legend.className = 'object-rights-legend';
+		legend.textContent = 'Устанавливает права для новых объектов';
+		controls.appendChild(legend);
+		contentRoot.appendChild(controls);
+
+		const locked = roles.filter((role) => role.readonlyReason).length;
+		const readonlyNote = canEdit && locked > 0
+			? 'Роли на поддержке без возможности изменения открыты только на просмотр: ' + locked + ' из ' + roles.length + '.'
+			: '';
+		if (readonlyNote) {
+			const note = document.createElement('div');
+			note.className = 'empty';
+			note.textContent = readonlyNote;
+			contentRoot.appendChild(note);
+		}
+
+		const box = document.createElement('div');
+		box.className = 'rights-table-box object-rights-box';
+		contentRoot.appendChild(box);
+		const detail = document.createElement('div');
+		detail.className = 'object-rights-detail';
+		contentRoot.appendChild(detail);
+
+		function renderDetail() {
+			detail.textContent = '';
+			const role = roles.find((item) => item.name === objectRightsView.selected);
+			if (!role) {
+				detail.appendChild(emptyNote('Выберите роль, чтобы увидеть ограничения доступа к данным и права подчинённых.'));
+				return;
+			}
+			const title = document.createElement('div');
+			title.className = 'object-rights-detail-title';
+			title.textContent = roleCaption(role) + (role.synonym ? ' (' + role.name + ')' : '');
+			detail.appendChild(title);
+			const restricted = Object.keys(role.restrictions || {});
+			if (restricted.length > 0) {
+				detail.appendChild(sectionTitle('Ограничения доступа к данным'));
+				for (const right of restricted) {
+					// Ограничение остаётся записанным и у снятого права
+					const granted = objectRightChecked(role, right);
+					for (const restriction of role.restrictions[right]) {
+						const item = document.createElement('div');
+						item.className = 'object-rights-restriction';
+						const head = document.createElement('div');
+						head.className = 'object-rights-restriction-head';
+						const fields = Array.isArray(restriction.fields) && restriction.fields.length > 0
+							? restriction.fields.join(', ')
+							: 'Другие поля';
+						head.textContent = rightLabel(right) + ': ' + fields;
+						if (!granted) {
+							const off = document.createElement('span');
+							off.className = 'object-rights-restriction-off';
+							off.textContent = 'право не выдано';
+							head.appendChild(off);
+						}
+						item.appendChild(head);
+						const text = document.createElement('pre');
+						text.className = 'object-rights-condition';
+						text.textContent = restriction.condition || '';
+						item.appendChild(text);
+						detail.appendChild(item);
+					}
+				}
+			}
+			const children = Array.isArray(role.children) ? role.children : [];
+			if (children.length > 0) {
+				detail.appendChild(sectionTitle('Права подчинённых'));
+				for (const child of children) {
+					const line = document.createElement('div');
+					line.className = 'object-rights-child';
+					const parts = Object.keys(child.rights || {}).map(function (right) {
+						return rightLabel(right) + ': ' + (child.rights[right] ? 'да' : 'нет');
+					});
+					line.textContent = childCaption(child.name, captions) + ' - ' + parts.join(', ');
+					detail.appendChild(line);
+				}
+			}
+			if (restricted.length === 0 && children.length === 0) {
+				detail.appendChild(emptyNote('Ограничений доступа и прав подчинённых у роли нет.'));
+			}
+		}
+
+		function emptyNote(text) {
+			const note = document.createElement('div');
+			note.className = 'empty';
+			note.textContent = text;
+			return note;
+		}
+
+		function sectionTitle(text) {
+			const heading = document.createElement('div');
+			heading.className = 'object-rights-section';
+			heading.textContent = text;
+			return heading;
+		}
+
+		function renderMatrix() {
+			const needle = objectRightsView.query.trim().toLowerCase();
+			const visible = roles.filter(function (role) {
+				if (objectRightsView.onlyGranted && !roleHasRights(role)) {
+					return false;
+				}
+				return !needle
+					|| roleCaption(role).toLowerCase().includes(needle)
+					|| role.name.toLowerCase().includes(needle);
+			});
+			counter.textContent = 'Ролей: ' + visible.length + ' из ' + roles.length;
+			legend.hidden = !visible.some((role) => role.setForNewObjects);
+			box.textContent = '';
+			if (visible.length === 0) {
+				let text = 'Ничего не найдено.';
+				if (roles.length === 0) {
+					text = 'В конфигурации нет ролей.';
+				} else if (!needle && objectRightsView.onlyGranted) {
+					text = 'Ролей с правами на объект нет. Снимите флажок, чтобы выдать права другой роли.';
+				}
+				box.appendChild(emptyNote(text));
+				return;
+			}
+			const table = document.createElement('table');
+			table.className = 'rights-table object-rights-table';
+			const head = document.createElement('tr');
+			const roleTh = document.createElement('th');
+			roleTh.className = 'rights-object-col';
+			roleTh.textContent = 'Роль';
+			head.appendChild(roleTh);
+			for (const right of rights) {
+				const th = document.createElement('th');
+				const label = document.createElement('div');
+				label.className = 'object-rights-head';
+				label.textContent = rightLabel(right);
+				th.title = rightLabel(right);
+				th.appendChild(label);
+				head.appendChild(th);
+			}
+			const thead = document.createElement('thead');
+			thead.appendChild(head);
+			table.appendChild(thead);
+			const tbody = document.createElement('tbody');
+			for (const role of visible) {
+				const tr = document.createElement('tr');
+				tr.className = (role.setForNewObjects ? 'object-rights-new' : '')
+					+ (role.name === objectRightsView.selected ? ' is-selected' : '');
+				const nameTd = document.createElement('td');
+				nameTd.className = 'rights-object-col';
+				nameTd.textContent = roleCaption(role);
+				nameTd.title = role.readonlyReason ? role.name + '\n' + role.readonlyReason : role.name;
+				tr.appendChild(nameTd);
+				const rowEditable = canEdit && !role.readonlyReason;
+				let rowChanged = false;
+				for (const right of rights) {
+					const td = document.createElement('td');
+					if (editedObjectRights.has(objectRightKey(role.name, right))) {
+						td.className = 'object-rights-changed';
+						rowChanged = true;
+					}
+					const input = document.createElement('input');
+					input.type = 'checkbox';
+					input.checked = objectRightChecked(role, right);
+					input.disabled = !rowEditable;
+					input.title = rightLabel(right);
+					input.addEventListener('change', function () {
+						toggleObjectRight(role, right, input.checked);
+						renderMatrix();
+						renderDetail();
+						renderSaveBar();
+					});
+					td.appendChild(input);
+					if (role.restrictions && role.restrictions[right]) {
+						const mark = document.createElement('span');
+						mark.className = 'object-rights-rls';
+						mark.textContent = '•';
+						mark.title = input.checked
+							? 'Есть ограничение доступа к данным'
+							: 'Есть ограничение доступа к данным, право не выдано';
+						td.appendChild(mark);
+					}
+					tr.appendChild(td);
+				}
+				if (rowChanged) {
+					nameTd.classList.add('object-rights-role-changed');
+				}
+				tr.addEventListener('click', function (event) {
+					if (event.target instanceof HTMLInputElement) {
+						return;
+					}
+					objectRightsView.selected = role.name;
+					for (const other of tbody.querySelectorAll('tr.is-selected')) {
+						other.classList.remove('is-selected');
+					}
+					tr.classList.add('is-selected');
+					renderDetail();
+				});
+				tbody.appendChild(tr);
+			}
+			table.appendChild(tbody);
+			box.appendChild(table);
+		}
+
+		filter.addEventListener('input', function () {
+			objectRightsView.query = filter.value || '';
+			renderMatrix();
+		});
+		toggleBox.addEventListener('change', function () {
+			objectRightsView.onlyGranted = toggleBox.checked;
+			renderMatrix();
+		});
+		renderMatrix();
+		renderDetail();
 	}
 
 	/** Состав объекта деревом с флажками: секции, группы по видам, реквизиты отдельным списком. */
@@ -2792,6 +3157,10 @@
 					return { object: key.slice(0, space), right: key.slice(space + 1), value };
 				}),
 				roleRightsFlags: Object.fromEntries(editedRoleFlags),
+				objectRights: [...editedObjectRights.entries()].map(([key, value]) => {
+					const space = key.indexOf(' ');
+					return { role: key.slice(0, space), right: key.slice(space + 1), value };
+				}),
 				commandPlacement:
 					editedCommandPlacement.size > 0 && model.commandInterface
 						? model.commandInterface.placement.map((entry) => ({
@@ -2837,6 +3206,7 @@
 			editedGroupsOrder = null;
 			editedRoleRights.clear();
 			editedRoleFlags.clear();
+			editedObjectRights.clear();
 			saveError = '';
 			savedFlash = false;
 			renderContent();
@@ -2876,6 +3246,10 @@
 				editedGroupsOrder = null;
 				editedRoleRights.clear();
 				editedRoleFlags.clear();
+				// Файлы ролей могли измениться: права перечитываются при следующем показе вкладки
+				editedObjectRights.clear();
+				objectRightsState.model = null;
+				objectRightsState.error = '';
 				editedStructure = model.structureLists ? structureEditsFromLists(model.structureLists) : null;
 				structBaselineOrderKey = structOrderKey(editedStructure);
 				if (Array.isArray(msg.tabs)) {
