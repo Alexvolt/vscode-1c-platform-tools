@@ -41,7 +41,7 @@ const OVM_POLL_INTERVAL_MS = 3000;
 const OVM_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Теги OVM для выбора версии OneScript */
-const OVM_TAGS = ['lts', 'stable', 'dev', 'preview', 'lts-dev'] as const;
+const OVM_TAGS = ['lts', 'stable', 'dev', 'preview'] as const;
 
 type OvmVersionItem = vscode.QuickPickItem & { version?: string };
 
