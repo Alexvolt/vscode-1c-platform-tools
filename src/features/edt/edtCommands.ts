@@ -32,6 +32,7 @@ import { createVRunnerTask, TaskOutputChain } from '../tasks/vrunnerTask';
 import { ensureMdSparrowRuntime } from '../metadata/mdSparrowBootstrap';
 import { runMdSparrowParamsMutation } from '../metadata/mdSparrowParams';
 import { notifyQuiet } from '../../shared/notify';
+import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 
 const log = logger.scope('edt');
 
@@ -397,6 +398,10 @@ export async function showEdtProjectInfo(): Promise<void> {
  * Открывает рабочую область проекта в графической 1С:EDT.
  */
 export async function openInEdt(): Promise<void> {
+	if (!ensureWorkspaceTrusted('запуск 1С:EDT')) {
+		return;
+	}
+
 	const target = await edtTarget(false);
 	if (!target) {
 		return;

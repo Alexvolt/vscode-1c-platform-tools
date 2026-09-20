@@ -18,9 +18,13 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Команды 1С, установка OneScript и компонентов, Docker и автономный сервер запускают код из открытой папки, поэтому в режиме ограниченной функциональности они не выполняются. Панели и просмотр метаданных работают.",
+      "description": "В режиме ограниченной функциональности расширение не запускает программы по проекту: команды 1С и vrunner, прогон тестов, 1С:EDT, запуск баз из списка, консоль кластера, автономный сервер, отладку, цепочки и хуки, установку OneScript и зависимостей. Канал для агентов не открывается. Панели, дерево команд и просмотр метаданных работают.",
       "restrictedConfigurations": [
         "1c-platform-tools.vrunner.path.executable",
+        "1c-platform-tools.execution.useTasks",
+        "1c-platform-tools.ipc.enabled",
+        "1c-platform-tools.ipc.port",
+        "1c-platform-tools.ipc.token",
         "1c-platform-tools.components.path.adapter",
         "1c-platform-tools.components.path.metadataJar",
         "1c-platform-tools.components.path.java",

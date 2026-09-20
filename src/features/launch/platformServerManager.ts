@@ -37,6 +37,7 @@ import { projectConfiguration } from '../../shared/projectConfiguration';
 import { projectMemento, SERVER_PUBLICATION_STATE } from '../../shared/projectState';
 import { currentRoot, runWithProject, sameProjectRoot } from '../../shared/workspaceProjects';
 import { projectLabel } from '../../commands/projectScope';
+import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 
 const log = logger.scope('server');
 
@@ -232,6 +233,11 @@ export class PlatformServerManager {
 	public async start(workspaceRoot: string | undefined = currentRoot()): Promise<void> {
 		if (!workspaceRoot) {
 			vscode.window.showErrorMessage('Откройте рабочую область проекта 1С.');
+			return;
+		}
+
+		// Сервер публикует базу и конфиг проекта, а версию платформы берёт из его настроек
+		if (!ensureWorkspaceTrusted('запуск автономного сервера')) {
 			return;
 		}
 

@@ -19,6 +19,7 @@ import { findEdtInstallations, pickEdtInstallation } from './edtLocator';
 import { describePlatformInstallations } from './platformBinary';
 import { projectPlatformRoots } from './platformSettings';
 import { projectConfiguration } from './projectConfiguration';
+import { untrustedWorkspaceBlocks } from './workspaceTrust';
 
 const execFileAsync = promisify(execFile);
 const HOST_EXTENSION_ID = 'yellow-hammer.1c-platform-tools';
@@ -179,6 +180,9 @@ async function readComponents(
  * @returns Строка версии или undefined
  */
 async function readCliVersion(command: string, args: string[]): Promise<string | undefined> {
+	if (untrustedWorkspaceBlocks(`версия ${command}`)) {
+		return undefined;
+	}
 	try {
 		const { stdout, stderr } = await execFileAsync(command, args, {
 			timeout: CLI_VERSION_TIMEOUT_MS,

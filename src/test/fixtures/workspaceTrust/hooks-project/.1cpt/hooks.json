@@ -1,0 +1,8 @@
+{
+	"version": 1,
+	"hooks": {
+		"1c-platform-tools.cf.load": {
+			"pre": ["node --eval \"require('node:fs').writeFileSync('hook-ran.txt', '')\""]
+		}
+	}
+}

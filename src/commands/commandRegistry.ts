@@ -21,7 +21,7 @@ import { VRunnerManager } from '../shared/vrunnerManager';
 import type { CommandExecutionOptions, StructuredCommandResult } from '../shared/commandExecutionTypes';
 import { isAgentOptions, agentInteractiveError, uiOnlyHandler } from '../shared/agentGate';
 import { askGithubToken, forgetGithubToken } from '../shared/githubToken';
-import { ensureWorkspaceTrusted } from '../shared/workspaceTrust';
+import { withWorkspaceTrust } from '../shared/workspaceTrust';
 import { inCurrentProject, inProjectOf } from './projectScope';
 
 const log = logger.scope('commands');
@@ -60,16 +60,17 @@ function getActiveEditorResourceUri(): vscode.Uri | undefined {
 	);
 }
 
+/** Команда над файлом активного редактора: разборка артефакта запускает платформу. */
 function registerFromEditor(
 	id: string,
 	handler: (uri: vscode.Uri) => void | Promise<void>
 ): vscode.Disposable {
-	return vscode.commands.registerCommand(id, async () => {
+	return vscode.commands.registerCommand(id, withWorkspaceTrust(id, async () => {
 		const uri = getActiveEditorResourceUri();
 		if (uri) {
 			await inProjectOf(uri, () => handler(uri));
 		}
-	});
+	}));
 }
 
 /**
@@ -79,12 +80,18 @@ function registerVRunnerCommand(
 	id: string,
 	handler: (opts?: CommandExecutionOptions) => Promise<StructuredCommandResult | void>
 ): vscode.Disposable {
-	return registerProjectCommand(id, async (opts?: CommandExecutionOptions) => {
-		if (!ensureWorkspaceTrusted('команды 1С')) {
-			return;
-		}
-		return handler(opts);
-	});
+	return registerProjectCommand(id, withWorkspaceTrust(id, handler));
+}
+
+/**
+ * Команда проекта, которая запускает платформу или vrunner мимо
+ * {@link registerVRunnerCommand}: мастера установки версии.
+ */
+function registerRunningCommand<A extends unknown[]>(
+	id: string,
+	handler: (...args: A) => unknown
+): vscode.Disposable {
+	return registerProjectCommand(id, withWorkspaceTrust(id, handler));
 }
 
 /**
@@ -440,29 +447,31 @@ export function registerCommands(
 	// агентный вызов отклоняется гейтом
 	const setVersionUiHint = 'Версия запрашивается в окне VS Code; выполняется пользователем.';
 	const setVersionCommands = [
-		registerProjectCommand('1c-platform-tools.cf.setVersion', uiOnlyHandler(setVersionUiHint, () => {
+		registerRunningCommand('1c-platform-tools.cf.setVersion', uiOnlyHandler(setVersionUiHint, () => {
 			commands.setVersion.setVersionConfiguration();
 		})),
-		registerProjectCommand('1c-platform-tools.cfe.setVersion', uiOnlyHandler(setVersionUiHint, () => {
+		registerRunningCommand('1c-platform-tools.cfe.setVersion', uiOnlyHandler(setVersionUiHint, () => {
 			commands.setVersion.setVersionExtension();
 		})),
-		registerProjectCommand('1c-platform-tools.epf.setVersionReport', uiOnlyHandler(setVersionUiHint, (reportName?: unknown) => {
+		registerRunningCommand('1c-platform-tools.epf.setVersionReport', uiOnlyHandler(setVersionUiHint, (reportName?: unknown) => {
 			commands.setVersion.setVersionReport(typeof reportName === 'string' ? reportName : undefined);
 		})),
-		registerProjectCommand('1c-platform-tools.epf.setVersionProcessor', uiOnlyHandler(setVersionUiHint, (processorName?: unknown) => {
+		registerRunningCommand('1c-platform-tools.epf.setVersionProcessor', uiOnlyHandler(setVersionUiHint, (processorName?: unknown) => {
 			commands.setVersion.setVersionProcessor(typeof processorName === 'string' ? processorName : undefined);
 		}))
 	];
 
 
 	// Узел артефакта выполняется в проекте своего файла, выбор проекта не меняется
+	const onArtifactNode = (handler: (uri: vscode.Uri) => Promise<void>) => (element: vscode.TreeItem): void => {
+		const uri = element.resourceUri;
+		if (uri) {
+			void inProjectOf(uri, () => handler(uri));
+		}
+	};
+	/** Узел артефакта: сборка и разборка запускают платформу. */
 	const registerArtifactCommand = (id: string, handler: (uri: vscode.Uri) => Promise<void>): vscode.Disposable =>
-		vscode.commands.registerCommand(id, (element: vscode.TreeItem) => {
-			const uri = element.resourceUri;
-			if (uri) {
-				void inProjectOf(uri, () => handler(uri));
-			}
-		});
+		vscode.commands.registerCommand(id, withWorkspaceTrust(id, onArtifactNode(handler)));
 	const artifactCommands = [
 		vscode.commands.registerCommand('1c-platform-tools.artifacts.open', (element: vscode.TreeItem) => {
 			const openUri =
@@ -480,7 +489,11 @@ export function registerCommands(
 		registerArtifactCommand('1c-platform-tools.artifacts.decompileProcessor', (uri) => commands.artifact.decompileProcessor(uri)),
 		registerArtifactCommand('1c-platform-tools.artifacts.compileReport', (uri) => commands.artifact.buildReport(uri)),
 		registerArtifactCommand('1c-platform-tools.artifacts.decompileReport', (uri) => commands.artifact.decompileReport(uri)),
-		registerArtifactCommand('1c-platform-tools.artifacts.delete', (uri) => commands.artifact.delete(uri)),
+		// Удаление файла сборки процессов не запускает
+		vscode.commands.registerCommand(
+			'1c-platform-tools.artifacts.delete',
+			onArtifactNode((uri) => commands.artifact.delete(uri))
+		),
 		registerFromEditor('1c-platform-tools.artifacts.decompileConfigurationFromEditor', (u) =>
 			commands.artifact.decompileConfiguration(u)
 		),

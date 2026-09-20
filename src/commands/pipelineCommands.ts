@@ -41,6 +41,7 @@ import {
 import { emitPipelineRunEvent } from '../shared/pipelines/pipelineEvents';
 import { PIPELINE_EDITOR_VIEW_TYPE, PipelineEditorProvider } from '../features/pipelines/pipelineEditorProvider';
 import { notifyQuiet } from '../shared/notify';
+import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from '../shared/workspaceTrust';
 
 const log = logger.scope('pipelines');
 
@@ -417,6 +418,10 @@ ${result.stderr ?? ''}`
 		const script = node.script?.trim();
 		if (!script) {
 			return { success: false, message: 'у шага не задана команда оболочки' };
+		}
+		// Шаг приходит из .1cpt/pipelines.json проекта
+		if (untrustedWorkspaceBlocks(`шаг цепочки: ${script}`)) {
+			return { success: false, message: WORKSPACE_TRUST_REQUIRED };
 		}
 		// Без префикса кодировки вывод oscript и 1С на Windows приходит в OEM
 		const command = `${SHELL_ENCODING_PREFIX}${script}`;

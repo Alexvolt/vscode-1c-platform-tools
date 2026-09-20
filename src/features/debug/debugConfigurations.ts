@@ -15,6 +15,7 @@ import { projectPlatformRoots } from '../../shared/platformSettings';
 import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
 import { BUILD_SUBDIRS } from '../../shared/pathDefaults';
 import { currentRoot, deepestProject, projectOf, runWithProject } from '../../shared/workspaceProjects';
+import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 
 const launchConfig: vscode.DebugConfiguration = {
 	name: 'Отладка 1С (запуск)',
@@ -228,6 +229,11 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 	): Promise<vscode.DebugConfiguration | undefined> {
 		if (config.type !== DEBUG_TYPE) {
 			return config;
+		}
+
+		// Конфигурация отладки приходит из launch.json проекта и запускает платформу
+		if (!ensureWorkspaceTrusted('отладка 1С')) {
+			return undefined;
 		}
 
 		const workspaceRoot = debugConfigurationRoot(folder, config);

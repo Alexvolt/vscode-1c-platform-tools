@@ -15,6 +15,7 @@ import { globSync } from 'glob';
 import { logger } from '../../shared/logger';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import { currentRoot } from '../../shared/workspaceProjects';
+import { isWorkspaceTrusted } from '../../shared/workspaceTrust';
 import {
 	type ReleaseComponentSpec,
 	cachedReleaseComponent,
@@ -269,6 +270,10 @@ export function checkOnecDebugAdapterUpdateInBackground(
 	context: vscode.ExtensionContext,
 	root: string | undefined = currentRoot()
 ): void {
+	// Компоненты не качаются в недоверенной папке: дальше их запускает dotnet
+	if (!isWorkspaceTrusted()) {
+		return;
+	}
 	const cfg = projectConfiguration(root);
 	if (cfg.get<string>('components.path.adapter', '').trim()) {
 		return;

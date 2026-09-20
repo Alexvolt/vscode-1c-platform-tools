@@ -15,6 +15,7 @@
 import { execFile } from 'node:child_process';
 import { logger } from '../../shared/logger';
 import { projectPlatformRoots } from '../../shared/platformSettings';
+import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from '../../shared/workspaceTrust';
 import { DEFAULT_RAC_TIMEOUT_MS } from './constants';
 import { describeRacNotFound, findRac } from './racLocator';
 import {
@@ -68,6 +69,11 @@ export class RacClient {
 	 * @returns Разобранные объекты или причина неудачи
 	 */
 	async run(args: string[], options: RacRunOptions = {}): Promise<RacResult> {
+		// Дерево кластеров обновляется само, поэтому отказ уходит узлом, без всплывающего окна
+		if (untrustedWorkspaceBlocks(`rac ${args[0] ?? ''}`.trim())) {
+			return { ok: false, failure: { kind: 'unknown', message: WORKSPACE_TRUST_REQUIRED } };
+		}
+
 		const settings = readClustersSettings();
 		const lookup = findRac(projectPlatformRoots(), options.platformVersion);
 		if (!lookup.binary) {

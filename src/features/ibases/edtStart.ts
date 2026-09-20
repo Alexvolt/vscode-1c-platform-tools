@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { edtComponentRoots, edtStartDataDirectory, fileUrlToPath } from '../../shared/edtLocator';
 import { subdirectoryNames } from '../../shared/installPaths';
+import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from '../../shared/workspaceTrust';
 import { spawnDetached } from './cestart';
 
 /** Имя исполняемого файла стартера. */
@@ -189,6 +190,9 @@ export function findEdtStart(deps: LaunchEdtStartDeps = {}): string | undefined 
  * @returns Успех с командой либо сообщение, почему не вышло
  */
 export function launchEdtStart(url?: string, deps: LaunchEdtStartDeps = {}): LaunchEdtStartResult {
+	if (untrustedWorkspaceBlocks('окно 1C:EDT Start')) {
+		return { ok: false, message: WORKSPACE_TRUST_REQUIRED };
+	}
 	const platform = deps.platform ?? process.platform;
 	const exists = deps.exists ?? fs.existsSync;
 	const binary = findEdtStart(deps);

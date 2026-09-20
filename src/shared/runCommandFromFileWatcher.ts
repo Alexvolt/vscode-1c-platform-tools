@@ -1,13 +1,24 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
 import { currentRoot, projectOf, runWithProject } from './workspaceProjects';
+import { ensureWorkspaceTrusted } from './workspaceTrust';
 
 const log = logger.scope('trigger');
 
 const RUN_COMMAND_FILE = '1c-platform-tools-run-command';
 const COMMAND_PREFIX = '1c-platform-tools.';
 
-async function handleRunCommandFile(uri: vscode.Uri): Promise<void> {
+/**
+ * Выполняет команду, записанную в файле-триггере, и удаляет файл.
+ *
+ * @param uri - Файл с идентификатором команды в первой строке
+ */
+export async function runCommandFromFile(uri: vscode.Uri): Promise<void> {
+	// Файл лежит в открытой папке и называет команду расширения: в недоверенной
+	// папке она не выполняется, а сам файл остаётся на месте
+	if (!ensureWorkspaceTrusted('команда из файла-триггера')) {
+		return;
+	}
 	try {
 		const doc = await vscode.workspace.openTextDocument(uri);
 		const line = doc.getText().split(/\r?\n/)[0]?.trim() ?? '';
@@ -34,7 +45,7 @@ async function handleRunCommandFile(uri: vscode.Uri): Promise<void> {
  */
 export function registerRunCommandFileWatcher(context: vscode.ExtensionContext): void {
 	const watcher = vscode.workspace.createFileSystemWatcher(`**/.cursor/${RUN_COMMAND_FILE}`);
-	const run = (uri: vscode.Uri) => void runWithProject(projectOf(uri) ?? currentRoot(), () => handleRunCommandFile(uri));
+	const run = (uri: vscode.Uri) => void runWithProject(projectOf(uri) ?? currentRoot(), () => runCommandFromFile(uri));
 	watcher.onDidCreate(run);
 	watcher.onDidChange(run);
 	context.subscriptions.push(watcher);

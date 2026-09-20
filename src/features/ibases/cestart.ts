@@ -10,6 +10,7 @@ import { spawn, type SpawnOptions } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PLATFORM_PATH_SETTING_TITLE, platformInstallRoots } from '../../shared/platformBinary';
+import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from '../../shared/workspaceTrust';
 
 /** Режим запуска стартера. */
 export type CestartMode = 'ENTERPRISE' | 'DESIGNER';
@@ -281,6 +282,10 @@ export function launchInfobase(
 	deps: LaunchInfobaseDeps = {}
 ): LaunchInfobaseResult {
 	const ibName = name.trim();
+	// Клиент открывает базу вместе с её кодом, а параметры запуска приходят из проекта
+	if (untrustedWorkspaceBlocks(`запуск базы «${ibName}»`)) {
+		return { ok: false, message: WORKSPACE_TRUST_REQUIRED };
+	}
 	if (!ibName) {
 		return { ok: false, message: 'Не выбрана информационная база.' };
 	}
@@ -313,6 +318,9 @@ export function launchInfobase(
  * @returns Успех с командой либо сообщение, почему не вышло
  */
 export function launchStartWindow(deps: Pick<LaunchInfobaseDeps, 'roots' | 'find' | 'spawn'> = {}): LaunchInfobaseResult {
+	if (untrustedWorkspaceBlocks('окно запуска платформы')) {
+		return { ok: false, message: WORKSPACE_TRUST_REQUIRED };
+	}
 	const lookup = (deps.find ?? findCestart)({ roots: deps.roots });
 	if (!lookup.binary) {
 		return { ok: false, message: CESTART_NOT_FOUND_MESSAGE };
