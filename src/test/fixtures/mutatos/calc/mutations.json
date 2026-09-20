@@ -1,0 +1,395 @@
+{
+	"schemaVersion": "1.0",
+	"thresholds": {
+		"high": 80,
+		"low": 50
+	},
+	"files": {
+		"Калькулятор.os": {
+			"language": "bsl",
+			"source": "// Подопытный класс для демонстрации мутационного тестирования.\n//\n// Тесты в examples/калькулятор/tests намеренно неполные: часть мутантов они убивают,\n// часть - нет. Выжившие мутанты показывают, где тестам не хватает проверок.\n\nФункция Сложить(Знач Первое, Знач Второе) Экспорт\n\tВозврат Первое + Второе;\nКонецФункции\n\nФункция Умножить(Знач Первое, Знач Второе) Экспорт\n\tВозврат Первое * Второе;\nКонецФункции\n\n// Возвращает большее из двух чисел.\nФункция Максимум(Знач Первое, Знач Второе) Экспорт\n\n\tЕсли Первое > Второе Тогда\n\t\tВозврат Первое;\n\tКонецЕсли;\n\n\tВозврат Второе;\n\nКонецФункции\n\n// Истина, если число попадает в отрезок, включая границы.\nФункция ВходитВДиапазон(Знач Число, Знач Начало, Знач Конец) Экспорт\n\n\tВозврат Число >= Начало И Число <= Конец;\n\nКонецФункции\n\n// Скидка: 10 процентов от суммы, но не больше предельной величины.\nФункция РассчитатьСкидку(Знач Сумма, Знач ПредельнаяСкидка) Экспорт\n\n\tСкидка = Сумма / 10;\n\n\tЕсли Скидка > ПредельнаяСкидка Тогда\n\t\tСкидка = ПредельнаяСкидка;\n\tКонецЕсли;\n\n\tВозврат Скидка;\n\nКонецФункции\n",
+			"mutants": [
+				{
+					"id": "1",
+					"mutatorName": "Возврат",
+					"replacement": "Неопределено",
+					"description": "возвращаемое значение заменено на Неопределено",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 7,
+							"column": 10
+						},
+						"end": {
+							"line": 7,
+							"column": 25
+						}
+					},
+					"duration": 8789,
+					"methodName": "Сложить"
+				},
+				{
+					"id": "2",
+					"mutatorName": "Арифметика",
+					"replacement": "-",
+					"description": "+ заменено на -",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 7,
+							"column": 17
+						},
+						"end": {
+							"line": 7,
+							"column": 18
+						}
+					},
+					"duration": 9086,
+					"methodName": "Сложить"
+				},
+				{
+					"id": "3",
+					"mutatorName": "Возврат",
+					"replacement": "Неопределено",
+					"description": "возвращаемое значение заменено на Неопределено",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 11,
+							"column": 10
+						},
+						"end": {
+							"line": 11,
+							"column": 25
+						}
+					},
+					"duration": 8507,
+					"methodName": "Умножить"
+				},
+				{
+					"id": "4",
+					"mutatorName": "Арифметика",
+					"replacement": "/",
+					"description": "* заменено на /",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 11,
+							"column": 17
+						},
+						"end": {
+							"line": 11,
+							"column": 18
+						}
+					},
+					"duration": 10500,
+					"methodName": "Умножить"
+				},
+				{
+					"id": "5",
+					"mutatorName": "Условия",
+					"replacement": ">=",
+					"description": "> заменено на >=",
+					"status": "Survived",
+					"location": {
+						"start": {
+							"line": 17,
+							"column": 14
+						},
+						"end": {
+							"line": 17,
+							"column": 15
+						}
+					},
+					"duration": 7978,
+					"methodName": "Максимум"
+				},
+				{
+					"id": "6",
+					"mutatorName": "Условия",
+					"replacement": "<",
+					"description": "> заменено на <",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 17,
+							"column": 14
+						},
+						"end": {
+							"line": 17,
+							"column": 15
+						}
+					},
+					"duration": 8757,
+					"methodName": "Максимум"
+				},
+				{
+					"id": "7",
+					"mutatorName": "ОтрицаниеУсловия",
+					"replacement": "Не (Первое > Второе)",
+					"description": "условие инвертировано",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 17,
+							"column": 7
+						},
+						"end": {
+							"line": 17,
+							"column": 22
+						}
+					},
+					"duration": 12050,
+					"methodName": "Максимум"
+				},
+				{
+					"id": "8",
+					"mutatorName": "Возврат",
+					"replacement": "Неопределено",
+					"description": "возвращаемое значение заменено на Неопределено",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 18,
+							"column": 11
+						},
+						"end": {
+							"line": 18,
+							"column": 17
+						}
+					},
+					"duration": 12919,
+					"methodName": "Максимум"
+				},
+				{
+					"id": "9",
+					"mutatorName": "Возврат",
+					"replacement": "Неопределено",
+					"description": "возвращаемое значение заменено на Неопределено",
+					"status": "NoCoverage",
+					"location": {
+						"start": {
+							"line": 21,
+							"column": 10
+						},
+						"end": {
+							"line": 21,
+							"column": 16
+						}
+					},
+					"duration": 0,
+					"methodName": "Максимум"
+				},
+				{
+					"id": "10",
+					"mutatorName": "Условия",
+					"replacement": "<",
+					"description": "<= заменено на <",
+					"status": "Survived",
+					"location": {
+						"start": {
+							"line": 28,
+							"column": 34
+						},
+						"end": {
+							"line": 28,
+							"column": 36
+						}
+					},
+					"duration": 11717,
+					"methodName": "ВходитВДиапазон"
+				},
+				{
+					"id": "11",
+					"mutatorName": "Логика",
+					"replacement": "Или",
+					"description": "И заменено на Или",
+					"status": "Survived",
+					"location": {
+						"start": {
+							"line": 28,
+							"column": 26
+						},
+						"end": {
+							"line": 28,
+							"column": 27
+						}
+					},
+					"duration": 12372,
+					"methodName": "ВходитВДиапазон"
+				},
+				{
+					"id": "12",
+					"mutatorName": "Возврат",
+					"replacement": "Неопределено",
+					"description": "возвращаемое значение заменено на Неопределено",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 28,
+							"column": 10
+						},
+						"end": {
+							"line": 28,
+							"column": 42
+						}
+					},
+					"duration": 11923,
+					"methodName": "ВходитВДиапазон"
+				},
+				{
+					"id": "13",
+					"mutatorName": "Условия",
+					"replacement": ">",
+					"description": ">= заменено на >",
+					"status": "Survived",
+					"location": {
+						"start": {
+							"line": 28,
+							"column": 16
+						},
+						"end": {
+							"line": 28,
+							"column": 18
+						}
+					},
+					"duration": 10231,
+					"methodName": "ВходитВДиапазон"
+				},
+				{
+					"id": "14",
+					"mutatorName": "ЧисловыеЛитералы",
+					"replacement": "0",
+					"description": "10 заменено на 0",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 35,
+							"column": 19
+						},
+						"end": {
+							"line": 35,
+							"column": 21
+						}
+					},
+					"duration": 7347,
+					"methodName": "РассчитатьСкидку"
+				},
+				{
+					"id": "15",
+					"mutatorName": "Арифметика",
+					"replacement": "*",
+					"description": "/ заменено на *",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 35,
+							"column": 17
+						},
+						"end": {
+							"line": 35,
+							"column": 18
+						}
+					},
+					"duration": 7676,
+					"methodName": "РассчитатьСкидку"
+				},
+				{
+					"id": "16",
+					"mutatorName": "ЧисловыеЛитералы",
+					"replacement": "11",
+					"description": "10 заменено на 11",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 35,
+							"column": 19
+						},
+						"end": {
+							"line": 35,
+							"column": 21
+						}
+					},
+					"duration": 7398,
+					"methodName": "РассчитатьСкидку"
+				},
+				{
+					"id": "17",
+					"mutatorName": "Условия",
+					"replacement": ">=",
+					"description": "> заменено на >=",
+					"status": "Survived",
+					"location": {
+						"start": {
+							"line": 37,
+							"column": 14
+						},
+						"end": {
+							"line": 37,
+							"column": 15
+						}
+					},
+					"duration": 6846,
+					"methodName": "РассчитатьСкидку"
+				},
+				{
+					"id": "18",
+					"mutatorName": "Условия",
+					"replacement": "<",
+					"description": "> заменено на <",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 37,
+							"column": 14
+						},
+						"end": {
+							"line": 37,
+							"column": 15
+						}
+					},
+					"duration": 6102,
+					"methodName": "РассчитатьСкидку"
+				},
+				{
+					"id": "19",
+					"mutatorName": "ОтрицаниеУсловия",
+					"replacement": "Не (Скидка > ПредельнаяСкидка)",
+					"description": "условие инвертировано",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 37,
+							"column": 7
+						},
+						"end": {
+							"line": 37,
+							"column": 32
+						}
+					},
+					"duration": 7737,
+					"methodName": "РассчитатьСкидку"
+				},
+				{
+					"id": "20",
+					"mutatorName": "Возврат",
+					"replacement": "Неопределено",
+					"description": "возвращаемое значение заменено на Неопределено",
+					"status": "Killed",
+					"location": {
+						"start": {
+							"line": 41,
+							"column": 10
+						},
+						"end": {
+							"line": 41,
+							"column": 16
+						}
+					},
+					"duration": 5538,
+					"methodName": "РассчитатьСкидку"
+				}
+			]
+		}
+	}
+}

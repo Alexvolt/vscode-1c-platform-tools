@@ -12,7 +12,7 @@ import { resolveOnescriptTestsPath } from '../onescriptTestsPath';
 import { projectConfiguration } from '../../../shared/projectConfiguration';
 
 /** Раннер тестов OneScript */
-type OneScriptRunner = '1testrunner' | 'oneunit';
+export type OneScriptRunner = '1testrunner' | 'oneunit';
 
 /**
  * Адаптер тестов OneScript
@@ -220,91 +220,93 @@ export class OneScriptAdapter implements TestFrameworkAdapter {
 
 	/**
 	 * Определяет раннер и команду его запуска
-	 *
-	 * Порядок: test.path.onescriptRunner (относительные пути — от корня
-	 * проекта) → локальная установка в oscript_modules/bin → PATH.
 	 */
 	private resolveRunner(): { kind: OneScriptRunner; command: string } {
-		const workspaceRoot = this.vrunner.getWorkspaceRoot();
-		const config = projectConfiguration(workspaceRoot);
-		const runnerSetting = config.get<string>('test.onescriptRunner', 'auto');
-		const customPath = config.get<string>('test.path.onescriptRunner', '').trim();
+		return resolveOneScriptRunner(this.vrunner.getWorkspaceRoot());
+	}
+}
 
-		// Явно заданный путь к раннеру: вид раннера — по имени файла
-		if (customPath.length > 0) {
-			const resolved = workspaceRoot ? resolveConfigPath(customPath, workspaceRoot) : customPath;
-			const kind: OneScriptRunner = path
-				.basename(resolved)
-				.toLowerCase()
-				.includes('oneunit')
-				? 'oneunit'
-				: '1testrunner';
-			return { kind, command: `"${resolved}"` };
-		}
+/**
+ * Раннер тестов OneScript проекта и команда его запуска
+ *
+ * Порядок: test.path.onescriptRunner (относительные пути — от корня
+ * проекта) → локальная установка в oscript_modules/bin → PATH.
+ *
+ * @param workspaceRoot - Корень проекта, чьи настройки читаются
+ */
+export function resolveOneScriptRunner(workspaceRoot: string | undefined): { kind: OneScriptRunner; command: string } {
+	const config = projectConfiguration(workspaceRoot);
+	const runnerSetting = config.get<string>('test.onescriptRunner', 'auto');
+	const customPath = config.get<string>('test.path.onescriptRunner', '').trim();
 
-		const kind = this.resolveRunnerKind(runnerSetting, workspaceRoot);
-		const localPath = this.findLocalRunner(kind, workspaceRoot);
-		return { kind, command: localPath ? `"${localPath}"` : kind };
+	// Явно заданный путь к раннеру: вид раннера — по имени файла
+	if (customPath.length > 0) {
+		const resolved = workspaceRoot ? resolveConfigPath(customPath, workspaceRoot) : customPath;
+		const kind: OneScriptRunner = path
+			.basename(resolved)
+			.toLowerCase()
+			.includes('oneunit')
+			? 'oneunit'
+			: '1testrunner';
+		return { kind, command: `"${resolved}"` };
 	}
 
-	/**
-	 * Выбирает вид раннера: явная настройка либо автоопределение
-	 *
-	 * auto → oneunit, если он стоит локально (oscript_modules/bin) ИЛИ объявлен
-	 * зависимостью проекта в packagedef (.ЗависитОт/.РазработкаЗависитОт("oneunit")).
-	 * Второй признак ловит случай, когда oneunit установлен глобально (в PATH, не в
-	 * проекте): без него автоопределение молча уступало бы место 1testrunner, и
-	 * oneunit-тесты падали бы на нём с ошибкой компиляции. Иначе — исторический
-	 * дефолт 1testrunner. Глобальный oneunit как команда подхватится из PATH
-	 * (resolveRunner отдаёт голое имя, если локального бинарника нет).
-	 */
-	private resolveRunnerKind(setting: string, workspaceRoot: string | undefined): OneScriptRunner {
-		if (setting === '1testrunner' || setting === 'oneunit') {
-			return setting;
-		}
-		if (
-			this.findLocalRunner('oneunit', workspaceRoot) ||
-			this.packagedefDependsOn('oneunit', workspaceRoot)
-		) {
-			return 'oneunit';
-		}
-		return '1testrunner';
-	}
+	const kind = resolveRunnerKind(runnerSetting, workspaceRoot);
+	const localPath = findLocalRunner(kind, workspaceRoot);
+	return { kind, command: localPath ? `"${localPath}"` : kind };
+}
 
-	/**
-	 * Объявляет ли packagedef проекта зависимость от пакета
-	 *
-	 * Признак «проект использует этот раннер»: например, vanessa-runner объявляет
-	 * .РазработкаЗависитОт("oneunit", ...). Файл packagedef небольшой, читаем
-	 * синхронно (как и проверку локального бинарника).
-	 */
-	private packagedefDependsOn(packageName: string, workspaceRoot: string | undefined): boolean {
-		if (!workspaceRoot) {
-			return false;
-		}
-		try {
-			const content = fsSync.readFileSync(path.join(workspaceRoot, 'packagedef'), 'utf8');
-			return packagedefDeclaresDependency(content, packageName);
-		} catch {
-			// packagedef нет (не oscript-пакет) или не прочитан — признак отсутствует
-			return false;
-		}
+/**
+ * Выбирает вид раннера: явная настройка либо автоопределение
+ *
+ * auto → oneunit, если он стоит локально (oscript_modules/bin) ИЛИ объявлен
+ * зависимостью проекта в packagedef (.ЗависитОт/.РазработкаЗависитОт("oneunit")).
+ * Второй признак ловит случай, когда oneunit установлен глобально (в PATH, не в
+ * проекте): без него автоопределение молча уступало бы место 1testrunner, и
+ * oneunit-тесты падали бы на нём с ошибкой компиляции. Иначе — исторический
+ * дефолт 1testrunner. Глобальный oneunit как команда подхватится из PATH
+ * (resolveOneScriptRunner отдаёт голое имя, если локального бинарника нет).
+ */
+function resolveRunnerKind(setting: string, workspaceRoot: string | undefined): OneScriptRunner {
+	if (setting === '1testrunner' || setting === 'oneunit') {
+		return setting;
 	}
+	if (findLocalRunner('oneunit', workspaceRoot) || packagedefDependsOn('oneunit', workspaceRoot)) {
+		return 'oneunit';
+	}
+	return '1testrunner';
+}
 
-	/**
-	 * Ищет раннер в локальной установке oscript_modules/bin
-	 */
-	private findLocalRunner(
-		kind: OneScriptRunner,
-		workspaceRoot: string | undefined
-	): string | undefined {
-		if (!workspaceRoot) {
-			return undefined;
-		}
-		const name = process.platform === 'win32' ? `${kind}.bat` : kind;
-		const localPath = path.join(workspaceRoot, 'oscript_modules', 'bin', name);
-		return fsSync.existsSync(localPath) ? localPath : undefined;
+/**
+ * Объявляет ли packagedef проекта зависимость от пакета
+ *
+ * Признак «проект использует этот раннер»: например, vanessa-runner объявляет
+ * .РазработкаЗависитОт("oneunit", ...). Файл packagedef небольшой, читаем
+ * синхронно (как и проверку локального бинарника).
+ */
+function packagedefDependsOn(packageName: string, workspaceRoot: string | undefined): boolean {
+	if (!workspaceRoot) {
+		return false;
 	}
+	try {
+		const content = fsSync.readFileSync(path.join(workspaceRoot, 'packagedef'), 'utf8');
+		return packagedefDeclaresDependency(content, packageName);
+	} catch {
+		// packagedef нет (не oscript-пакет) или не прочитан — признак отсутствует
+		return false;
+	}
+}
+
+/**
+ * Ищет раннер в локальной установке oscript_modules/bin
+ */
+function findLocalRunner(kind: OneScriptRunner, workspaceRoot: string | undefined): string | undefined {
+	if (!workspaceRoot) {
+		return undefined;
+	}
+	const name = process.platform === 'win32' ? `${kind}.bat` : kind;
+	const localPath = path.join(workspaceRoot, 'oscript_modules', 'bin', name);
+	return fsSync.existsSync(localPath) ? localPath : undefined;
 }
 
 /**
