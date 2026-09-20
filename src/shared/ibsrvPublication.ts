@@ -11,19 +11,26 @@
  * Сервер запускается как `ibsrv --data=<dir> --config=<file>`.
  */
 
+/** Публикуемый сервис: имя объекта метаданных и его корневой URL. */
+export interface PublishedService {
+	/** Имя объекта метаданных. */
+	name: string;
+	/** Корневой URL сервиса: по нему ibsrv публикует путь `/hs/<root>`. */
+	root?: string;
+}
+
 /**
  * Выбор публикации для категории сервисов (Web- или HTTP-сервисы).
  *
  * `publishByDefault: true` — публикуются все сервисы категории; список `services`
  * при этом игнорируется. Иначе публикуются только перечисленные в `services`
- * (пустой список — не публикуется ничего). Для перечисленных сервисов корневой
- * URL/синоним берёт из метаданных сам ibsrv (указываем только имя).
+ * (пустой список — не публикуется ничего).
  */
 export interface ServiceSelection {
-	/** Публиковать все сервисы категории. */
+	/** Публиковать все сервисы категории, включая сервисы расширений. */
 	publishByDefault: boolean;
-	/** Имена конкретных сервисов (когда publishByDefault = false). */
-	services: string[];
+	/** Конкретные сервисы (когда publishByDefault = false). */
+	services: readonly PublishedService[];
 }
 
 /** Что публиковать автономным сервером. */
@@ -125,6 +132,11 @@ function yamlBool(value: boolean): string {
 /**
  * Формирует строки секции категории сервисов (web-services/http-services).
  *
+ * `publish-by-default` касается сервисов основной конфигурации, сервисы
+ * расширений публикует `publish-extensions-by-default`: у выбора «все сервисы»
+ * значение у них одно. Перечисленным сервисам пишется корневой URL: без него
+ * ibsrv не публикует путь `/hs/<root>`.
+ *
  * @param key - Ключ секции YAML (`web-services` или `http-services`)
  * @param selection - Выбор публикации категории
  * @returns Строки YAML с отступом публикации (уровень внутри элемента http)
@@ -133,11 +145,16 @@ function serviceSectionLines(key: string, selection: ServiceSelection): string[]
 	const lines = [
 		`    ${key}:`,
 		`      publish-by-default: ${yamlBool(selection.publishByDefault)}`,
+		`      publish-extensions-by-default: ${yamlBool(selection.publishByDefault)}`,
 	];
 	if (!selection.publishByDefault && selection.services.length > 0) {
 		lines.push('      service:');
-		for (const name of selection.services) {
-			lines.push(`        - name: ${name}`, '          publish: yes');
+		for (const service of selection.services) {
+			lines.push(`        - name: ${service.name}`);
+			if (service.root) {
+				lines.push(`          root: ${service.root}`);
+			}
+			lines.push('          publish: yes');
 		}
 	}
 	return lines;

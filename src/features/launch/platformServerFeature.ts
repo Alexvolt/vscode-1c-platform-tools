@@ -170,15 +170,15 @@ async function selectPublishedServices(manager: PlatformServerManager): Promise<
 		{ label: 'Web-сервисы', kind: vscode.QuickPickItemKind.Separator, role: 'sep' },
 		{ label: 'Все Web-сервисы', description: 'публиковать все (по умолчанию)', role: 'webAll' },
 	];
-	for (const name of services?.web ?? []) {
-		items.push({ label: name, role: 'web', serviceName: name });
+	for (const service of services?.web ?? []) {
+		items.push({ label: service.name, role: 'web', serviceName: service.name });
 	}
 	items.push(
 		{ label: 'HTTP-сервисы', kind: vscode.QuickPickItemKind.Separator, role: 'sep' },
 		{ label: 'Все HTTP-сервисы', description: 'публиковать все (по умолчанию)', role: 'httpAll' }
 	);
-	for (const name of services?.http ?? []) {
-		items.push({ label: name, role: 'http', serviceName: name });
+	for (const service of services?.http ?? []) {
+		items.push({ label: service.name, role: 'http', serviceName: service.name });
 	}
 
 	const initial = items.filter((it) => {
@@ -187,7 +187,7 @@ async function selectPublishedServices(manager: PlatformServerManager): Promise<
 			case 'webAll': return selection.webAll;
 			case 'httpAll': return selection.httpAll;
 			case 'web': return !selection.webAll && selection.web.includes(it.serviceName!);
-			case 'http': return !selection.httpAll && selection.http.includes(it.serviceName!);
+			case 'http': return !selection.httpAll && selection.http.some((service) => service.name === it.serviceName);
 			default: return false;
 		}
 	});
@@ -200,12 +200,14 @@ async function selectPublishedServices(manager: PlatformServerManager): Promise<
 	const has = (role: PubItem['role']): boolean => picked.some((p) => p.role === role);
 	const names = (role: PubItem['role']): string[] => picked.filter((p) => p.role === role).map((p) => p.serviceName!);
 
+	const httpAll = has('httpAll');
+	const httpNames = names('http');
 	const next: PublicationSelection = {
 		odata: has('odata'),
 		webAll: has('webAll'),
 		web: names('web'),
-		httpAll: has('httpAll'),
-		http: names('http'),
+		httpAll,
+		http: httpAll ? [] : await manager.resolveHttpServices(services?.http ?? [], httpNames, root),
 	};
 	await manager.setPublicationSelection(next, root);
 

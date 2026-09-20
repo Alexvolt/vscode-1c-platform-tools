@@ -25,13 +25,14 @@ import { PLATFORM_PATH_SETTING_TITLE, resolvePlatformBinaryInRoots } from '../..
 import { projectPlatformRoots } from '../../shared/platformSettings';
 import {
 	PublicationOptions,
+	PublishedService,
 	ServerUrls,
 	buildServerConfigYaml,
 	buildServerUrls,
 	parseServerConfigParams,
 } from '../../shared/ibsrvPublication';
 import { loadProjectMetadataTree } from '../metadata/metadataTreeService';
-import { extractPublishableServices, PublishableServices } from './serverServices';
+import { extractPublishableServices, readHttpServiceRoots, PublishableService, PublishableServices } from './serverServices';
 import type { InfobaseHolder } from '../../shared/exclusiveInfobase';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import { projectMemento, SERVER_PUBLICATION_STATE } from '../../shared/projectState';
@@ -68,7 +69,8 @@ export interface PublicationSelection {
 	webAll: boolean;
 	web: string[];
 	httpAll: boolean;
-	http: string[];
+	/** HTTP-сервисы с корневыми URL: по ним ibsrv публикует пути `/hs/<root>`. */
+	http: PublishedService[];
 }
 
 /** Состояние автономного сервера. */
@@ -498,7 +500,8 @@ export class PlatformServerManager {
 	public getPublicationSelection(workspaceRoot: string | undefined = currentRoot()): PublicationSelection {
 		const stored = projectMemento(workspaceRoot).get<PublicationSelection>(SERVER_PUBLICATION_STATE);
 		if (stored) {
-			return stored;
+			// Прежний выбор хранил одни имена сервисов: корневой URL допишется при следующем выборе
+			return { ...stored, http: stored.http.map((service) => (typeof service === 'string' ? { name: service } : service)) };
 		}
 		const config = projectConfiguration(workspaceRoot);
 		return {
@@ -598,7 +601,7 @@ export class PlatformServerManager {
 			odata: selection.odata,
 			webServices: {
 				publishByDefault: selection.webAll,
-				services: selection.webAll ? [] : selection.web,
+				services: selection.webAll ? [] : selection.web.map((name) => ({ name })),
 			},
 			httpServices: {
 				publishByDefault: selection.httpAll,
@@ -623,6 +626,30 @@ export class PlatformServerManager {
 			log.warn(`Не удалось прочитать дерево метаданных: ${(error as Error).message}`);
 			return undefined;
 		}
+	}
+
+	/**
+	 * Читает корневые URL выбранных HTTP-сервисов: без них ibsrv не публикует
+	 * путь сервиса.
+	 *
+	 * @param services - Сервисы проекта из {@link loadServices}
+	 * @param names - Имена выбранных сервисов
+	 * @param workspaceRoot - Корень проекта; по умолчанию текущий
+	 * @returns Выбранные сервисы с корневыми URL
+	 */
+	public async resolveHttpServices(
+		services: readonly PublishableService[],
+		names: readonly string[],
+		workspaceRoot: string | undefined = currentRoot()
+	): Promise<PublishedService[]> {
+		const selected = names
+			.map((name) => services.find((service) => service.name === name))
+			.filter((service): service is PublishableService => service !== undefined);
+		if (!workspaceRoot || selected.length === 0) {
+			return names.map((name) => ({ name }));
+		}
+		const roots = await readHttpServiceRoots(this.context, workspaceRoot, selected);
+		return names.map((name) => ({ name, root: roots.get(name) }));
 	}
 
 	/**
