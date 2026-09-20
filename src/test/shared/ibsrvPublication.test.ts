@@ -48,14 +48,16 @@ suite('ibsrvPublication', () => {
 				'      publish: yes',
 				'    web-services:',
 				'      publish-by-default: yes',
+				'      publish-extensions-by-default: yes',
 				'    http-services:',
 				'      publish-by-default: yes',
+				'      publish-extensions-by-default: yes',
 				'',
 			].join('\n')
 		);
 	});
 
-	test('buildServerConfigYaml: точечный список HTTP-сервисов', () => {
+	test('buildServerConfigYaml: точечный список HTTP-сервисов с корневыми URL', () => {
 		const yaml = buildServerConfigYaml({
 			host: 'localhost',
 			port: 8314,
@@ -66,14 +68,22 @@ suite('ibsrvPublication', () => {
 			publication: {
 				odata: false,
 				webServices: { publishByDefault: true, services: [] },
-				httpServices: { publishByDefault: false, services: ['ОбменДанными', 'Платежи'] },
+				httpServices: {
+					publishByDefault: false,
+					services: [{ name: 'ОбменДанными', root: 'exchange' }, { name: 'Платежи' }],
+				},
 			},
 		});
-		assert.ok(yaml.includes('    http-services:\n      publish-by-default: no\n      service:\n'));
-		assert.ok(yaml.includes('        - name: ОбменДанными\n          publish: yes\n'));
+		assert.ok(
+			yaml.includes(
+				'    http-services:\n      publish-by-default: no\n      publish-extensions-by-default: no\n      service:\n'
+			)
+		);
+		assert.ok(yaml.includes('        - name: ОбменДанными\n          root: exchange\n          publish: yes\n'));
+		// корневого URL нет: пишется одно имя
 		assert.ok(yaml.includes('        - name: Платежи\n          publish: yes\n'));
 		// при publishByDefault=true секция service не печатается
-		assert.ok(!/web-services:\n {6}publish-by-default: yes\n {6}service:/.test(yaml));
+		assert.ok(!/web-services:\n {6}publish-by-default: yes\n {6}publish-extensions-by-default: yes\n {6}service:/.test(yaml));
 	});
 
 	test('buildServerConfigYaml: выборочное отключение и пустая база → /', () => {

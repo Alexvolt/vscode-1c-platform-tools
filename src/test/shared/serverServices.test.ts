@@ -1,5 +1,5 @@
 import * as assert from 'node:assert';
-import { extractPublishableServices } from '../../features/launch/serverServices';
+import { extractPublishableServices, httpServiceRoot } from '../../features/launch/serverServices';
 import type { ProjectMetadataTreeDto } from '../../features/metadata/metadataTreeService';
 
 function tree(partial: Partial<ProjectMetadataTreeDto>): ProjectMetadataTreeDto {
@@ -58,8 +58,9 @@ suite('serverServices', () => {
 		});
 
 		const result = extractPublishableServices(dto);
-		assert.deepStrictEqual(result.http, ['ОбменДанными', 'Платежи']); // отсортировано
-		assert.deepStrictEqual(result.web, ['ОбменWS']);
+		assert.deepStrictEqual(result.http.map((service) => service.name), ['ОбменДанными', 'Платежи']); // отсортировано
+		assert.deepStrictEqual(result.web.map((service) => service.name), ['ОбменWS']);
+		assert.strictEqual(result.http[0].objectXml, 'b');
 	});
 
 	test('extractPublishableServices: пустое дерево → пустые списки', () => {
@@ -84,6 +85,13 @@ suite('serverServices', () => {
 			],
 		});
 		const dto = tree({ sources: [mkSource('main'), mkSource('ext')] });
-		assert.deepStrictEqual(extractPublishableServices(dto).http, ['Общий']);
+		assert.deepStrictEqual(extractPublishableServices(dto).http.map((service) => service.name), ['Общий']);
+	});
+
+	test('httpServiceRoot: корневой URL из свойств объекта', () => {
+		assert.strictEqual(httpServiceRoot('{"kind":"httpService","scalars":{"RootURL":"billing"}}'), 'billing');
+		assert.strictEqual(httpServiceRoot('{"scalars":{"RootURL":"  "}}'), undefined);
+		assert.strictEqual(httpServiceRoot('{"scalars":{}}'), undefined);
+		assert.strictEqual(httpServiceRoot('не json'), undefined);
 	});
 });
