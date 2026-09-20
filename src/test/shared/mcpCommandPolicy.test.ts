@@ -119,6 +119,12 @@ suite('mcpCommandPolicy', () => {
 		}
 	});
 
+	test('мутационный прогон агенту доступен с исходом, отчёт в браузере нет', () => {
+		assert.strictEqual(isCommandExposedToMcp('1c-platform-tools.test.mutatos'), true);
+		assert.strictEqual(commandSupportsWait('1c-platform-tools.test.mutatos'), true);
+		assert.strictEqual(isCommandExposedToMcp('1c-platform-tools.test.mutatosReport'), false);
+	});
+
 	test('обновление компонентов агенту не отдаётся: список выбирают галочками', () => {
 		assert.strictEqual(isCommandExposedToMcp('1c-platform-tools.components.update'), false);
 	});

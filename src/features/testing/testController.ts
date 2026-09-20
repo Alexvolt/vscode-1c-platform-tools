@@ -34,8 +34,21 @@ import {
 } from '../../shared/workspaceProjects';
 import { findProjectFiles, isOutsideScanRoot } from '../artifacts/projectScan';
 import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
+import { resolveOneScriptRunner, type OneScriptRunner } from './adapters/onescriptAdapter';
 
 const log = logger.scope('testing');
+
+/** Раннер тестов OneScript проекта дерева: по нему выбираются пункты меню узлов. */
+const ONESCRIPT_RUNNER_CONTEXT = '1c-platform-tools.test.onescriptRunner';
+
+/**
+ * Показывает раннер проекта в контексте окна.
+ *
+ * @param runner - Раннер или undefined, когда дерева нет
+ */
+function setOneScriptRunnerContext(runner: OneScriptRunner | undefined): void {
+	void vscode.commands.executeCommand('setContext', ONESCRIPT_RUNNER_CONTEXT, runner);
+}
 
 /**
  * Сегменты пути, исключаемые при поиске тестовых файлов
@@ -99,7 +112,7 @@ function missingRunnerHint(result: { stdout: string; stderr: string; exitCode: n
 	return (
 		'\nПохоже, раннер тестов не найден. Установите зависимости проекта ' +
 		'(команда «Установить зависимости» или opm install --dev -l) ' +
-		'либо укажите путь к раннеру в настройках testing.*Path.'
+		'либо укажите путь к раннеру в настройке test.path.onescriptRunner или test.path.onebdd.'
 	);
 }
 
@@ -248,6 +261,30 @@ export class TestingController implements vscode.Disposable {
 	/** Корень проекта, для которого строится дерево */
 	public get root(): string | undefined {
 		return this.projectRoot;
+	}
+
+	/**
+	 * Отбор тестов OneScript по узлу дерева: файл набора, у кейса ещё его метод.
+	 *
+	 * У параметризованного кейса метод это процедура теста, а не имя набора значений.
+	 *
+	 * @param item - Узел дерева
+	 * @returns Корень проекта дерева и отбор; undefined для узлов других фреймворков, каталогов и корня
+	 */
+	public oneScriptSelection(item: vscode.TestItem): { root: string; file: string; method?: string } | undefined {
+		const root = this.treeRoot;
+		if (!root) {
+			return undefined;
+		}
+		const file = this.files.get(item.id);
+		if (file) {
+			return file.adapter.id === 'onescript' && file.item.uri ? { root, file: file.item.uri.fsPath } : undefined;
+		}
+		const parent = item.parent ? this.files.get(item.parent.id) : undefined;
+		if (parent?.adapter.id !== 'onescript' || !parent.item.uri) {
+			return undefined;
+		}
+		return { root, file: parent.item.uri.fsPath, method: this.caseMethodNames.get(item.id) ?? item.label };
 	}
 
 	/**
@@ -404,6 +441,7 @@ export class TestingController implements vscode.Disposable {
 			this.controller.items.replace([]);
 			this.treeRoot = root;
 		}
+		setOneScriptRunnerContext(resolveOneScriptRunner(root).kind);
 
 		const nextFileIds = new Set<string>();
 		for (const { adapter, glob, classified } of discovered) {
@@ -444,6 +482,7 @@ export class TestingController implements vscode.Disposable {
 		this.files.clear();
 		this.controller.items.replace([]);
 		this.treeRoot = undefined;
+		setOneScriptRunnerContext(undefined);
 	}
 
 	/**
@@ -1265,9 +1304,11 @@ export class TestingController implements vscode.Disposable {
 				this.vrunner.executeVRunnerCancellable(args, { env, token, onOutput, appendOverrides: false })
 			);
 		}
+		// Обёртки раннеров запускают oscript по имени: движок задаёт PATH
+		const processEnv = await runWithProject(root, () => this.vrunner.oneScriptEnv(env));
 		return runCancellableCommand(args[0], {
 			cwd: root,
-			env,
+			env: processEnv,
 			token,
 			onOutput
 		});
@@ -1438,7 +1479,7 @@ export class TestingController implements vscode.Disposable {
 	/**
 	 * Абсолютный путь к базовому каталогу временных отчётов прогонов
 	 *
-	 * Единый источник пути (testing.reportsPath) для создания подкаталогов
+	 * Единый источник пути (test.path.reports) для создания подкаталогов
 	 * прогонов и для очистки устаревших отчётов.
 	 *
 	 * @param root - Корень проекта

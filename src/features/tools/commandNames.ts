@@ -458,6 +458,17 @@ export function getAllureReportCommandName(): CommandNameAndTitle {
 }
 
 /**
+ * Получить название и заголовок для команды мутационного тестирования
+ */
+export function getMutationTestingCommandName(): CommandNameAndTitle {
+	return {
+		id: '1c-platform-tools.test.mutatos',
+		name: 'Мутационное тестирование',
+		title: 'Мутационное тестирование'
+	};
+}
+
+/**
  * Получить название и заголовок для команды YAxUnit тестов
  */
 export function getYAxUnitTestsCommandName(): CommandNameAndTitle {

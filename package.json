@@ -1867,6 +1867,21 @@
         "category": "1С: Тестирование"
       },
       {
+        "command": "1c-platform-tools.test.mutatos",
+        "title": "Мутационное тестирование",
+        "category": "1С: Тестирование"
+      },
+      {
+        "command": "1c-platform-tools.test.mutatosItem",
+        "title": "Мутационное тестирование",
+        "category": "1С: Тестирование"
+      },
+      {
+        "command": "1c-platform-tools.test.mutatosReport",
+        "title": "Открыть отчёт мутаций",
+        "category": "1С: Тестирование"
+      },
+      {
         "command": "1c-platform-tools.test.loadExtensions",
         "title": "Загрузить тестовые расширения",
         "icon": "$(cloud-upload)",
@@ -2357,6 +2372,18 @@
           "when": "onecPlatformTools.debug.measureActive"
         },
         {
+          "command": "1c-platform-tools.test.mutatos",
+          "when": "1c-platform-tools.is1CProject"
+        },
+        {
+          "command": "1c-platform-tools.test.mutatosItem",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.test.mutatosReport",
+          "when": "1c-platform-tools.is1CProject"
+        },
+        {
           "command": "1c-platform-tools.tools.refresh",
           "when": "false"
         },
@@ -2743,6 +2770,13 @@
         {
           "command": "1c-platform-tools.project.copyPath",
           "when": "false"
+        }
+      ],
+      "testing/item/context": [
+        {
+          "command": "1c-platform-tools.test.mutatosItem",
+          "when": "controllerId == '1c-platform-tools-tests' && testId =~ /^onescript\\|file:/ && 1c-platform-tools.test.onescriptRunner == 'oneunit'",
+          "group": "1c-platform-tools@1"
         }
       ],
       "debug/toolBar": [
@@ -4700,7 +4734,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
     "test": "vscode-test && npm run test:node",
-    "test:node": "node --test out/test/shared/gitHead.node.js out/test/shared/ovmPaths.node.js out/test/shared/processOutput.node.js out/test/utils/shellArgvRoundtrip.node.js",
+    "test:node": "node --test out/test/shared/gitHead.node.js out/test/shared/ovmPaths.node.js out/test/shared/processOutput.node.js out/test/utils/shellArgvRoundtrip.node.js out/test/shared/executableLookup.node.js out/test/testing/mutatosRun.node.js out/test/testing/mutatosSources.node.js out/test/testing/mutatosReport.node.js",
     "package": "vsce package",
     "changelog": "git-cliff --config cliff.toml --output CHANGELOG.md",
     "docs:dev": "vitepress dev docs",

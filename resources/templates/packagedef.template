@@ -9,7 +9,7 @@
     .ЗависитОт("add")
     .ЗависитОт("vanessa-automation-single")
     .ЗависитОт("vanessa-runner", "3.0.0")
-    .ЗависитОт("1testrunner")
-    .ЗависитОт("oneunit")
+    .РазработкаЗависитОт("1testrunner")
+    .РазработкаЗависитОт("oneunit")
 
 ;

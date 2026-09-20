@@ -29,6 +29,7 @@ import { resolveMetadataInRoots } from '../features/tools/terminalLinks';
 import { resolveProjectLayout, type SourceRoot } from '../shared/projectLayout';
 import { readRunSummary, formatRunSummary, RunReportFormat } from '../features/testing/runReportSummary';
 import { ensureAllure } from '../shared/allureComponent';
+import { openMutationReport, runMutationTesting } from '../features/testing/mutatos/mutatosCommand';
 import { logger } from '../shared/logger';
 
 const log = logger.scope('testing');
@@ -479,6 +480,23 @@ export class TestCommands extends BaseCommand {
 			{ kind: 'run.enterprise', execute, command: commandParam, common: connectionArgs },
 			opts, 'Запуск обработки в Предприятии', undefined, '1c-platform-tools.epf.run'
 		);
+	}
+
+	/**
+	 * Запускает мутационное тестирование OneScript через mutatos из зависимостей проекта.
+	 *
+	 * @param opts — опции выполнения; при wait: true ответ приходит после прогона
+	 * @returns void в UI-режиме, StructuredCommandResult при wait: true
+	 */
+	async runMutationTesting(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
+		return runMutationTesting(this.vrunner, opts);
+	}
+
+	/**
+	 * Открывает HTML-отчёт мутационного тестирования во внешнем браузере.
+	 */
+	async openMutationReport(): Promise<void> {
+		return openMutationReport(this.vrunner);
 	}
 
 	/**

@@ -117,6 +117,10 @@ const HIDDEN_EXACT = [
 	`${COMMAND_PREFIX}project.revealInExplorer`,
 	`${COMMAND_PREFIX}project.openTerminal`,
 	`${COMMAND_PREFIX}project.copyPath`,
+	// Отчёт мутаций открывается в браузере человека; агенту итог и пути отчётов отдаёт прогон
+	`${COMMAND_PREFIX}test.mutatosReport`,
+	// Пункт меню узла панели тестирования: без узла команде нечего запускать
+	`${COMMAND_PREFIX}test.mutatosItem`,
 ];
 
 /**

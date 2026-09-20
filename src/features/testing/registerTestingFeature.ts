@@ -1,5 +1,6 @@
 import { onDidChangeProjectLayout } from '../../shared/projectLayoutWatch';
-import { onDidChangeCurrentProject, onDidChangeProjects } from '../../shared/workspaceProjects';
+import { onDidChangeCurrentProject, onDidChangeProjects, runWithProject } from '../../shared/workspaceProjects';
+import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 import * as vscode from 'vscode';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { TestingController, type TestingControllerOptions } from './testController';
@@ -10,6 +11,8 @@ import { YaxunitAdapter } from './adapters/yaxunitAdapter';
 import { OneScriptAdapter } from './adapters/onescriptAdapter';
 import { OneBddAdapter } from './adapters/onebddAdapter';
 import { registerConfigureTestingCommand } from './configureTestingCommand';
+import { disposeMutatosDiagnostics } from './mutatos/mutatosDiagnostics';
+import { runMutationTesting } from './mutatos/mutatosCommand';
 
 /**
  * Результат регистрации фичи тестирования
@@ -51,9 +54,32 @@ export function registerTestingFeature(params: {
 		vrunner
 	});
 	return {
-		disposables: [...explorer.disposables, configureCommand],
+		disposables: [
+			...explorer.disposables,
+			configureCommand,
+			registerMutationTestingOfItem(explorer.controller, vrunner),
+			new vscode.Disposable(disposeMutatosDiagnostics)
+		],
 		rebuild: explorer.rebuild
 	};
+}
+
+/**
+ * Мутационное тестирование из контекстного меню узла OneScript: мутанты
+ * проверяются тестами выбранного набора или метода.
+ *
+ * @param controller - Контроллер дерева тестов
+ * @param vrunner - Менеджер инструментов проекта
+ */
+function registerMutationTestingOfItem(controller: TestingController, vrunner: VRunnerManager): vscode.Disposable {
+	return vscode.commands.registerCommand('1c-platform-tools.test.mutatosItem', async (item?: vscode.TestItem) => {
+		const selection = item ? controller.oneScriptSelection(item) : undefined;
+		if (!selection || !ensureWorkspaceTrusted('команды 1С')) {
+			return;
+		}
+		const { root, ...tests } = selection;
+		await runWithProject(root, () => runMutationTesting(vrunner, undefined, { selection: tests }));
+	});
 }
 
 /**

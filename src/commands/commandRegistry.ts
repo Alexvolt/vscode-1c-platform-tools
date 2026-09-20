@@ -417,6 +417,12 @@ export function registerCommands(
 		registerVRunnerCommand('1c-platform-tools.test.yaxunit', (opts) =>
 			commands.test.runYAxUnit(opts)
 		),
+		registerVRunnerCommand('1c-platform-tools.test.mutatos', (opts) =>
+			commands.test.runMutationTesting(opts)
+		),
+		registerVRunnerCommand('1c-platform-tools.test.mutatosReport', () =>
+			commands.test.openMutationReport()
+		),
 		registerVRunnerCommand('1c-platform-tools.test.allure', (opts) =>
 			commands.test.generateAllureReport(opts)
 		),

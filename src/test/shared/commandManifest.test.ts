@@ -108,6 +108,24 @@ suite('манифест команд', () => {
 		);
 	});
 
+	test('группа тестирования: прогоны, мутационное тестирование, затем отчёт Allure', () => {
+		const group = TREE_GROUPS.find((item) => item.sectionType === 'test');
+		assert.ok(group, 'группа «Тестирование» пропала из дерева');
+		assert.deepStrictEqual(
+			group.commands.map((command) => command.command),
+			[
+				'1c-platform-tools.test.xunit',
+				'1c-platform-tools.syntaxCheck.run',
+				'1c-platform-tools.edt.validate',
+				'1c-platform-tools.test.vanessa',
+				'1c-platform-tools.test.yaxunit',
+				'1c-platform-tools.test.mutatos',
+				'1c-platform-tools.test.allure',
+			],
+			'состав или порядок команд тестирования разошёлся с задуманным'
+		);
+	});
+
 	test('команды расширений решения не смешаны с тестовыми', () => {
 		const group = TREE_GROUPS.find((item) => item.sectionType === 'extension');
 		assert.ok(group, 'группа «Расширения» пропала из дерева');

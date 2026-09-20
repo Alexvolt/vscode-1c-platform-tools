@@ -5,7 +5,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
-import { withBinDirFirst } from '../../shared/ovmPaths';
+import { withBinDirFirst, withSelectedEngine } from '../../shared/ovmPaths';
 
 const OVM_BIN = path.join('C:', 'Users', 'user', 'AppData', 'Local', 'ovm', 'current', 'bin');
 const SYSTEM_BIN = path.join('C:', 'Program Files', 'OneScript', 'bin');
@@ -41,5 +41,28 @@ describe('withBinDirFirst', () => {
 	test('остальные переменные сохраняются', () => {
 		const env = withBinDirFirst({ Path: SYSTEM_BIN, OVM_OSCRIPTBIN: OVM_BIN }, OVM_BIN);
 		assert.equal(env.OVM_OSCRIPTBIN, OVM_BIN);
+	});
+});
+
+describe('withSelectedEngine', () => {
+	test('каталог первым в PATH и в OVM_OSCRIPTBIN: автозапуск cmd не подменит движок', () => {
+		const env = withSelectedEngine({ Path: OVM_BIN, OVM_OSCRIPTBIN: OVM_BIN }, SYSTEM_BIN);
+
+		assert.equal(env.Path, `${SYSTEM_BIN}${path.delimiter}${OVM_BIN}`);
+		assert.equal(env.OVM_OSCRIPTBIN, SYSTEM_BIN);
+	});
+
+	test('без каталога установки окружение остаётся прежним', () => {
+		const source = { Path: SYSTEM_BIN, OVM_OSCRIPTBIN: OVM_BIN };
+
+		assert.deepEqual(withSelectedEngine(source, undefined), source);
+		assert.deepEqual(withSelectedEngine(source, ''), source);
+	});
+
+	test('исходное окружение не меняется', () => {
+		const source = { Path: SYSTEM_BIN, OVM_OSCRIPTBIN: OVM_BIN };
+		withSelectedEngine(source, SYSTEM_BIN);
+
+		assert.equal(source.OVM_OSCRIPTBIN, OVM_BIN);
 	});
 });

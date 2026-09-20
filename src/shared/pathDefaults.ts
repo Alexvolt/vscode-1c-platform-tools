@@ -81,7 +81,9 @@ export const BUILD_SUBDIRS = {
 	/** Тестовые обработки: build/out/tests/epf */
 	testsEpf: 'tests/epf',
 	/** Промежуточный каталог: собранное здесь получает имена, заданные вызовом */
-	staging: 'staging'
+	staging: 'staging',
+	/** Отчёты мутационного тестирования: build/out/mutatos */
+	mutatos: 'mutatos'
 } as const;
 
 /** Дефолты путей группы 1c-platform-tools.test.* */

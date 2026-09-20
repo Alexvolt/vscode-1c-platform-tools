@@ -119,6 +119,7 @@
           "1c-platform-tools.test.decompileExtensions",
           "1c-platform-tools.test.dumpExtensions",
           "1c-platform-tools.test.loadExtensions",
+          "1c-platform-tools.test.mutatos",
           "1c-platform-tools.test.validateEdt",
           "1c-platform-tools.test.vanessa",
           "1c-platform-tools.test.xunit",

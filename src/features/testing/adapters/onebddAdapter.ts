@@ -91,7 +91,7 @@ export class OneBddAdapter implements TestFrameworkAdapter {
 	}
 
 	/**
-	 * Путь к 1bdd: настройка testing.onebddPath (относительные пути — от корня
+	 * Путь к 1bdd: настройка test.path.onebdd (относительные пути — от корня
 	 * проекта) → локальная установка oscript_modules/bin → PATH
 	 */
 	private getRunnerCommand(): string {

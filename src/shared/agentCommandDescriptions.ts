@@ -61,6 +61,10 @@ export const AGENT_COMMAND_DESCRIPTIONS: Record<string, AgentCommandDescription>
 		title: 'Запустить тесты YAxUnit; результат берётся из jUnit-отчёта прогона',
 		category: TESTING,
 	},
+	'1c-platform-tools.test.mutatos': {
+		title: 'Запустить мутационное тестирование OneScript: mutatos из зависимостей проекта правит исходники проекта по одной мутации и гоняет тесты OneUnit; в ответе индекс мутаций, число мутантов по исходам и выжившие мутанты с позициями, отчёты JSON, HTML и XML ложатся в каталог результатов сборки',
+		category: TESTING,
+	},
 	'1c-platform-tools.syntaxCheck.run': {
 		title: 'Запустить синтаксический контроль конфигурации; ошибки возвращаются списком с путями к модулям',
 		category: TESTING,
