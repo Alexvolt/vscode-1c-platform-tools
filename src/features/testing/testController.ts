@@ -33,6 +33,7 @@ import {
 	type ProjectScanRoot
 } from '../../shared/workspaceProjects';
 import { findProjectFiles, isOutsideScanRoot } from '../artifacts/projectScan';
+import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 
 const log = logger.scope('testing');
 
@@ -739,6 +740,10 @@ export class TestingController implements vscode.Disposable {
 	): Promise<void> {
 		const root = this.treeRoot;
 		if (!root) {
+			return;
+		}
+		// Тесты исполняются раннером из папки проекта
+		if (!ensureWorkspaceTrusted('прогон тестов')) {
 			return;
 		}
 		// Замораживаем структуру дерева на всё время обработки запроса, включая

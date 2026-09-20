@@ -15,6 +15,7 @@ import { readManifestCommands } from './commandCatalog';
 import { extractCommandFlags, resolveRequestDirectory, resolveRequestRoot } from './ipcRequest';
 import { hasProjectFile } from './projectLayout';
 import { normalizeProjectRoot, runWithProject } from './workspaceProjects';
+import { isWorkspaceTrusted, onWorkspaceTrustGranted, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
 import { initializeChoices } from '../features/projects/projectInitialization';
 import { workspaceProjectsSource, type WorkspaceProjectsSource } from '../features/projects/workspaceProjectsSource';
 
@@ -43,7 +44,7 @@ interface IpcResponse {
 	};
 }
 
-interface IpcServerConfig {
+export interface IpcServerConfig {
 	enabled: boolean;
 	host: string;
 	port: number;
@@ -279,6 +280,16 @@ export async function handleExecuteCommand(
 	window: IpcWindow = extensionWindow()
 ): Promise<IpcResponse> {
 	const base = buildResponseBase(request.id);
+
+	// Канал в недоверенной папке не поднимается; проверка остаётся на случай,
+	// когда он уже слушает, а команда приходит для другого окна
+	if (!isWorkspaceTrusted()) {
+		log.warn('папка не доверенная, команда агента не выполнена');
+		return {
+			...base,
+			error: { message: WORKSPACE_TRUST_REQUIRED, code: 'WORKSPACE_NOT_TRUSTED' },
+		};
+	}
 
 	if (typeof params.commandId !== 'string' || params.commandId.trim() === '') {
 		return {
@@ -549,18 +560,39 @@ function listenServer(server: net.Server, config: IpcServerConfig): void {
 	});
 }
 
+/**
+ * Открывает канал по готовым настройкам.
+ *
+ * Единственное место, где канал начинает слушать порт: проверка доверия стоит
+ * здесь, а не у подписок, поэтому другой вызов её не обойдёт. Канал исполняет
+ * команды расширения, и в недоверенной папке он не открывается: иначе настройка
+ * проекта решала бы это за пользователя.
+ *
+ * @param config - Настройки канала
+ * @param extensionId - Идентификатор расширения для ответа ping
+ * @returns Слушающий сервер либо null, если канал не открыт
+ */
+export function openIpcChannel(config: IpcServerConfig, extensionId: string): net.Server | null {
+	if (!isWorkspaceTrusted()) {
+		log.info('папка не доверенная, канал не открыт');
+		return null;
+	}
+	if (!config.enabled) {
+		log.debug('сервер отключен настройкой 1c-platform-tools.ipc.enabled');
+		return null;
+	}
+	const server = createServer(config, extensionId);
+	listenServer(server, config);
+	return server;
+}
+
 export function startIpcServer(context: vscode.ExtensionContext): void {
 	const extensionId = 'yellow-hammer.1c-platform-tools';
 	let config = readConfig();
 	let activeServer: net.Server | null = null;
 
 	const start = (): void => {
-		if (!config.enabled) {
-			log.debug('сервер отключен настройкой 1c-platform-tools.ipc.enabled');
-			return;
-		}
-		activeServer = createServer(config, extensionId);
-		listenServer(activeServer, config);
+		activeServer = openIpcChannel(config, extensionId);
 	};
 
 	const stop = (): void => {
@@ -579,6 +611,11 @@ export function startIpcServer(context: vscode.ExtensionContext): void {
 				config = readConfig();
 				start();
 			}
+		}),
+		onWorkspaceTrustGranted(() => {
+			stop();
+			config = readConfig();
+			start();
 		}),
 		{ dispose: stop },
 	);

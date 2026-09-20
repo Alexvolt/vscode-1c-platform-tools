@@ -5,6 +5,7 @@
 
 import * as vscode from 'vscode';
 import { sameProjectRoot, workspaceFolderOf } from '../../shared/workspaceProjects';
+import { untrustedWorkspaceBlocks } from '../../shared/workspaceTrust';
 
 /** Терминалы, созданные расширением: корень проекта команды. */
 const terminalRoots = new WeakMap<vscode.Terminal, string>();
@@ -110,8 +111,12 @@ export interface ProjectTerminalOptions {
  * с тем же именем и каталогом или новый.
  *
  * @param options - Имя, каталог, окружение и проект
+ * @returns Терминал; undefined в недоверенной папке, команду в него не пишут
  */
-export function projectTerminal(options: ProjectTerminalOptions): vscode.Terminal {
+export function projectTerminal(options: ProjectTerminalOptions): vscode.Terminal | undefined {
+	if (untrustedWorkspaceBlocks(`терминал ${options.name}`)) {
+		return undefined;
+	}
 	const terminal =
 		reusableTerminal(vscode.window.terminals, options.name, options.cwd) ??
 		// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем

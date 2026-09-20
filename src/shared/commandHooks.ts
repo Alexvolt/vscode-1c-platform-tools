@@ -4,6 +4,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { logger } from './logger';
 import { projectRootKey } from './workspaceProjects';
+import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
 
 const execAsync = promisify(exec);
 const log = logger.scope('hooks');
@@ -95,6 +96,10 @@ async function runStep(
 	env: NodeJS.ProcessEnv,
 	cwd: string
 ): Promise<{ exitCode: number; output: string }> {
+	// Шаги приходят из .1cpt/hooks.json проекта: это команды оболочки из открытой папки
+	if (untrustedWorkspaceBlocks(`хук: ${step.command}`)) {
+		return { exitCode: 1, output: WORKSPACE_TRUST_REQUIRED };
+	}
 	const timeoutMs = (step.timeout ?? DEFAULT_TIMEOUT_MS / 1000) * 1000;
 	try {
 		const { stdout, stderr } = await execAsync(step.command, {

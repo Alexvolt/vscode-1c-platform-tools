@@ -62,6 +62,7 @@ import { ACTIVE_ENV_OVERRIDES_STATE, ACTIVE_ENV_PROFILE_STATE, projectMemento } 
 import { currentRoot, projectRootKey, runWithProject } from './workspaceProjects';
 import { projectConfiguration } from './projectConfiguration';
 import { projectTerminal } from '../features/tasks/terminalProjects';
+import { isWorkspaceTrusted, untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
 
 const log = logger.scope('vrunner');
 
@@ -87,6 +88,11 @@ export interface VRunnerExecutionResult {
 	stderr: string;
 	/** Код возврата команды (0 - успех, иначе - ошибка) */
 	exitCode: number;
+}
+
+/** Исход команды, которую не запустили из недоверенной папки. */
+function untrustedExecutionResult(): VRunnerExecutionResult {
+	return { success: false, stdout: '', stderr: WORKSPACE_TRUST_REQUIRED, exitCode: 1 };
 }
 
 /** Состояние файла настроек активного профиля. */
@@ -552,6 +558,11 @@ export class VRunnerManager {
 	 */
 	private runCommandForCheck(commandPath: string, args: string[], binDir?: string): Promise<boolean> {
 		return new Promise((resolve) => {
+			// Проверка запускает найденный бинарь, в том числе из oscript_modules проекта
+			if (untrustedWorkspaceBlocks(`проверка ${commandPath}`)) {
+				resolve(false);
+				return;
+			}
 			const command = buildProcessCommand(commandPath, args);
 			const options = { maxBuffer: 1024 * 1024, timeout: 10000, env: this.childEnv(undefined, binDir) };
 			exec(command, options, (error) => {
@@ -645,6 +656,12 @@ export class VRunnerManager {
 
 		if (!version) {
 			version = await this.readVRunnerVersionFromOpmMetadata();
+		}
+
+		// В недоверенной папке vrunner не запускается, поэтому пустой итог не кэшируем:
+		// иначе версия осталась бы неопределённой до конца сеанса и после выдачи доверия
+		if (!version && !isWorkspaceTrusted()) {
+			return undefined;
 		}
 
 		if (version) {
@@ -1158,6 +1175,10 @@ export class VRunnerManager {
 	 */
 	public async checkDockerAvailable(): Promise<boolean> {
 		return new Promise((resolve) => {
+			if (untrustedWorkspaceBlocks('проверка Docker')) {
+				resolve(false);
+				return;
+			}
 			exec('docker --version', { maxBuffer: 1024 * 1024 }, (error) => {
 				resolve(!error);
 			});
@@ -1728,6 +1749,9 @@ export class VRunnerManager {
 		}
 
 		const terminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, env: options?.env, root: this.getEffectiveRoot() });
+		if (!terminal) {
+			return;
+		}
 		// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 		terminal.sendText(command);
 		terminal.show();
@@ -1799,6 +1823,9 @@ export class VRunnerManager {
 				return;
 			}
 			const dockerTerminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, env: options?.env, root: this.getEffectiveRoot() });
+			if (!dockerTerminal) {
+				return;
+			}
 			// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 			dockerTerminal.sendText(command);
 			dockerTerminal.show();
@@ -1813,6 +1840,9 @@ export class VRunnerManager {
 		const fullCommand = joinCommands(commands, shellType);
 
 		const seqTerminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, env: options?.env, root: this.getEffectiveRoot() });
+		if (!seqTerminal) {
+			return;
+		}
 		// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 		seqTerminal.sendText(fullCommand);
 		seqTerminal.show();
@@ -1908,6 +1938,9 @@ export class VRunnerManager {
 		args: string[],
 		options?: { cwd?: string; env?: NodeJS.ProcessEnv }
 	): Promise<VRunnerExecutionResult> {
+		if (untrustedWorkspaceBlocks(`vrunner ${args[0] ?? ''}`.trim())) {
+			return untrustedExecutionResult();
+		}
 		const useDocker = await this.shouldUseDocker();
 		const cwd = options?.cwd || this.getEffectiveRoot();
 
@@ -2057,6 +2090,9 @@ export class VRunnerManager {
 		const command = buildCommand(opmPath, processedArgs, shellType);
 
 		const opmTerminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, root: this.getEffectiveRoot() });
+		if (!opmTerminal) {
+			return;
+		}
 		// eslint-disable-next-line no-restricted-syntax -- execution.useTasks === false: терминал выбран пользователем
 		opmTerminal.sendText(command);
 		opmTerminal.show();
@@ -2077,6 +2113,9 @@ export class VRunnerManager {
 		args: string[],
 		options?: { cwd?: string }
 	): Promise<VRunnerExecutionResult> {
+		if (untrustedWorkspaceBlocks(`opm ${args[0] ?? ''}`.trim())) {
+			return untrustedExecutionResult();
+		}
 		return new Promise((resolve) => {
 			const { path: opmPath, leadingArgs } = this.getOpmInvocation();
 			const command = buildProcessCommand(opmPath, [...leadingArgs, ...args]);
@@ -2114,6 +2153,9 @@ export class VRunnerManager {
 		args: string[],
 		options?: { cwd?: string }
 	): Promise<VRunnerExecutionResult> {
+		if (untrustedWorkspaceBlocks(`allure ${args[0] ?? ''}`.trim())) {
+			return untrustedExecutionResult();
+		}
 		return new Promise((resolve) => {
 			const command = buildProcessCommand(this.getAllurePath(), args);
 

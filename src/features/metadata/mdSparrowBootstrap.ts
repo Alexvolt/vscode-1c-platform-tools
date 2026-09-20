@@ -195,10 +195,6 @@ export function checkMdSparrowUpdateInBackground(
 	onUpdateApplied: () => void,
 	root: string | undefined = currentRoot()
 ): void {
-	// Компоненты не качаются в недоверенной папке: дальше их запускает Java
-	if (!vscode.workspace.isTrusted) {
-		return;
-	}
 	const cfg = projectConfiguration(root);
 	if (cfg.get<string>('components.path.metadataJar', '').trim()) {
 		return;

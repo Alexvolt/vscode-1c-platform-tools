@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { spawn, exec } from 'node:child_process';
 import { logger } from './logger';
 import { ProcessOutputDecoder } from './processOutput';
+import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
 
 const log = logger.scope('process');
 
@@ -104,6 +105,14 @@ export function runCancellableCommand(
 		// Отменённый заранее запуск не стартует: иначе процесс успел бы создать контейнер или базу
 		if (options?.token?.isCancellationRequested) {
 			resolve({ success: false, stdout, stderr, exitCode: -1, cancelled: true });
+			return;
+		}
+
+		// Единственная точка запуска дочерних процессов расширения: терминал задачи,
+		// панель тестирования и синхронные команды приходят сюда
+		if (untrustedWorkspaceBlocks(command)) {
+			options?.onOutput?.(`${WORKSPACE_TRUST_REQUIRED}\n`);
+			resolve({ success: false, stdout, stderr: WORKSPACE_TRUST_REQUIRED, exitCode: -1, cancelled: false });
 			return;
 		}
 

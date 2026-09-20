@@ -24,6 +24,7 @@ import { notifyQuiet } from '../../shared/notify';
 import { readPipelines } from '../../shared/pipelines/pipelineFile';
 import type { Pipeline } from '../../shared/pipelines/pipelineTypes';
 import { VRunnerManager } from '../../shared/vrunnerManager';
+import { withWorkspaceTrust } from '../../shared/workspaceTrust';
 
 const log = logger.scope('ui');
 
@@ -262,18 +263,20 @@ export function registerMainTreeCommands(
 
 	const launchRunCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.tasks.run',
-		inCurrentProject(async (taskLabel: string) => {
+		// Задача и конфигурация запуска описаны в папке рабочей области
+		withWorkspaceTrust('1c-platform-tools.tasks.run', inCurrentProject(async (taskLabel: string) => {
 			if (!isProjectRef.current) {
 				showNot1CProjectMessage();
 				return;
 			}
 			await workspaceTasksCommands.runTask(taskLabel);
-		})
+		}))
 	);
 
 	const oscriptRunCommand = vscode.commands.registerCommand(
 		'1c-platform-tools.tasks.runOscript',
-		inCurrentProject(async (taskName?: unknown) => {
+		// Файл задачи лежит в tasks/ проекта и исполняется oscript
+		withWorkspaceTrust('1c-platform-tools.tasks.runOscript', inCurrentProject(async (taskName?: unknown) => {
 			if (isAgentOptions(taskName)) {
 				return agentInteractiveError('Передайте имя задачи строкой (см. tasks/*.os).');
 			}
@@ -282,7 +285,7 @@ export function registerMainTreeCommands(
 				return;
 			}
 			await oscriptTasksCommands.runOscriptTask(typeof taskName === 'string' ? taskName : undefined);
-		})
+		}))
 	);
 
 	const oscriptAddTaskCommand = vscode.commands.registerCommand(

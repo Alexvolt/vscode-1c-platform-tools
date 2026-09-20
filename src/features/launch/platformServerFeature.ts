@@ -26,6 +26,7 @@ import {
 	workspaceFolderOf,
 } from '../../shared/workspaceProjects';
 import { inCurrentProject, projectLabel } from '../../commands/projectScope';
+import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 import type { StructuredCommandResult } from '../../shared/commandExecutionTypes';
 
 /** Изменяемая ссылка на признак проекта 1С. */
@@ -231,11 +232,16 @@ async function selectPublishedServices(manager: PlatformServerManager): Promise<
  *
  * @param manager - Менеджер сервера
  */
-async function startServerDebug(manager: PlatformServerManager): Promise<void> {
+export async function startServerDebug(manager: PlatformServerManager): Promise<void> {
 	const root = currentRoot();
 	const workspaceFolder = root === undefined ? undefined : workspaceFolderOf(root);
 	if (root === undefined || !workspaceFolder) {
 		vscode.window.showErrorMessage('Откройте рабочую область проекта 1С.');
+		return;
+	}
+
+	// Проверка до вопроса про порт отладки: иначе настройка проекта менялась бы ради запуска, которого не будет
+	if (!ensureWorkspaceTrusted('отладка через автономный сервер')) {
 		return;
 	}
 

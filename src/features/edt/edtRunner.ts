@@ -24,6 +24,7 @@ import { findEdtInstallations, pickEdtInstallation, type EdtInstallation } from 
 import { isEdtProject } from '../../shared/projectLayout';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import { currentRoot } from '../../shared/workspaceProjects';
+import { ensureWorkspaceTrusted, WORKSPACE_TRUST_REQUIRED } from '../../shared/workspaceTrust';
 
 const log = logger.scope('edt');
 
@@ -443,6 +444,11 @@ export async function ensureProjectRegistered(
  * @returns Код возврата процесса и причина неудачи
  */
 export async function runEdtCommand(request: EdtCommand): Promise<EdtRunResult> {
+	// 1cedtcli работает над исходным кодом проекта, а путь к нему задают настройки edt.*
+	if (!ensureWorkspaceTrusted(`EDT ${request.command}`)) {
+		return { exitCode: 1, error: WORKSPACE_TRUST_REQUIRED };
+	}
+
 	const settings = readEdtSettings();
 	const installation = resolveEdt(settings);
 	if (!installation) {
