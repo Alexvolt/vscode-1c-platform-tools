@@ -26,6 +26,9 @@
 | Сочетание | Команда | В конфигураторе |
 | --- | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>F7</kbd> | Синтаксический контроль | то же сочетание |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd> | Запустить автономный сервер | — |
+| <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd> | Остановить автономный сервер | — |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>F5</kbd> | Перезапустить автономный сервер | — |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | Открыть список проектов | — |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> | Показать в дереве | — |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Сохранить изменения формы | — |
