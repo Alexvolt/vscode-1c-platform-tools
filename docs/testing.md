@@ -134,7 +134,7 @@ project/
 
 Секция `yaxunit` профиля задаёт запуск тестов YAxUnit из панели и командой «YAxUnit тесты»: конфиг в `--command` (`RunUnitTests=<конфиг>`) вместо настройки `test.path.yaxunitConfig`, режим клиента `--ordinaryapp`, файл кода возврата `--exitCodePath`, а также `--additional` и `--no-wait`. Так разные профили запускают разные конфиги, например дымовой и полный. Секция добавляется в редакторе профиля и при создании файла настроек.
 
-В `autumn-properties.json` это секция `vrunner.test.yaxunit` с опциями команды `vrunner test yaxunit`: готовый конфиг `yaxunit-config`, отчёт `report-format` и `report-path`, файл кода возврата `exitcode`, фильтры `ext`, `modules`, `tests`, `tags` и `suites`. Готовый конфиг используется как есть, поэтому отчёт, код возврата и фильтры из секции действуют, когда конфиг не задан.
+В `autumn-properties.json` это секция `vrunner.test.yaxunit` с опциями команды `vrunner test yaxunit`: готовый конфиг `yaxunit-config`, отчёт `report-format` и `report-path`, файл кода возврата `exitcode`, фильтры `ext`, `modules`, `tests`, `tags` и `suites`. Готовый конфиг используется как есть. Без него панель передаёт фильтр и jUnit-отчёт этого прогона опциями команды, остальное раннер берёт из секции.
 
 ## Мутационное тестирование
 
