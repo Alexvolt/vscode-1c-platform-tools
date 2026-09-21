@@ -155,6 +155,8 @@ export const AUTUMN_OPTIONAL_SECTIONS: AutumnSectionOption[] = [
 		path: ['test', 'yaxunit'],
 		section: {
 			'yaxunit-config': 'tools/yaxunit.json',
+			'report-format': ['junit'],
+			'report-path': 'build/out/yaxunit/junit.xml',
 		},
 	},
 ];

@@ -144,8 +144,9 @@ export class YaxunitAdapter implements TestFrameworkAdapter {
 	 *
 	 * С готовым конфигом фильтр накладывается на его копию в каталоге прогона:
 	 * раннер использует готовый конфиг как есть. Без конфига, что бывает только
-	 * на vanessa-runner 3, фильтр и путь отчёта уходят опциями test yaxunit, а
-	 * остальное раннер берёт из секции vrunner.test.yaxunit профиля.
+	 * на vanessa-runner 3, фильтр и путь jUnit-отчёта этого прогона уходят
+	 * опциями test yaxunit: `--report-path` перекрывает `report-path` секции,
+	 * иначе раннер пишет отчёт в профиль, а панель ждёт файл прогона.
 	 *
 	 * @param filter - Отбор тестов прогона
 	 * @param reportDir - Каталог отчёта прогона
@@ -166,19 +167,17 @@ export class YaxunitAdapter implements TestFrameworkAdapter {
 		const ownReport = path.join(reportDir, 'report.xml');
 
 		if (baseConfig === undefined) {
-			const sectionReport =
-				profile.report && workspaceRoot ? resolveConfigPath(profile.report, workspaceRoot) : undefined;
 			const [args] = await this.vrunner.planIntent({
 				kind: 'test.yaxunit',
 				filter,
-				report: sectionReport ? undefined : ownReport,
+				report: ownReport,
 				...runOptions,
 				common,
 			});
 			return {
 				tool: 'vrunner',
 				args,
-				reportTarget: { format: 'junit', path: sectionReport ?? ownReport },
+				reportTarget: { format: 'junit', path: ownReport },
 				noReportHint: NO_REPORT_HINT,
 			};
 		}

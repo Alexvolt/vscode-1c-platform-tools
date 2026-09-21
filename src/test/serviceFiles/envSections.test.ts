@@ -43,6 +43,12 @@ suite('serviceFiles/envSections', () => {
 			vrunner: { test: { yaxunit: Record<string, unknown> } };
 		};
 		assert.strictEqual(result.vrunner.test.yaxunit['yaxunit-config'], 'tools/yaxunit.json');
+		assert.deepStrictEqual(result.vrunner.test.yaxunit['report-format'], ['junit']);
+		assert.strictEqual(result.vrunner.test.yaxunit['report-path'], 'build/out/yaxunit/junit.xml');
+		assert.deepStrictEqual(
+			Object.keys(result.vrunner.test.yaxunit),
+			['yaxunit-config', 'report-format', 'report-path']
+		);
 	});
 
 	test('перенос env.json запускает скрипт из пакета vanessa-runner и читает env.json', () => {

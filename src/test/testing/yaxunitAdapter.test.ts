@@ -68,6 +68,37 @@ suite('yaxunitAdapter', () => {
 		);
 	});
 
+	test('без готового конфига на 3.x отчёт прогона уходит в report-path', async () => {
+		invalidateProjectLayout();
+		const reportDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaxunit-report-'));
+		const ownReport = path.join(reportDir, 'report.xml');
+		const fileUri = vscode.Uri.file(
+			path.join(DESIGNER_WORKSPACE, 'tests', 'cfe', 'Тесты', 'CommonModules', 'ОМ_Тест', 'Ext', 'Module.bsl')
+		);
+		let report: string | undefined;
+		const vrunner = {
+			getWorkspaceRoot: () => DESIGNER_WORKSPACE,
+			readActiveSettings: async () => ({
+				settings: {
+					vrunner: { test: { yaxunit: { 'report-path': 'build/out/yaxunit/junit.xml' } } },
+				},
+				schema: 'v3' as const,
+			}),
+			planIntent: async (intent: { report?: string }) => {
+				report = intent.report;
+				return [['test', 'yaxunit']];
+			},
+		} as unknown as VRunnerManager;
+		const adapter = new YaxunitAdapter(vrunner);
+		try {
+			const plan = await adapter.buildRunPlan({ fileUri }, reportDir);
+			assert.strictEqual(report, ownReport);
+			assert.strictEqual(plan.reportTarget?.path, ownReport);
+		} finally {
+			await fs.rm(reportDir, { recursive: true, force: true });
+		}
+	});
+
 	test('buildRunPlan: весь модуль — filter.modules, подмножество — filter.tests', async () => {
 		const adapter = new YaxunitAdapter(VRunnerManager.getInstance());
 		const reportDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaxunit-test-'));
