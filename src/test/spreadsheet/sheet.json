@@ -1,0 +1,33 @@
+{
+	"rowCount": 2,
+	"rows": [
+		{
+			"index": 0,
+			"cells": [
+				{ "column": 0, "text": "Накладная", "formatIndex": 1 },
+				{ "column": 1, "formatIndex": 2 }
+			]
+		},
+		{
+			"index": 1,
+			"columnsId": "table",
+			"cells": [{ "column": 0, "text": "Организация", "formatIndex": 2, "parameter": true }]
+		}
+	],
+	"columnSets": [
+		{ "size": 4, "columns": [{ "column": 0, "formatIndex": 1 }] },
+		{ "id": "table", "size": 2, "columns": [{ "column": 0, "formatIndex": 1 }, { "column": 1, "formatIndex": 1 }] }
+	],
+	"formats": [
+		{ "width": 80, "hAlign": "center", "font": 0, "bottomBorder": 0 },
+		{ "rightBorder": 0 }
+	],
+	"fonts": [{ "face": "Arial", "sizePt": 14, "bold": true }],
+	"lines": [{ "style": "solid", "width": 1 }],
+	"merges": [{ "row": 0, "column": 0, "rowSpan": 1, "colSpan": 2 }],
+	"areas": [
+		{ "name": "Заголовок", "kind": "rows", "beginRow": 0, "endRow": 0, "beginColumn": -1, "endColumn": -1 },
+		{ "name": "Колонка", "kind": "columns", "beginRow": -1, "endRow": -1, "beginColumn": 0, "endColumn": 0 }
+	],
+	"drawings": []
+}

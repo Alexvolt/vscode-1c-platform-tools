@@ -36,6 +36,7 @@ import {
 	METADATA_OBJECT_SECTION_SOURCES_BY_TYPE,
 	type MetadataObjectSectionSource,
 } from './metadataObjectSectionProfiles';
+import { templateMenuToken } from '../spreadsheet/templateContent';
 import {
 	formatOfFile,
 	formModuleFileOf,
@@ -183,6 +184,9 @@ export function defaultMetadataLeafOpenCommand(item: MetadataLeafTreeItem): stri
 	const type = normalizeMetadataObjectType(item.objectType);
 	if (isMetadataCommonForm(type)) {
 		return '1c-platform-tools.metadata.openForm';
+	}
+	if (type === 'CommonTemplate') {
+		return '1c-platform-tools.metadata.openTemplate';
 	}
 	if (objectModuleKindsForType(type).includes('module')) {
 		return '1c-platform-tools.metadata.openModule';
@@ -465,7 +469,10 @@ export class MetadataLeafTreeItem extends vscode.TreeItem {
 				tokens.push('mdSupportRule');
 			}
 			if (normalizedObjectType === 'CommonTemplate') {
-				tokens.push('mdDcsOpen');
+				const token = templateMenuToken(abs);
+				if (token) {
+					tokens.push(token);
+				}
 			}
 			if (tokens.length > 0) {
 				this.contextValue = [this.contextValue, ...tokens].join(' ');
@@ -828,6 +835,17 @@ export class MetadataObjectNodeTreeItem extends vscode.TreeItem {
 			this.command = {
 				command: '1c-platform-tools.metadata.openForm',
 				title: 'Открыть форму',
+				arguments: [this],
+			};
+		}
+		if (nodeKind === 'template') {
+			const token = owner.resourceUri ? templateMenuToken(owner.resourceUri.fsPath, name) : undefined;
+			if (token) {
+				this.contextValue = `${this.contextValue} ${token}`;
+			}
+			this.command = {
+				command: token === 'mdDcs' ? '1c-platform-tools.metadata.openDcs' : '1c-platform-tools.metadata.openTemplate',
+				title: token === 'mdDcs' ? 'Открыть схему компоновки' : 'Открыть макет',
 				arguments: [this],
 			};
 		}

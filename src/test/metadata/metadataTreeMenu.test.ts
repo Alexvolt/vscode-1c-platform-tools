@@ -153,8 +153,12 @@ suite('контекстное меню дерева метаданных', () =>
 		// Дублирования команды объекта md-sparrow не умеет: пункта нет
 		assert.ok(menuFor(NODES.dimension).includes('Дублировать'));
 		assert.ok(!menuFor(NODES.command).includes('Дублировать'));
-		// Состав макета не правится: свойства и открытие схемы компоновки
-		assert.deepStrictEqual(menuFor(NODES.readonlyChild), ['Открыть схему компоновки', 'Свойства']);
+		// Без вида макета команд открытия нет: схема и табличный документ — разные пункты
+		assert.deepStrictEqual(menuFor(NODES.readonlyChild), ['Свойства']);
+		assert.ok(menuFor('metadataChild_template mdSpreadsheet').includes('Открыть макет'));
+		assert.ok(!menuFor('metadataChild_template mdSpreadsheet').includes('Открыть схему компоновки'));
+		assert.ok(menuFor('metadataChild_template mdDcs').includes('Открыть схему компоновки'));
+		assert.ok(!menuFor('metadataChild_template mdDcs').includes('Открыть макет'));
 	});
 
 	test('«Добавить» есть у каждого раздела, куда md-sparrow умеет добавлять', () => {

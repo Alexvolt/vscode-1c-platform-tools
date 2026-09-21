@@ -119,6 +119,8 @@ export type MdSparrowOp =
 	| 'cf-md-subsystem-subsystems-order-set'
 	| 'cf-md-subsystem-groups-order-set'
 	| 'cf-dcs-info'
+	| 'cf-spreadsheet-get'
+	| 'cf-spreadsheet-set-cell'
 	| 'cf-dcs-set-query'
 	| 'cf-dcs-add-calculated-field'
 	| 'project-metadata-tree'

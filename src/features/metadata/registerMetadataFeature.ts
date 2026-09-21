@@ -73,6 +73,8 @@ import {
 	supportEnabled,
 } from './mdSparrowParams';
 import { openDcsEditorPanel } from './dcsEditorPanel';
+import { openSpreadsheetPanel } from '../spreadsheet/openSpreadsheetPanel';
+import { classifyTemplateContent, findTemplateContent } from '../spreadsheet/templateContent';
 import { loadProjectMetadataTree } from './metadataTreeService';
 import { openErCanvasPanel } from './er/erCanvasPanel';
 import type { ErScope } from './er/erTypes';
@@ -2430,6 +2432,66 @@ export function registerMetadataFeature(
 					return;
 				}
 				await openObjectPropertiesTab(node, 'commandInterface');
+			}
+		),
+		registerMetadataCommand(
+			'1c-platform-tools.metadata.openTemplate',
+			async (item?: vscode.TreeItem) => {
+				const selected = item ?? metadataTreeView.selection[0];
+				let objectFile: string | undefined;
+				let templateName: string | undefined;
+				let title = '';
+				let cwd: string | undefined;
+				let configurationXmlAbs: string | undefined;
+				if (selected instanceof MetadataObjectNodeTreeItem && selected.nodeKind === 'template' && selected.owner.resourceUri) {
+					objectFile = selected.owner.resourceUri.fsPath;
+					templateName = selected.name;
+					title = `${selected.owner.name}.${selected.name}`;
+					cwd = selected.owner.metadataRootAbs ?? path.dirname(objectFile);
+					configurationXmlAbs = selected.owner.configurationXmlAbs;
+				} else if (
+					selected instanceof MetadataLeafTreeItem
+					&& selected.objectType === 'CommonTemplate'
+					&& selected.resourceUri
+				) {
+					objectFile = selected.resourceUri.fsPath;
+					title = selected.name;
+					cwd = selected.metadataRootAbs ?? path.dirname(objectFile);
+					configurationXmlAbs = selected.configurationXmlAbs;
+				}
+				if (!objectFile || !cwd) {
+					void vscode.window.showInformationMessage('Выберите макет в дереве.');
+					return;
+				}
+				const content = await findTemplateContent(objectFile, templateName);
+				if (!content) {
+					void vscode.window.showInformationMessage('Файл макета не найден.');
+					return;
+				}
+				const kind = await classifyTemplateContent(content);
+				if (kind === 'dcs') {
+					await vscode.commands.executeCommand('1c-platform-tools.metadata.openDcs', selected);
+					return;
+				}
+				if (kind === 'binary') {
+					return;
+				}
+				if (kind === 'text') {
+					await openTextFile(content);
+					return;
+				}
+				const schema = configurationXmlAbs
+					? await mdSparrowSchemaFlagFromConfigurationXml(configurationXmlAbs)
+					: await mainSchemaFlag();
+				if (schema === undefined) {
+					return;
+				}
+				await openSpreadsheetPanel(context, {
+					templateXmlFsPath: content,
+					title,
+					cwd,
+					schemaFlag: schema,
+				});
 			}
 		),
 		registerMetadataCommand(
