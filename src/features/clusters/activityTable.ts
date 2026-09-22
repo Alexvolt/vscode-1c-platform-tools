@@ -381,6 +381,25 @@ export function filterActivityRows(rows: ActivityRow[], query: string): Activity
 }
 
 /**
+ * Подпись числа строк списка.
+ *
+ * В дереве это число стоит у группы, из таблицы его не увидеть без прокрутки.
+ * Поиск не должен прятать размер списка: тогда видно, сколько строк прошло
+ * отбор и сколько загружено.
+ *
+ * @param visible - Сколько строк проходит отбор
+ * @param total - Сколько строк загружено
+ * @param query - Строка поиска; пробелы по краям не считаются поиском
+ * @returns Число загруженных строк либо «сколько видно из загруженных»
+ */
+export function activityRowCountLabel(visible: number, total: number, query: string): string {
+	if (query.trim() === '') {
+		return String(total);
+	}
+	return `${visible} из ${total}`;
+}
+
+/**
  * Выгружает таблицу в CSV.
  *
  * Разделитель — точка с запятой: с ним таблицу открывает Excel с русскими

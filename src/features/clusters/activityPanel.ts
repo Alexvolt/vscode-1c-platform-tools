@@ -11,6 +11,10 @@
  * сеансов завершается одним действием, а обслуживание базы редко заканчивается
  * одним сеансом.
  *
+ * Число строк стоит в подзаголовке рядом с подключением: в дереве оно видно
+ * у группы, а из таблицы его не увидеть, пока не прокрутишь список. Поиск
+ * не прячет размер — подпись показывает, сколько строк прошло отбор.
+ *
  * Панель одна на окно: повторный вызов обновляет уже открытую вкладку, а не
  * плодит новые.
  */
@@ -22,6 +26,7 @@ import { chromeStyles } from '../editors/webviewChrome';
 import {
 	activityColumns,
 	activityCsv,
+	activityRowCountLabel,
 	buildActivityRows,
 	type ActivityKind,
 	type ActivityRow,
@@ -450,9 +455,15 @@ export class ClusterActivityPanel {
 	}
 }
 
-/** Разметка и скрипт таблицы. */
+/**
+ * Разметка и скрипт таблицы.
+ *
+ * Подпись числа строк — та же функция, что проверяют тесты. Поиск считается
+ * в панели на каждое нажатие, и вторая копия формулы разъехалась бы с отбором.
+ */
 function buildHtml(): string {
 	const nonce = Math.random().toString(36).slice(2);
+	const rowCountLabel = activityRowCountLabel.toString();
 	return /* html */ `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -461,9 +472,12 @@ function buildHtml(): string {
 <style>
 ${chromeStyles()}
 	.toolbar input[type=text] { width: 220px; }
-	/* Подключение слева от кнопок: они уходят к правому краю */
+	/* Подключение слева от кнопок: они уходят к правому краю.
+	   Число строк не сжимается — длинное имя подключения обрезается, счётчик остаётся. */
 	.toolbar .subtitle { color: var(--vscode-descriptionForeground); font-size: 0.85em;
-		margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		margin-right: auto; display: flex; align-items: baseline; min-width: 0; }
+	.toolbar .subtitle .connection { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+	.toolbar .subtitle .count { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 	.tabs { display: flex; gap: 4px; }
 	.tabs button.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 	.scroll { flex: 1; min-height: 0; overflow: auto; }
@@ -491,7 +505,10 @@ ${chromeStyles()}
 	<div class="toolbar">
 		<div class="tabs" id="tabs"></div>
 		<input type="text" id="filter" placeholder="Поиск по таблице">
-		<span class="subtitle" id="subtitle"></span>
+		<span class="subtitle">
+			<span class="connection" id="subtitle"></span>
+			<span class="count" id="rowcount"></span>
+		</span>
 		<button id="bulk" hidden></button>
 		<button id="refresh">Обновить</button>
 		<button id="csv" title="Скопировать выбранные строки, а без выбора всю таблицу">Копировать</button>
@@ -515,10 +532,12 @@ const EMPTY_TITLES = {
 	connections: 'Соединений нет',
 	locks: 'Блокировок нет',
 };
+const rowCountLabel = ${rowCountLabel};
 let kind = '';
 let kinds = [];
 let columns = [];
 let rows = [];
+let connectionLabel = '';
 let picked = new Set();
 /** Строка, от которой Shift отмеряет диапазон */
 let anchorId = null;
@@ -688,12 +707,22 @@ function renderBody() {
 	});
 }
 
+function renderCount(shownCount) {
+	const count = document.getElementById('rowcount');
+	if (connectionLabel === '') {
+		count.textContent = '';
+		return;
+	}
+	count.textContent = ' · ' + rowCountLabel(shownCount, rows.length, filter);
+}
+
 function render() {
 	const table = document.getElementById('table');
 	const state = document.getElementById('state');
 	const shown = visibleRows();
 	renderTabs();
 	renderBulk();
+	renderCount(shown.length);
 	table.hidden = shown.length === 0;
 	state.hidden = shown.length > 0;
 	state.className = 'state';
@@ -768,6 +797,7 @@ window.addEventListener('message', (event) => {
 		kinds = data.kinds || kinds;
 		renderTabs();
 		document.getElementById('table').hidden = true;
+		document.getElementById('rowcount').textContent = '';
 		const state = document.getElementById('state');
 		state.hidden = false;
 		state.className = 'state error';
@@ -779,6 +809,7 @@ window.addEventListener('message', (event) => {
 		kinds = data.kinds;
 		columns = data.columns;
 		rows = data.rows;
+		connectionLabel = data.subtitle;
 		// Выбор сбрасывается: строки перечитаны, и часть отмеченных объектов на
 		// сервере могло уже не остаться.
 		clearPicked();

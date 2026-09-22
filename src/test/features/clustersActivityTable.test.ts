@@ -6,6 +6,7 @@ import {
 	SESSION_COLUMNS,
 	activityColumns,
 	activityCsv,
+	activityRowCountLabel,
 	buildActivityRows,
 	buildCell,
 	filterActivityRows,
@@ -132,6 +133,18 @@ suite('таблица активности: строки', () => {
 		assert.strictEqual(filterActivityRows(rows, 'бухгалтерия').length, 1);
 		assert.strictEqual(filterActivityRows(rows, '').length, 2);
 		assert.strictEqual(filterActivityRows(rows, 'нет такого').length, 0);
+	});
+
+	test('без поиска подпись равна числу загруженных строк', () => {
+		assert.strictEqual(activityRowCountLabel(48, 48, ''), '48');
+		assert.strictEqual(activityRowCountLabel(0, 0, ''), '0');
+		assert.strictEqual(activityRowCountLabel(12, 48, '   '), '48');
+	});
+
+	test('при поиске подпись показывает, сколько строк прошло отбор', () => {
+		assert.strictEqual(activityRowCountLabel(12, 48, 'ива'), '12 из 48');
+		assert.strictEqual(activityRowCountLabel(0, 48, 'нет'), '0 из 48');
+		assert.strictEqual(activityRowCountLabel(48, 48, 'а'), '48 из 48');
 	});
 });
 
