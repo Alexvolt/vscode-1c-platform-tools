@@ -47,7 +47,7 @@ suite('serviceFiles/envSections', () => {
 		assert.strictEqual(result.vrunner.test.yaxunit['report-path'], 'build/out/yaxunit/junit.xml');
 		assert.deepStrictEqual(
 			Object.keys(result.vrunner.test.yaxunit),
-			['yaxunit-config', 'report-format', 'report-path']
+			['yaxunit-config', 'report-format', 'report-path', 'additional']
 		);
 	});
 

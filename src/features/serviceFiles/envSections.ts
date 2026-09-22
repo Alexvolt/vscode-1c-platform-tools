@@ -1,3 +1,5 @@
+import { TEST_ADDITIONAL } from './envDefaults';
+
 /**
  * Опциональные секции env.json (vanessa / xunit / yaxunit / синтаксический контроль).
  *
@@ -26,7 +28,7 @@ export const ENV_OPTIONAL_SECTIONS: EnvSectionOption[] = [
 		section: {
 			'--vanessasettings': './tools/VAParams.json',
 			'--pathvanessa': './oscript_modules/vanessa-automation-single/vanessa-automation-single.epf',
-			'--additional': '/DisplayAllFunctions /L ru',
+			'--additional': TEST_ADDITIONAL,
 		},
 	},
 	{
@@ -39,6 +41,7 @@ export const ENV_OPTIONAL_SECTIONS: EnvSectionOption[] = [
 			'--reportsxunit':
 				'ГенераторОтчетаJUnitXML{build/out/smoke/junit/junit.xml};ГенераторОтчетаAllureXMLВерсия2{build/out/smoke/allure/allure.xml}',
 			'--xddExitCodePath': './build/xddExitCodePath.txt',
+			'--additional': TEST_ADDITIONAL,
 		},
 	},
 	{
@@ -68,6 +71,7 @@ export const ENV_OPTIONAL_SECTIONS: EnvSectionOption[] = [
 			'--command': 'RunUnitTests=tools/yaxunit.json',
 			'--ordinaryapp': '-1',
 			'--exitCodePath': './build/out/yaxunit/result.txt',
+			'--additional': TEST_ADDITIONAL,
 		},
 	},
 ];
@@ -117,7 +121,7 @@ export const AUTUMN_OPTIONAL_SECTIONS: AutumnSectionOption[] = [
 		section: {
 			vanessasettings: './tools/VAParams.json',
 			'bddrunner-path': './oscript_modules/vanessa-automation-single/vanessa-automation-single.epf',
-			additional: '/DisplayAllFunctions /L ru',
+			additional: TEST_ADDITIONAL,
 		},
 	},
 	{
@@ -128,6 +132,7 @@ export const AUTUMN_OPTIONAL_SECTIONS: AutumnSectionOption[] = [
 			xddConfig: './tools/xUnitParams.json',
 			reportsxunit: 'jUnit{build/out/smoke/junit/junit.xml};allure{build/out/smoke/allure/allure.xml}',
 			xddExitCodePath: './build/xddExitCodePath.txt',
+			additional: TEST_ADDITIONAL,
 		},
 	},
 	{
@@ -157,6 +162,7 @@ export const AUTUMN_OPTIONAL_SECTIONS: AutumnSectionOption[] = [
 			'yaxunit-config': 'tools/yaxunit.json',
 			'report-format': ['junit'],
 			'report-path': 'build/out/yaxunit/junit.xml',
+			additional: TEST_ADDITIONAL,
 		},
 	},
 ];
