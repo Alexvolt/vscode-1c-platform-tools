@@ -287,7 +287,7 @@
       "1c-platform-tools-todo": [
         {
           "id": "1c-platform-tools-todo-list",
-          "name": "Список дел",
+          "name": "1С: Список дел",
           "when": "1c-platform-tools.is1CProject == true"
         }
       ],

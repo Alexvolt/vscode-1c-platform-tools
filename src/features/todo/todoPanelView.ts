@@ -152,7 +152,7 @@ export class TodoPanelTreeDataProvider implements vscode.TreeDataProvider<TodoNo
 
 	private _updateViewTitle(): void {
 		if (this._treeView) {
-			this._treeView.title = 'Список дел';
+			this._treeView.title = '1С: Список дел';
 		}
 	}
 
