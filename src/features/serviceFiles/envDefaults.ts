@@ -1,5 +1,12 @@
 import { VRUNNER_SCHEMA, HOOKS_SCHEMA, PIPELINES_SCHEMA } from './schemaUrls';
 
+/** Ключи клиента: показ всех функций и русский интерфейс. */
+const LAUNCH_ADDITIONAL = '/DisplayAllFunctions /L ru';
+
+/** Прогон тестов: ключи клиента плюс тихий старт без регламентных заданий. */
+export const TEST_ADDITIONAL =
+	`${LAUNCH_ADDITIONAL} /DisableStartupDialogs /DisableStartupMessages /AllowExecuteScheduledJobs -Off`;
+
 /** Базовые поля секции default, общие для всех env-файлов */
 const DEFAULT_SECTION = {
 	'--ibconnection': '/F./build/ib',
@@ -17,7 +24,7 @@ export const ENV_DEFAULTS = {
 	$schema: VRUNNER_SCHEMA,
 	default: {
 		...DEFAULT_SECTION,
-		'--additional': '/DisplayAllFunctions /L ru',
+		'--additional': LAUNCH_ADDITIONAL,
 		'--ordinaryapp': '-1',
 	},
 };
@@ -40,7 +47,7 @@ export const AUTUMN_DEFAULTS = {
 		v8version: '8.3',
 		locale: 'ru',
 		language: 'ru',
-		additional: '/DisplayAllFunctions /L ru',
+		additional: LAUNCH_ADDITIONAL,
 		ordinaryapp: '-1',
 	},
 };
@@ -61,8 +68,6 @@ export function settingsMigrationCommand(packageDir?: string): string {
 	return `oscript ${packageDir ?? '<каталог vanessa-runner>'}/${SETTINGS_MIGRATION_SCRIPT} --input env.json`;
 }
 
-const VANESSA_ADDITIONAL = '/DisplayAllFunctions /L ru';
-
 /** Канонический дефолт tools/vrunner.json */
 export const VRUNNER_DEFAULTS = {
 	$schema: VRUNNER_SCHEMA,
@@ -73,7 +78,7 @@ export const VRUNNER_DEFAULTS = {
 	vanessa: {
 		'--vanessasettings': './tools/VAParams.json',
 		'--pathvanessa': './oscript_modules/vanessa-automation-single/vanessa-automation-single.epf',
-		'--additional': VANESSA_ADDITIONAL,
+		'--additional': TEST_ADDITIONAL,
 	},
 };
 
@@ -87,7 +92,7 @@ export const VRUNNER_INIT_DEFAULTS = {
 	vanessa: {
 		'--vanessasettings': './tools/VAParams.init.json',
 		'--pathvanessa': './oscript_modules/vanessa-automation-single/vanessa-automation-single.epf',
-		'--additional': VANESSA_ADDITIONAL,
+		'--additional': TEST_ADDITIONAL,
 	},
 };
 
@@ -106,7 +111,7 @@ export const VRUNNER_DEFAULTS_V3 = {
 			vanessa: {
 				vanessasettings: './tools/VAParams.json',
 				'bddrunner-path': CI_BDDRUNNER_PATH,
-				additional: VANESSA_ADDITIONAL,
+				additional: TEST_ADDITIONAL,
 			},
 		},
 	},
@@ -120,7 +125,7 @@ export const VRUNNER_INIT_DEFAULTS_V3 = {
 			vanessa: {
 				vanessasettings: './tools/VAParams.init.json',
 				'bddrunner-path': CI_BDDRUNNER_PATH,
-				additional: VANESSA_ADDITIONAL,
+				additional: TEST_ADDITIONAL,
 			},
 		},
 	},
