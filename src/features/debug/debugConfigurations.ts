@@ -261,6 +261,9 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 		// Строка подключения и учётные данные берутся из активного профиля запуска
 		// (env.json/env.<id>.json для vrunner 2 или autumn-properties.* для vrunner 3),
 		// а не напрямую из env.json — иначе смена профиля не влияла бы на отладку.
+		// Файл профиля выбирается по версии vrunner, а до её определения считается 2.x:
+		// первый запуск в свежем окне открыл бы базу из env.json вместо autumn-properties.json.
+		await this.vrunner.getVRunnerVersion();
 		const connectionString = this.vrunner.readActiveProfileSettingSync('ibconnection');
 		if (typeof connectionString !== 'string' || connectionString.trim() === '') {
 			void vscode.window.showErrorMessage(
