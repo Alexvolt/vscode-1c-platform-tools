@@ -97,6 +97,11 @@ async function connectDebugTarget(item?: DebugTargetItem): Promise<void> {
 	}
 }
 
+/** Очищает список: цели завершённой сессии не подключить, а «Подключить» ушёл бы в другую активную сессию. */
+export function clearDebugTargets(): void {
+	debugTargetsProvider.updateItems([]);
+}
+
 export function updateDebugTargets(session: vscode.DebugSession): void {
 	void session
 		.customRequest('DebugTargetsRequest')

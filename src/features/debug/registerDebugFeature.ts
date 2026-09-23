@@ -139,14 +139,15 @@ export function registerDebugFeature(context: vscode.ExtensionContext): void {
 		vscode.debug.onDidStartDebugSession((session) => {
 			if (session.type === DEBUG_TYPE) {
 				log.info(`сессия отладки запущена: ${session.name}`);
+				onecDebugTargets.updateDebugTargets(session);
 			}
-			onecDebugTargets.updateDebugTargets(session);
 		})
 	);
 	context.subscriptions.push(
 		vscode.debug.onDidTerminateDebugSession((session) => {
 			if (session.type === DEBUG_TYPE) {
 				log.info(`сессия отладки завершена: ${session.name}`);
+				onecDebugTargets.clearDebugTargets();
 			}
 		})
 	);
