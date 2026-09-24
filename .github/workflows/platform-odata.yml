@@ -1,0 +1,286 @@
+# Проверка команд OData на настоящей платформе 1С.
+#
+# Платформа нужной версии скачивается yard с releases.1c.ru и ставится так же,
+# как в namespace-forest. ibcmd создаёт файловую базу из тестовой конфигурации,
+# ibsrv публикует стандартный интерфейс OData и HTTP-сервис с серверным кодом
+# служебной обработки состава. Лицензия для этого не нужна.
+#
+# Отдельными шагами без влияния на итог пробуются сборка служебной обработки
+# конфигуратором и её запуск тонким клиентом: им может понадобиться лицензия.
+#
+# Секреты (Settings → Secrets → Actions): ONEC_LOGIN, ONEC_PASSWORD - учётные
+# данные releases.1c.ru.
+name: Проверка OData на платформе
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform_version:
+        description: 'Версия платформы, например 8.3.27.1936'
+        required: false
+        default: '8.3.27.1936'
+  push:
+    branches:
+      - 'feat/479-odata'
+    paths:
+      - '.github/workflows/platform-odata.yml'
+      - 'src/features/odata/**'
+      - 'src/test/platform/**'
+      - 'src/test/fixtures/platform/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-odata-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  odata:
+    name: OData на платформе ${{ inputs.platform_version || '8.3.27.1936' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    env:
+      PLATFORM_VERSION: ${{ inputs.platform_version || '8.3.27.1936' }}
+      PORT: 8314
+
+    steps:
+      - name: Проверить секреты releases.1c.ru
+        env:
+          ONEC_LOGIN: ${{ secrets.ONEC_LOGIN }}
+          ONEC_PASSWORD: ${{ secrets.ONEC_PASSWORD }}
+        run: |
+          if [ -z "$ONEC_LOGIN" ] || [ -z "$ONEC_PASSWORD" ]; then
+            echo "::error::Нет секретов ONEC_LOGIN и ONEC_PASSWORD: без них платформу не скачать с releases.1c.ru"
+            exit 1
+          fi
+
+      - name: Получить код
+        uses: actions/checkout@v7
+
+      - name: Установить Node.js 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Собрать расширение
+        run: |
+          npm ci
+          npm run compile
+
+      - name: Установить OneScript
+        uses: otymko/setup-onescript@v1.5.1
+        with:
+          version: stable
+
+      - name: Установить yard
+        run: |
+          opm install opm
+          opm install yard
+          YARD_OS=$(find "$HOME/.local/share/ovm" -path '*/yard/src/yard.os' 2>/dev/null | head -1)
+          if [ -z "$YARD_OS" ]; then echo "::error::yard.os не найден"; exit 1; fi
+          echo "YARD_OS=$YARD_OS" >> "$GITHUB_ENV"
+
+      - name: Установить зависимости платформы 1С
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fontconfig libgsf-1-114 libglib2.0-0 libodbc1 libwebkit2gtk-4.0-37 \
+            xvfb unzip curl
+          LE_BASE=http://archive.ubuntu.com/ubuntu/pool/universe/e/enchant/
+          LE_FILE=$(curl -s "$LE_BASE" | grep -oE 'libenchant1c2a_[^"]*_amd64\.deb' | head -1)
+          curl -sL "$LE_BASE$LE_FILE" -o /tmp/libenchant.deb
+          sudo apt-get install -y /tmp/libenchant.deb
+
+      - name: Скачать и установить платформу ${{ env.PLATFORM_VERSION }}
+        env:
+          YARD_RELEASES_USER: ${{ secrets.ONEC_LOGIN }}
+          YARD_RELEASES_PWD: ${{ secrets.ONEC_PASSWORD }}
+        run: |
+          DISTR_DIR=$(mktemp -d); chmod 777 "$DISTR_DIR"
+          # Фильтры yard - регулярные выражения: точки экранируются
+          ESCAPED_VERSION=$(echo "$PLATFORM_VERSION" | sed 's/\./\\./g')
+          APP_MAJOR=$(echo "$PLATFORM_VERSION" | cut -d. -f1,2 | sed 's/\./\\./g')
+          # Сначала полная платформа: в ней есть конфигуратор и тонкий клиент для пробных шагов
+          DISTR_FILTERS=(
+            "Технологическая платформа.+\(64-bit\) для Linux$"
+            "[CС]ервер.+\(64-bit\) для DEB-based Linux-систем$"
+          )
+          STEP_OK=0
+          for ATTEMPT in 1 2 3; do
+            for DF in "${DISTR_FILTERS[@]}"; do
+              timeout 900 oscript "$YARD_OS" releases get \
+                --app-filter "Технологическая платформа $APP_MAJOR\$" \
+                --version-filter "$ESCAPED_VERSION" \
+                --distr-filter "$DF" \
+                --path "$DISTR_DIR" --download-limit 1 --extract || true
+              if find "$DISTR_DIR" -type f \( -name 'setup-full*.run' -o -name '*.deb' \) | grep -q .; then
+                STEP_OK=1; break
+              fi
+            done
+            [ "$STEP_OK" -eq 1 ] && break
+            echo "Попытка $ATTEMPT: дистрибутив не получен, пауза 20 с"; sleep 20
+          done
+          if [ "$STEP_OK" -ne 1 ]; then
+            echo "::error::Дистрибутив $PLATFORM_VERSION не скачан"; exit 1
+          fi
+
+          echo "Содержимое дистрибутива:"
+          find "$DISTR_DIR" -type f \( -name '*.run' -o -name '*.deb' \) | sed "s#$DISTR_DIR/##"
+          RUN_INSTALLER=$(find "$DISTR_DIR" -name 'setup-full*.run' | head -1)
+          if [ -n "$RUN_INSTALLER" ]; then
+            chmod +x "$RUN_INSTALLER"
+            for COMPONENTS in server,client_full,v8_install_deps server,client_full; do
+              if timeout 900 xvfb-run -a sudo "$RUN_INSTALLER" --mode unattended \
+                --enable-components "$COMPONENTS" > /tmp/install.log 2>&1; then
+                break
+              fi
+              echo "Набор компонентов [$COMPONENTS] отклонён, пробую следующий"
+            done
+          else
+            DEBS=$(find "$DISTR_DIR" -name '*.deb' | sort)
+            timeout 600 sudo dpkg -i $DEBS > /tmp/install.log 2>&1 \
+              || timeout 600 sudo apt-get install -f -y >> /tmp/install.log 2>&1 \
+              || { echo "Ошибка установки .deb:"; tail -30 /tmp/install.log; }
+          fi
+          rm -rf "$DISTR_DIR"
+
+          find_bin() { find /opt/1cv8 /opt/1C -name "$1" -type f 2>/dev/null | sort -V | tail -1; }
+          IBCMD=$(find_bin ibcmd); IBSRV=$(find_bin ibsrv)
+          if [ -z "$IBCMD" ] || [ -z "$IBSRV" ]; then
+            echo "::error::ibcmd/ibsrv не найдены после установки $PLATFORM_VERSION"
+            tail -30 /tmp/install.log; exit 1
+          fi
+          {
+            echo "IBCMD=$IBCMD"
+            echo "IBSRV=$IBSRV"
+            echo "V8_DESIGNER=$(find_bin 1cv8)"
+            echo "V8_THIN=$(find_bin 1cv8c)"
+          } >> "$GITHUB_ENV"
+          echo "ibcmd: $IBCMD"; echo "ibsrv: $IBSRV"
+
+      - name: Подготовить конфигурацию, исходники обработки и конфиг публикации
+        run: |
+          WORK=$(mktemp -d); chmod 777 "$WORK"
+          mkdir -p "$WORK/db" "$WORK/data"
+          {
+            echo "WORK=$WORK"
+            echo "DB_DIR=$WORK/db"
+            echo "DATA_DIR=$WORK/data"
+          } >> "$GITHUB_ENV"
+          node out/test/platform/prepareOData.node.js "$WORK/cf" "$WORK/epf-src" \
+            "$WORK/publication.yaml" "$WORK/db" "$PORT"
+
+      - name: Создать базу из конфигурации
+        run: |
+          DATA_ARG=""
+          if ! timeout 300 "$IBCMD" infobase create --db-path="$DB_DIR"; then
+            DATA_ARG="--data=$DATA_DIR"
+            timeout 300 "$IBCMD" infobase create $DATA_ARG --db-path="$DB_DIR"
+          fi
+          timeout 300 "$IBCMD" infobase config import $DATA_ARG --db-path="$DB_DIR" "$WORK/cf"
+          timeout 300 "$IBCMD" infobase config apply $DATA_ARG --db-path="$DB_DIR" --force
+
+      - name: Запустить автономный сервер
+        run: |
+          # Аргументы те же, что у автономного сервера расширения: данные и конфиг публикации
+          "$IBSRV" --data="$DATA_DIR" --config="$WORK/publication.yaml" > "$WORK/ibsrv.log" 2>&1 &
+          echo $! > "$WORK/ibsrv.pid"
+          for i in $(seq 1 30); do
+            curl -s "http://localhost:$PORT/" > /dev/null 2>&1 && break
+            sleep 2
+          done
+          echo "ONEC_PUBLICATION_URL=http://localhost:$PORT/ib" >> "$GITHUB_ENV"
+          curl -s -o /dev/null -w '$metadata: %{http_code}\n' "http://localhost:$PORT/ib/odata/standard.odata/\$metadata" || true
+
+      - name: Проверить запросы и состав OData
+        # Файл идёт в том же процессе: у Node 20 обмен с дочерним процессом тестов ломается на выводе
+        run: node --test-reporter=spec out/test/platform/odataPlatform.node.js
+
+      - name: Методы изменения, которые принимает сервер (при неудаче проверки)
+        if: failure()
+        run: |
+          ROOT="$ONEC_PUBLICATION_URL/odata/standard.odata"
+          SET=$(python3 -c "import urllib.parse;print(urllib.parse.quote('Catalog_Товары'))")
+          curl -s -X POST "$ONEC_PUBLICATION_URL/hs/odata-composition/run" \
+            -d '{"include":[{"name":"Catalog_Товары","candidates":["Справочник.Товары"]}],"exclude":[],"available":false}' > /dev/null
+          new_key() {
+            curl -s -X POST -H 'Content-Type: application/json' -d '{"Description":"Диагностика"}' "$ROOT/$SET?\$format=json" \
+              | python3 -c "import json,sys;print(json.load(sys.stdin).get('Ref_Key',''))"
+          }
+          try() {
+            local title="$1"; shift
+            local key; key=$(new_key)
+            local element="$ROOT/$SET(guid'$key')?\$format=json"
+            local code
+            code=$(curl -s -o /tmp/answer.txt -w '%{http_code}' --max-time 10 "$@" "$element" || true)
+            local now
+            now=$(curl -s --max-time 10 "$element" | python3 -c "import json,sys;print(json.load(sys.stdin).get('Description','(нет)'))" 2>/dev/null || echo '(не прочитан)')
+            echo "$title → HTTP $code, наименование после: $now; тело: $(head -c 200 /tmp/answer.txt)"
+          }
+          BODY='{"Description":"Изменено"}'
+          try "PATCH" -X PATCH -H 'Content-Type: application/json' -d "$BODY"
+          try "MERGE" -X MERGE -H 'Content-Type: application/json' -d "$BODY"
+          try "PUT" -X PUT -H 'Content-Type: application/json' -d "$BODY"
+          try "POST + X-HTTP-Method: PATCH" -X POST -H 'X-HTTP-Method: PATCH' -H 'Content-Type: application/json' -d "$BODY"
+          try "POST + X-HTTP-Method: MERGE" -X POST -H 'X-HTTP-Method: MERGE' -H 'Content-Type: application/json' -d "$BODY"
+          try "DELETE" -X DELETE
+          echo "=== Заголовки успешного GET"
+          curl -s -D - -o /dev/null --max-time 10 "$ROOT/$SET?\$format=json&\$top=1" || true
+
+      - name: Собрать служебную обработку конфигуратором (пробно)
+        id: designer
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          if [ -z "$V8_DESIGNER" ]; then echo "Конфигуратор не установлен"; exit 1; fi
+          # Отдельная пустая база: рабочую держит ibsrv
+          BUILD_DB="$WORK/build-db"; mkdir -p "$BUILD_DB"
+          timeout 300 "$IBCMD" infobase create --db-path="$BUILD_DB" || true
+          set +e
+          timeout 300 xvfb-run -a "$V8_DESIGNER" DESIGNER /F"$BUILD_DB" \
+            /DisableStartupDialogs /DisableStartupMessages /Out "$WORK/designer.log" \
+            /LoadExternalDataProcessorOrReportFromFiles "$WORK/epf-src/ODataComposition.xml" "$WORK/ODataComposition.epf"
+          CODE=$?
+          set -e
+          echo "Код возврата конфигуратора: $CODE"
+          iconv -f cp1251 -t utf-8 "$WORK/designer.log" 2>/dev/null || cat "$WORK/designer.log" 2>/dev/null || true
+          test -f "$WORK/ODataComposition.epf"
+
+      - name: Запустить служебную обработку тонким клиентом (пробно)
+        id: thin
+        if: ${{ !cancelled() && steps.designer.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          if [ -z "$V8_THIN" ]; then echo "Тонкий клиент не установлен"; exit 1; fi
+          EXCHANGE="$WORK/exchange"; mkdir -p "$EXCHANGE"
+          echo '{"include":[{"name":"Catalog_Товары","candidates":["Справочник.Товары","Catalog.Товары"]}],"exclude":[],"available":false}' > "$EXCHANGE/request.json"
+          set +e
+          timeout 180 xvfb-run -a "$V8_THIN" ENTERPRISE /WS"$ONEC_PUBLICATION_URL" \
+            /DisableStartupDialogs /DisableStartupMessages /Out "$WORK/client.log" \
+            /Execute "$WORK/ODataComposition.epf" /C"$EXCHANGE"
+          echo "Код возврата тонкого клиента: $?"
+          set -e
+          cat "$WORK/client.log" 2>/dev/null || true
+          echo "Ответ обработки:"
+          cat "$EXCHANGE/response.json"
+
+      - name: Итог
+        if: always()
+        run: |
+          {
+            echo "### OData на платформе $PLATFORM_VERSION"
+            echo ""
+            echo "| Шаг | Итог |"
+            echo "|---|---|"
+            echo "| Сборка обработки конфигуратором (пробно) | ${{ steps.designer.outcome }} |"
+            echo "| Запуск обработки тонким клиентом (пробно) | ${{ steps.thin.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Журнал автономного сервера
+        if: always()
+        run: |
+          [ -f "$WORK/ibsrv.pid" ] && kill "$(cat "$WORK/ibsrv.pid")" 2>/dev/null || true
+          cat "$WORK/ibsrv.log" 2>/dev/null || true
