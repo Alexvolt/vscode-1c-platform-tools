@@ -2678,6 +2678,31 @@ export class VRunnerManager {
 	}
 
 	/**
+	 * Учётная запись пользователя ИБ, с которой работают команды профиля.
+	 *
+	 * Для собственных запросов расширения к базе (стандартный интерфейс OData):
+	 * секрет берётся из профиля, а не передаётся в вызове. С явным файлом
+	 * настроек значения берутся из него, иначе перекрытия активного профиля
+	 * (временные параметры, env.local.json) идут поверх его файла.
+	 *
+	 * @param settingsFile - Файл настроек вызова
+	 * @returns Имя и пароль (пустые строки, если не заданы)
+	 */
+	public async getIbCredentials(settingsFile?: string): Promise<{ user: string; password: string }> {
+		if (settingsFile) {
+			return {
+				user: (await this.readSettingsFileOption(settingsFile, 'db-user')) ?? '',
+				password: (await this.readSettingsFileOption(settingsFile, 'db-pwd')) ?? '',
+			};
+		}
+		const overrides = this.getEffectiveEnvOverrides();
+		return {
+			user: overrides?.dbUser || (await this.readActiveProfileSetting('db-user')) || '',
+			password: overrides?.dbPwd || (await this.readActiveProfileSetting('db-pwd')) || '',
+		};
+	}
+
+	/**
 	 * Возвращает версию платформы 1С активного профиля (`--v8version`).
 	 *
 	 * Единый источник версии платформы для команд расширения: сначала перекрытие

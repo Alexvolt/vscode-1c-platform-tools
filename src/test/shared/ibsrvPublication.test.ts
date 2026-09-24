@@ -145,7 +145,14 @@ suite('ibsrvPublication', () => {
 			port: 8314,
 			base: '/ib',
 			distributeLicenses: true,
+			odata: true,
 		});
+	});
+
+	test('parseServerConfigParams: публикация OData по конфигу', () => {
+		const yaml = 'http:\n  - base: /ib\n    odata:\n      publish: no\n    web-services:\n      publish-by-default: yes\n';
+		assert.strictEqual(parseServerConfigParams(yaml).odata, false);
+		assert.strictEqual(parseServerConfigParams(yaml.replace('publish: no', 'publish: yes')).odata, true);
 	});
 
 	test('parseServerConfigParams: учитывает ручную правку порта', () => {
@@ -163,6 +170,7 @@ suite('ibsrvPublication', () => {
 			port: undefined,
 			base: undefined,
 			distributeLicenses: undefined,
+			odata: undefined,
 		});
 	});
 });

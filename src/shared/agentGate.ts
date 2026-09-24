@@ -21,6 +21,9 @@ const AGENT_OPTION_KEYS = [
 	'frameworks',
 	'execute',
 	'command',
+	'resource',
+	'include',
+	'exclude',
 ] as const;
 
 /**

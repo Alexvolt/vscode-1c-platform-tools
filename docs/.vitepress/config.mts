@@ -63,6 +63,7 @@ const guides = [
 	{ text: 'Автоматизация', link: '/automation' },
 	{ text: 'Профили запуска', link: '/launch-profiles' },
 	{ text: 'Автономный сервер', link: '/autonomous-server' },
+	{ text: 'Данные через OData', link: '/odata' },
 	{ text: 'ER-диаграммы', link: '/er-diagrams' },
 	{ text: 'Тестирование', link: '/testing' },
 	{ text: '1С: Список дел', link: '/todo' },

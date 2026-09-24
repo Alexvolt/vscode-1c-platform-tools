@@ -31,6 +31,7 @@ const SESSIONS = '1С: Сеансы';
 const PIPELINES = '1С: Пайплайны';
 const SERVER = '1С: Автономный сервер';
 const PROJECT = '1С: Проект';
+const ODATA = '1С: OData';
 
 /** Описания команд, чей заголовок вне интерфейса непонятен. */
 export const AGENT_COMMAND_DESCRIPTIONS: Record<string, AgentCommandDescription> = {
@@ -331,6 +332,16 @@ export const AGENT_COMMAND_DESCRIPTIONS: Record<string, AgentCommandDescription>
 	'1c-platform-tools.server.debug': {
 		title: 'Запустить отладку через автономный сервер ibsrv',
 		category: SERVER,
+	},
+
+	// Стандартный интерфейс OData: данные базы и состав интерфейса
+	'1c-platform-tools.odata.query': {
+		title: 'Запрос к данным информационной базы через стандартный интерфейс OData: resource - набор (Catalog_Номенклатура), элемент (Catalog_Номенклатура(guid\'…\')) или $metadata; method GET (по умолчанию), POST - создание, PATCH - изменение переданных полей, PUT - замена элемента целиком (поля не из body сбрасываются), DELETE; выборка параметрами filter, select, expand, orderby, top, skip; тело записи в body. Адрес - автономный сервер проекта или своя публикация из параметра url, учётная запись - из профиля запуска. POST, PUT, PATCH и DELETE меняют данные: вызывайте их только по явной просьбе пользователя. Возвращается код HTTP, тело ответа и понятная ошибка',
+		category: ODATA,
+	},
+	'1c-platform-tools.odata.setup': {
+		title: 'Показать или изменить состав стандартного интерфейса OData в информационной базе профиля: без include и exclude возвращает текущий состав, include и exclude точечно включают и исключают объекты (Справочник.Номенклатура или Catalog_Номенклатура), остальной состав не меняется; available: true добавляет список всех объектов, которые можно включить. Выполняется служебной обработкой в Предприятии, пользователю нужны административные права',
+		category: ODATA,
 	},
 
 	// Окружение

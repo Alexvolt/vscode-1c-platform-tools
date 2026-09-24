@@ -8,6 +8,8 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { registerInfobaseHolder } from '../../shared/exclusiveInfobase';
+import { registerODataEndpointProvider, type ODataEndpoint } from '../../shared/odataEndpoint';
+import { ODATA_SERVICE_PATH } from '../odata/odataRequest';
 import { openLocalUrl } from '../../shared/remoteEnv';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { ServerUrls } from '../../shared/ibsrvPublication';
@@ -303,7 +305,7 @@ export async function startServerDebug(manager: PlatformServerManager): Promise<
  */
 async function showServerMenu(manager: PlatformServerManager): Promise<void> {
 	interface MenuItem extends vscode.QuickPickItem {
-		action: 'start' | 'stop' | 'restart' | 'browser' | 'services' | 'debug' | 'logs' | 'config';
+		action: 'start' | 'stop' | 'restart' | 'browser' | 'services' | 'odata' | 'debug' | 'logs' | 'config';
 	}
 
 	const running = manager.state === 'running';
@@ -321,6 +323,7 @@ async function showServerMenu(manager: PlatformServerManager): Promise<void> {
 	}
 	items.push(
 		{ label: '$(checklist) Выбрать публикуемые сервисы', action: 'services' },
+		{ label: '$(list-selection) Состав OData', action: 'odata' },
 		{ label: '$(debug-alt) Отладка через сервер', action: 'debug' },
 		{ label: '', kind: vscode.QuickPickItemKind.Separator, action: 'logs' },
 		{ label: '$(output) Показать журнал', action: 'logs' },
@@ -351,6 +354,9 @@ async function showServerMenu(manager: PlatformServerManager): Promise<void> {
 			break;
 		case 'services':
 			await selectPublishedServices(manager);
+			break;
+		case 'odata':
+			await vscode.commands.executeCommand('1c-platform-tools.odata.setup');
 			break;
 		case 'debug':
 			await startServerDebug(manager);
@@ -413,10 +419,13 @@ export function registerPlatformServerFeature(
 	// загрузки, выгрузки и обновления конфигурации БД этой базы просят
 	// освободить её на время работы и возвращают сервер сам.
 	const holderRegistration = registerInfobaseHolder(manager.infobaseHolder());
+	// Команды OData без явного url идут в публикацию запущенного сервера
+	const odataRegistration = registerODataEndpointProvider({ resolve: (root) => odataEndpointOf(manager, root) });
 
 	const disposables: vscode.Disposable[] = [
 		manager,
 		new vscode.Disposable(() => holderRegistration.dispose()),
+		new vscode.Disposable(() => odataRegistration.dispose()),
 		statusItem,
 		manager.onDidChangeState(() => refresh()),
 		// Профиль задаёт адрес ИБ — при его смене сервер перегенерирует конфиг
@@ -441,6 +450,40 @@ export function registerPlatformServerFeature(
 	];
 
 	return disposables;
+}
+
+/**
+ * Адрес стандартного интерфейса OData запущенного сервера проекта.
+ *
+ * @param manager - Менеджер сервера
+ * @param root - Корень проекта вызова
+ * @returns Адрес либо причина, почему запрос в сервер не пойдёт
+ */
+function odataEndpointOf(manager: PlatformServerManager, root: string | undefined): ODataEndpoint {
+	const owner = manager.ownerRoot;
+	const urls = manager.getUrls();
+	if (manager.state !== 'running' || owner === undefined || urls === undefined) {
+		return {
+			problem:
+				'Автономный сервер не запущен. Запустите его (server_start) с отмеченным пунктом «OData» ' +
+				'в «Выбрать публикуемые сервисы» или передайте адрес своей публикации в параметре url.',
+		};
+	}
+	if (root !== undefined && !sameProjectRoot(owner, root)) {
+		return {
+			problem:
+				`Автономный сервер запущен для проекта ${projectLabel(owner)}, а не для этого. ` +
+				'Остановите его (server_stop) и запустите в нужном проекте либо передайте адрес публикации в параметре url.',
+		};
+	}
+	if (!manager.publishesOData) {
+		return {
+			problem:
+				'Автономный сервер запущен без стандартного интерфейса OData. Отметьте пункт «OData» в ' +
+				'«Выбрать публикуемые сервисы» (статус-бар «1С: Сервер») и перезапустите сервер (server_restart).',
+		};
+	}
+	return { serviceRoot: `${urls.root}${ODATA_SERVICE_PATH}` };
 }
 
 /**

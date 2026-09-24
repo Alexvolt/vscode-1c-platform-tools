@@ -3,6 +3,7 @@
  * @module mdSparrowRunner
  */
 
+import { StringDecoder } from 'node:string_decoder';
 import { spawn } from 'node:child_process';
 import { logger } from '../../shared/logger';
 import type { MdSparrowRuntime } from './mdSparrowBootstrap';
@@ -91,11 +92,14 @@ export function runMdSparrowOnce(
 		});
 		let stdout = '';
 		let stderr = '';
+		// Декодер держит байты символа, разорванного между порциями: иначе кириллица на стыке портится
+		const stdoutDecoder = new StringDecoder('utf8');
+		const stderrDecoder = new StringDecoder('utf8');
 		child.stdout?.on('data', (chunk: Buffer) => {
-			stdout += chunk.toString('utf8');
+			stdout += stdoutDecoder.write(chunk);
 		});
 		child.stderr?.on('data', (chunk: Buffer) => {
-			stderr += chunk.toString('utf8');
+			stderr += stderrDecoder.write(chunk);
 		});
 		const sub = options?.token?.onCancellationRequested(() => {
 			try {
@@ -111,6 +115,8 @@ export function runMdSparrowOnce(
 		});
 		child.on('close', (code) => {
 			sub?.dispose();
+			stdout += stdoutDecoder.end();
+			stderr += stderrDecoder.end();
 			const duration = Date.now() - startedAt;
 			if (code === 0) {
 				log.debug(`${label}: разовый запуск за ${duration} мс`);

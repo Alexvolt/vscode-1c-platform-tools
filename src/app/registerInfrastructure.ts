@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { registerRunCommandFileWatcher } from '../shared/runCommandFromFileWatcher';
 import { startIpcServer } from '../shared/ipcServer';
+import { registerServiceFolderDecoration } from '../features/serviceFiles/serviceFolderDecoration';
 
 /**
  * Регистрирует инфраструктурные сервисы расширения.
@@ -8,4 +9,5 @@ import { startIpcServer } from '../shared/ipcServer';
 export function registerInfrastructure(context: vscode.ExtensionContext): void {
 	registerRunCommandFileWatcher(context);
 	startIpcServer(context);
+	registerServiceFolderDecoration(context);
 }

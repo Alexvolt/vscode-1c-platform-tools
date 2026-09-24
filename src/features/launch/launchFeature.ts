@@ -6,6 +6,7 @@
  * через QuickPick и применяются ко всем командам vanessa-runner поверх профиля.
  */
 
+import { resolveODataEndpoint } from '../../shared/odataEndpoint';
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
@@ -598,6 +599,8 @@ export function registerLaunchFeature(
 				effectiveIbConnection: effectiveOverrides?.ibConnection
 					?? vrunner.readActiveProfileSettingSync('ibconnection')
 					?? null,
+				// Запущен ли автономный сервер проекта с OData: без этого агент узнаёт о нём только пробным запросом
+				odata: odataStatus(workspaceRoot),
 			};
 			return {
 				success: true,
@@ -712,4 +715,17 @@ function watchProjectFiles(
 		watcher.onDidChange(onFsChange),
 		watcher.onDidDelete(() => void onFsDelete())
 	);
+}
+
+/**
+ * Состояние стандартного интерфейса OData автономного сервера для env_status.
+ *
+ * @param workspaceRoot - Корень проекта
+ * @returns Адрес интерфейса, если сервер проекта запущен с OData, иначе причина
+ */
+function odataStatus(workspaceRoot: string | undefined): { serviceRoot: string | null; problem: string | null } {
+	const endpoint = resolveODataEndpoint(workspaceRoot);
+	return 'problem' in endpoint
+		? { serviceRoot: null, problem: endpoint.problem }
+		: { serviceRoot: endpoint.serviceRoot, problem: null };
 }

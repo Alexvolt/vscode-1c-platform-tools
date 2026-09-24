@@ -62,6 +62,32 @@ export interface CommandExecutionOptions {
 	outputDirectory?: string;
 	/** Имя собранного файла без расширения, с переменными `${name}`, `${folder}`, `${version}`, `${gitBranch}`. */
 	outputName?: string;
+	/** Метод HTTP запроса к OData: GET, POST, PUT, PATCH, DELETE (odata.query). */
+	method?: string;
+	/** Ресурс OData: набор, элемент, свойство или `$metadata` (odata.query). */
+	resource?: string;
+	/** Адрес своей публикации ИБ; без него запрос идёт в автономный сервер проекта (odata.query). */
+	url?: string;
+	/** Отбор `$filter` (odata.query). */
+	filter?: string;
+	/** Поля `$select` через запятую (odata.query). */
+	select?: string;
+	/** Связанные данные `$expand` (odata.query). */
+	expand?: string;
+	/** Сортировка `$orderby` (odata.query). */
+	orderby?: string;
+	/** Число записей `$top` (odata.query). */
+	top?: number;
+	/** Пропуск записей `$skip` (odata.query). */
+	skip?: number;
+	/** Тело POST, PUT и PATCH: объект или строка JSON (odata.query). */
+	body?: unknown;
+	/** Объекты, которые включить в состав стандартного интерфейса OData (odata.setup). */
+	include?: string[];
+	/** Объекты, которые исключить из состава стандартного интерфейса OData (odata.setup). */
+	exclude?: string[];
+	/** Вернуть все объекты, которые можно включить в состав (odata.setup). */
+	available?: boolean;
 }
 
 /**

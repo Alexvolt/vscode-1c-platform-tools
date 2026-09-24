@@ -226,3 +226,13 @@ suite('mcpCommandPolicy: пайплайны', () => {
 		}
 	});
 });
+
+suite('mcpCommandPolicy: стандартный интерфейс OData', () => {
+	test('запрос и состав интерфейса доступны агенту и возвращают исход', () => {
+		for (const id of ['1c-platform-tools.odata.query', '1c-platform-tools.odata.setup']) {
+			assert.strictEqual(isCommandExposedToMcp(id), true, id);
+			assert.strictEqual(commandSupportsWait(id), true, id);
+			assert.strictEqual(commandRunsInProject(id), true, id);
+		}
+	});
+});
