@@ -153,6 +153,8 @@ export class PlatformServerManager {
 	private publicationConfigPath: string | undefined;
 	/** Параметры (host/port/base), на которых реально поднят текущий процесс. */
 	private activeConfig: { host: string; port: number; base: string } | undefined;
+	/** Публикует ли текущий процесс стандартный интерфейс OData: по конфигу на момент запуска. */
+	private activeODataPublished = false;
 	/** Резолвер промиса фактического завершения текущего процесса. */
 	private exitResolve: (() => void) | undefined;
 	/** Промис, который разрешается, когда текущий процесс полностью завершился. */
@@ -217,6 +219,16 @@ export class PlatformServerManager {
 			return buildServerUrls(params.host, params.port, params.base);
 		}
 		return buildServerUrls(settings.host, settings.port, settings.httpBase);
+	}
+
+	/**
+	 * Публикует ли запущенный сервер стандартный интерфейс OData.
+	 *
+	 * Решает конфиг, с которым процесс запущен: выбор сервисов после запуска
+	 * вступает в силу только с перезапуском.
+	 */
+	public get publishesOData(): boolean {
+		return this._state === 'running' && this.activeODataPublished;
 	}
 
 	/** HTTP-порт текущего/последнего запуска. */
@@ -297,7 +309,7 @@ export class PlatformServerManager {
 
 		const dataDir = this.getDataDir(workspaceRoot, settings);
 		const configPath = path.join(dataDir, 'publication.yaml');
-		let params: { host: string; port: number; base: string };
+		let params: { host: string; port: number; base: string; odata: boolean };
 		try {
 			await fs.mkdir(dataDir, { recursive: true });
 			// Конфиг создаётся, только если его ещё нет — ручные правки сохраняются.
@@ -344,7 +356,8 @@ export class PlatformServerManager {
 			}
 		});
 
-		this.activeConfig = params;
+		this.activeConfig = { host: params.host, port: params.port, base: params.base };
+		this.activeODataPublished = params.odata;
 		this.currentUrls = buildServerUrls(params.host, params.port, params.base);
 
 		const ready = await this.waitForReady(child);
@@ -716,12 +729,12 @@ export class PlatformServerManager {
 	/**
 	 * Читает серверные параметры из конфига (с подстановкой значений настроек).
 	 *
-	 * @returns host/port/base/distributeLicenses — из файла, иначе из настроек
+	 * @returns host/port/base/distributeLicenses/odata — из файла, иначе из настроек
 	 */
 	private async readConfigParams(
 		configPath: string,
 		settings: ServerSettings
-	): Promise<{ host: string; port: number; base: string; distributeLicenses: boolean }> {
+	): Promise<{ host: string; port: number; base: string; distributeLicenses: boolean; odata: boolean }> {
 		let parsed: ReturnType<typeof parseServerConfigParams> = {};
 		try {
 			parsed = parseServerConfigParams(await fs.readFile(configPath, 'utf8'));
@@ -733,6 +746,7 @@ export class PlatformServerManager {
 			port: parsed.port ?? settings.port,
 			base: parsed.base ?? settings.httpBase,
 			distributeLicenses: parsed.distributeLicenses ?? settings.distributeLicenses,
+			odata: parsed.odata ?? settings.publication.odata,
 		};
 	}
 

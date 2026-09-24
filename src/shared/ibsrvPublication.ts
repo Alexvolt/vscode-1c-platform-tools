@@ -71,6 +71,8 @@ export interface ParsedServerParams {
 	base?: string;
 	/** Выдача лицензий (infobase.distribute-licenses). */
 	distributeLicenses?: boolean;
+	/** Публикация стандартного интерфейса OData (http[].odata.publish). */
+	odata?: boolean;
 }
 
 /**
@@ -88,11 +90,13 @@ export function parseServerConfigParams(yaml: string): ParsedServerParams {
 	const portStr = yaml.match(/^\s*port:\s*(\d+)\s*$/m)?.[1];
 	const base = yaml.match(/^\s*-\s*base:\s*(\S+)\s*$/m)?.[1];
 	const lic = yaml.match(/^\s*distribute-licenses:\s*(yes|no)\b/m)?.[1];
+	const odata = yaml.match(/^\s*odata:\s*\r?\n\s*publish:\s*(yes|no|true|false)\b/m)?.[1];
 	return {
 		host: host || undefined,
 		port: portStr ? Number(portStr) : undefined,
 		base: base || undefined,
 		distributeLicenses: lic ? lic === 'yes' : undefined,
+		odata: odata ? odata === 'yes' || odata === 'true' : undefined,
 	};
 }
 

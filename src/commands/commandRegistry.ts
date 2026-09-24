@@ -17,6 +17,7 @@ import { WorkspaceTasksCommands } from './workspaceTasksCommands';
 import { ArtifactCommands } from './artifactCommands';
 import { SkillsCommands } from './skillsCommands';
 import { ServiceFilesCommands } from './serviceFilesCommands';
+import { ODataCommands } from './odataCommands';
 import { VRunnerManager } from '../shared/vrunnerManager';
 import type { CommandExecutionOptions, StructuredCommandResult } from '../shared/commandExecutionTypes';
 import { isAgentOptions, agentInteractiveError, uiOnlyHandler } from '../shared/agentGate';
@@ -51,6 +52,7 @@ interface Commands {
 	session: SessionCommands;
 	pipelines: PipelineCommands;
 	hooks: HooksCommands;
+	odata: ODataCommands;
 }
 
 function getActiveEditorResourceUri(): vscode.Uri | undefined {
@@ -402,6 +404,12 @@ export function registerCommands(
 		)
 	];
 
+	// Стандартный интерфейс OData: запросы к данным и состав интерфейса
+	const odataCommands = [
+		registerVRunnerCommand('1c-platform-tools.odata.query', (opts) => commands.odata.query(opts)),
+		registerVRunnerCommand('1c-platform-tools.odata.setup', (opts) => commands.odata.setup(opts)),
+	];
+
 	// Команды тестирования
 	const testCommands = [
 		registerVRunnerCommand('1c-platform-tools.test.xunit', (opts) => commands.test.runXUnit(opts)),
@@ -538,6 +546,7 @@ export function registerCommands(
 		...supportCommands,
 		...dependenciesCommands,
 		...runCommands,
+		...odataCommands,
 		...testCommands,
 		...setVersionCommands,
 		...artifactCommands,
