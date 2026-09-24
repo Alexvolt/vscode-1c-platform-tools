@@ -4769,6 +4769,20 @@
         }
       }
     ],
+    "configurationDefaults": {
+      "material-icon-theme.folders.associations": {
+        ".1cpt": "tools"
+      },
+      "vsicons.associations.folders": [
+        {
+          "icon": "tools",
+          "extensions": [
+            ".1cpt"
+          ],
+          "format": "svg"
+        }
+      ]
+    },
     "colors": [
       {
         "id": "1cplatformtools.projects.currentProjectHighlightForeground",
