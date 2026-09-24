@@ -1,3 +1,4 @@
+import { StringDecoder } from 'node:string_decoder';
 import * as net from 'node:net';
 import * as crypto from 'node:crypto';
 import * as vscode from 'vscode';
@@ -439,8 +440,10 @@ function createServer(config: IpcServerConfig, extensionId: string): net.Server 
 			}
 		};
 
+		// Декодер держит байты символа, разорванного между порциями: иначе кириллица на стыке портится
+		const decoder = new StringDecoder('utf8');
 		socket.on('data', (data: Buffer) => {
-			buffer += data.toString('utf8');
+			buffer += decoder.write(data);
 			let index = buffer.indexOf('\n');
 
 			while (index !== -1) {
