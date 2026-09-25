@@ -175,7 +175,7 @@ export class VRunnerManager {
 	private extensionPath: string | undefined;
 	private memento: vscode.Memento | undefined;
 
-	/** Кэш версии vrunner по корню проекта: undefined - ещё не определяли, null - определить не удалось. */
+	/** Кэш версии vrunner по корню проекта: undefined - ещё не определяли, null - прошлая попытка не удалась, следующий вызов её повторит. */
 	private readonly vrunnerVersionCacheByRoot = new Map<string, VRunnerVersion | null>();
 
 	/** Идущие сейчас проверки oscript по значению components.path.oscript: гасят параллельные запуски. */
@@ -670,8 +670,10 @@ export class VRunnerManager {
 	 * способа. Если ни один не сработал, выполняется запасное чтение
 	 * `opm-metadata.xml` из `oscript_modules/vanessa-runner` в корне workspace.
 	 *
-	 * Результат кэшируется на время сессии; используйте forceRefresh для
-	 * принудительного повторного определения (например, после переустановки).
+	 * Найденная версия кэшируется на время сессии, неудача нет: vrunner могли
+	 * поставить мимо расширения, Docker мог ещё не запуститься, а в недоверенной
+	 * папке vrunner не запускается вовсе. forceRefresh определяет заново и
+	 * найденную версию (например, после переустановки).
 	 *
 	 * @param forceRefresh - Игнорировать кэш и определить версию заново
 	 * @returns Разобранная версия или undefined, если определить не удалось
@@ -679,8 +681,8 @@ export class VRunnerManager {
 	public async getVRunnerVersion(forceRefresh = false): Promise<VRunnerVersion | undefined> {
 		const cacheKey = this.versionCacheKey();
 		const cachedVersion = this.vrunnerVersionCacheByRoot.get(cacheKey);
-		if (!forceRefresh && cachedVersion !== undefined) {
-			return cachedVersion ?? undefined;
+		if (!forceRefresh && cachedVersion) {
+			return cachedVersion;
 		}
 
 		// Кэш наполняется только по завершении, а на активации детект зовут
@@ -713,20 +715,13 @@ export class VRunnerManager {
 			version = await this.readVRunnerVersionFromOpmMetadata();
 		}
 
-		if (!version) {
-			// Неудачу не кэшируем вовсе (по аналогии с oscript/opm — см.
-			// resolveBinaryPath: "найденное держим до конца сессии... ненайденное
-			// перепроверяем"). Иначе один неудачный детект (например, Docker-
-			// контейнер ещё не успел стартовать на холодном старте) залипает как
-			// "не определена" до конца сессии, и все дальнейшие команды строятся
-			// по устаревшему предположению о версии CLI.
+		const previous = this.vrunnerVersionCacheByRoot.get(cacheKey);
+		if (version) {
+			log.debug(`Определена версия vrunner: ${version.raw}`);
+		} else if (previous !== null) {
 			log.warn('Не удалось определить версию vrunner');
-			return undefined;
 		}
 
-		log.debug(`Определена версия vrunner: ${version.raw}`);
-
-		const previous = this.vrunnerVersionCacheByRoot.get(cacheKey);
 		this.vrunnerVersionCacheByRoot.set(cacheKey, version ?? null);
 		if (previous !== undefined && (previous?.raw ?? null) !== (version?.raw ?? null)) {
 			log.info(`Версия vrunner изменилась: ${previous?.raw ?? 'не определена'} -> ${version?.raw ?? 'не определена'}`);
