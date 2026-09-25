@@ -23,6 +23,7 @@ import {
 	CONTAINER_WORKSPACE,
 	containerPath,
 	containerPathsInText,
+	dockerMountSource,
 	fileInfobaseOutside,
 	hostPathOutside,
 	isInsideDir,
@@ -106,7 +107,7 @@ interface DockerPlan {
 	argsArray: string[][];
 	/** Каталог проекта для тома */
 	root: string;
-	/** Тома сверх каталога проекта */
+	/** Тома сверх проекта и параметры docker run */
 	options: DockerRunOptions;
 }
 
@@ -310,7 +311,7 @@ export class VRunnerManager {
 			return projectRootKey(root);
 		}
 		// У каждого образа и у этой машины vrunner свой
-		const image = vscode.workspace.getConfiguration('1c-platform-tools').get<string>('docker.image', '').trim();
+		const image = projectConfiguration(root).get<string>('docker.image', '').trim();
 		return `${projectRootKey(root)}|docker|${image}`;
 	}
 
@@ -1249,7 +1250,7 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Выполнять ли команды vrunner в Docker: настройка `docker.enabled`.
+	 * Выполнять ли команды vrunner в Docker: настройка `docker.enabled` проекта.
 	 *
 	 * Внутри {@link runOnThisMachine} ответ всегда отрицательный.
 	 *
@@ -1261,7 +1262,7 @@ export class VRunnerManager {
 
 	private dockerEnabled(): boolean {
 		return onThisMachine.getStore() !== true
-			&& vscode.workspace.getConfiguration('1c-platform-tools').get<boolean>('docker.enabled', false);
+			&& projectConfiguration(this.getEffectiveRoot()).get<boolean>('docker.enabled', false);
 	}
 
 	/**
@@ -1276,18 +1277,13 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Получает Docker-образ из настроек VS Code
-	 * 
-	 * Настройка берется из `1c-platform-tools.docker.image`.
-	 * Образ должен содержать установленную платформу 1С:Предприятие и vanessa-runner.
-	 * 
+	 * Docker-образ проекта из настройки `docker.image`.
+	 *
 	 * @returns Docker-образ для выполнения команд
-	 * @throws {Error} Если образ не указан в настройках (пустая строка)
+	 * @throws {Error} Если образ не указан
 	 */
 	public getDockerImage(): string {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		const image = config.get<string>('docker.image', '');
-		
+		const image = projectConfiguration(this.getEffectiveRoot()).get<string>('docker.image', '').trim();
 		if (!image) {
 			throw new Error(
 				'Docker-образ не указан в настройках. Укажите образ в настройках расширения ' +
@@ -1295,7 +1291,6 @@ export class VRunnerManager {
 				'"localhost/onec-image:latest". Образ должен содержать установленную платформу 1С:Предприятие и vanessa-runner.'
 			);
 		}
-		
 		return image;
 	}
 
@@ -1384,6 +1379,7 @@ export class VRunnerManager {
 				return { error: `В Docker раннеру виден только каталог проекта, а база ${infobase} лежит вне его` };
 			}
 		}
+		const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(root))?.uri.fsPath;
 		const used = (mount: DockerMount): boolean =>
 			processed.some((args) =>
 				argumentValues(args).some((value) => value === mount.container || value.startsWith(`${mount.container}/`))
@@ -1391,8 +1387,8 @@ export class VRunnerManager {
 		return {
 			image,
 			argsArray: processed,
-			root,
-			options: { mounts: extra.filter(used) },
+			root: dockerMountSource(root, folder, process.env.LOCAL_WORKSPACE_FOLDER),
+			options: { mounts: extra.filter(used), runArgs: this.dockerRunArgsSetting(root) },
 		};
 	}
 
@@ -1426,6 +1422,16 @@ export class VRunnerManager {
 		} catch {
 			return undefined;
 		}
+	}
+
+	/**
+	 * Параметры `docker run` проекта из настройки `docker.runArgs`.
+	 *
+	 * @param root - Каталог проекта
+	 */
+	private dockerRunArgsSetting(root: string): string[] {
+		const value = projectConfiguration(root).get<unknown>('docker.runArgs', []);
+		return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item !== '') : [];
 	}
 
 	/**

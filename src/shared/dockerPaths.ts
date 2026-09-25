@@ -127,3 +127,31 @@ export function fileInfobaseOutside(connection: string, root: string): string | 
 	}
 	return isInsideDir(root, path.resolve(root, match[1])) ? undefined : match[1];
 }
+
+/**
+ * Путь каталога проекта для тома `docker run`.
+ *
+ * При docker-outside-of-docker демон видит пути хоста, а не контейнера разработки;
+ * путь папки рабочей области на хосте приходит в `LOCAL_WORKSPACE_FOLDER`.
+ *
+ * @param root - Каталог проекта
+ * @param folderRoot - Папка рабочей области, в которой лежит проект
+ * @param localWorkspaceFolder - Значение `LOCAL_WORKSPACE_FOLDER`
+ */
+export function dockerMountSource(
+	root: string,
+	folderRoot: string | undefined,
+	localWorkspaceFolder: string | undefined
+): string {
+	if (!localWorkspaceFolder || folderRoot === undefined || !isInsideDir(folderRoot, root)) {
+		return root;
+	}
+	const relative = path.relative(folderRoot, root);
+	if (relative === '') {
+		return localWorkspaceFolder;
+	}
+	const windowsHost = /^[A-Za-z]:[\\/]/.test(localWorkspaceFolder) || localWorkspaceFolder.startsWith('\\\\');
+	return windowsHost
+		? path.win32.join(localWorkspaceFolder, relative)
+		: path.posix.join(localWorkspaceFolder, toPosix(relative));
+}

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
 	containerPath,
 	containerPathsInText,
+	dockerMountSource,
 	fileInfobaseOutside,
 	hostPathOutside,
 	isInsideDir,
@@ -52,6 +53,14 @@ suite('Docker: пути контейнера', () => {
 		const absolute = path.join(os.tmpdir(), 'bases', 'erp');
 		assert.strictEqual(fileInfobaseOutside(`/F${absolute}`, ROOT), absolute);
 		assert.strictEqual(fileInfobaseOutside('/Ssrv-1c\\erp', ROOT), undefined);
+	});
+
+	test('docker-outside-of-docker: том берёт путь папки на хосте', () => {
+		assert.strictEqual(dockerMountSource('/workspaces/repo', '/workspaces/repo', undefined), '/workspaces/repo');
+		assert.strictEqual(dockerMountSource('/workspaces/repo', '/workspaces/repo', '/host/repo'), '/host/repo');
+		assert.strictEqual(dockerMountSource('/workspaces/repo/proj', '/workspaces/repo', '/host/repo'), '/host/repo/proj');
+		assert.strictEqual(dockerMountSource('/workspaces/repo/proj', '/workspaces/repo', 'C:\\Users\\me\\repo'), 'C:\\Users\\me\\repo\\proj');
+		assert.strictEqual(dockerMountSource('/other/proj', '/workspaces/repo', '/host/repo'), '/other/proj');
 	});
 
 	test('пути внутри строки параметров платформы переводятся, ключи остаются', () => {

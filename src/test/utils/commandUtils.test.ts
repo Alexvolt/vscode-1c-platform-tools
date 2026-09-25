@@ -333,14 +333,20 @@ suite('commandUtils', () => {
 		const result = joinCommands(['command1'], 'bash');
 		assert.strictEqual(result, 'command1', 'Одна команда должна возвращаться без разделителей');
 	});
-	test('dockerRunArgs: дополнительные тома идут до образа', () => {
+	test('dockerRunArgs: тома и параметры docker.runArgs идут до образа', () => {
 		assert.deepStrictEqual(
 			dockerRunArgs('vrunner:8.3.27', ['load'], '/home/ws', {
 				containerName: 'c',
 				mounts: [{ host: '/tmp/edt', container: '/edt-staging' }],
+				runArgs: ['--network', 'host'],
 			}),
-			['run', '--rm', '--name', 'c', '-v', '/home/ws:/workspace', '-v', '/tmp/edt:/edt-staging', '-w', '/workspace', 'vrunner:8.3.27', 'load']
+			['run', '--rm', '--name', 'c', '-v', '/home/ws:/workspace', '-v', '/tmp/edt:/edt-staging', '-w', '/workspace', '--network', 'host', 'vrunner:8.3.27', 'load']
 		);
+	});
+
+	test('buildDockerCommandSequence: параметры docker.runArgs стоят до точки входа', () => {
+		const result = buildDockerCommandSequence('vrunner:8.3.27', [['compile']], '/home/ws', 'sh', { runArgs: ['--network', 'host'] });
+		assert.ok(result.includes('-w /workspace --network host --entrypoint /bin/sh vrunner:8.3.27'), result);
 	});
 
 	test('normalizeIbPathForDocker: база внутри проекта становится относительной', () => {

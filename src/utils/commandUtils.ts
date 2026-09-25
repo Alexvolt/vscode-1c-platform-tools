@@ -309,10 +309,12 @@ export interface DockerRunOptions {
 	containerName?: string;
 	/** Каталоги хоста сверх каталога проекта */
 	mounts?: readonly DockerMount[];
+	/** Параметры `docker run` из настройки docker.runArgs */
+	runArgs?: readonly string[];
 }
 
 /**
- * Начало аргументов `docker run`: тома и рабочий каталог.
+ * Начало аргументов `docker run`: тома, рабочий каталог и параметры пользователя.
  *
  * @param workspaceRoot - Каталог проекта на хосте
  * @param options - Параметры запуска
@@ -328,6 +330,7 @@ function dockerRunPrefix(workspaceRoot: string, options: DockerRunOptions, hostP
 		...(options.mounts ?? []).flatMap((mount) => ['-v', `${hostPath(mount.host)}:${mount.container}`]),
 		'-w',
 		CONTAINER_WORKSPACE,
+		...(options.runArgs ?? []),
 	];
 }
 
@@ -337,7 +340,7 @@ function dockerRunPrefix(workspaceRoot: string, options: DockerRunOptions, hostP
  * @param dockerImage - Docker-образ с ENTRYPOINT vrunner
  * @param vrunnerArgs - Аргументы команды vrunner
  * @param workspaceRoot - Каталог проекта на хосте
- * @param options - Имя контейнера и дополнительные тома
+ * @param options - Имя контейнера, дополнительные тома и параметры docker run
  * @returns Аргументы программы `docker`
  */
 export function dockerRunArgs(
@@ -364,7 +367,7 @@ export function dockerRunArgs(
  * @param vrunnerArgs - Аргументы команды vrunner (без префикса 'vrunner')
  * @param workspaceRoot - Корневая директория workspace (будет смонтирована в /workspace)
  * @param shellType - Тип оболочки терминала хоста (опционально, определяется автоматически)
- * @param options - Имя контейнера и дополнительные тома
+ * @param options - Имя контейнера, дополнительные тома и параметры docker run
  * @returns Строка команды Docker для выполнения в терминале
  */
 export function buildDockerCommand(
@@ -394,7 +397,7 @@ export function buildDockerCommand(
  * @param vrunnerArgsArray - Массив наборов аргументов (каждый набор — одна команда vrunner)
  * @param workspaceRoot - Корневая директория workspace
  * @param shellType - Тип оболочки терминала хоста
- * @param options - Имя контейнера и дополнительные тома
+ * @param options - Имя контейнера, дополнительные тома и параметры docker run
  */
 export function buildDockerCommandSequence(
 	dockerImage: string,
