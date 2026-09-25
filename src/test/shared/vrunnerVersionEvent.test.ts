@@ -71,6 +71,15 @@ suite('версия vanessa-runner: переустановка в другом �
 		assert.strictEqual(await vrunner.runWithProjectRoot(root, async () => vrunner.getCachedVRunnerVersionLabel()), '3.0.0');
 	});
 
+	test('переустановка определяет версию корня, где прошлая попытка не удалась', async () => {
+		writeFlakyRunner(root, '3.0.0', 2);
+		assert.strictEqual(await vrunner.runWithProjectRoot(root, () => vrunner.getVRunnerVersion()), undefined);
+
+		await vrunner.runWithProjectRoot(other, () => vrunner.refreshVRunnerVersion(root));
+
+		assert.strictEqual(await vrunner.runWithProjectRoot(root, async () => vrunner.getCachedVRunnerVersionLabel()), '3.0.0');
+	});
+
 	test('версию корня, для которого её не определяли, переустановка не определяет', async () => {
 		writeLocalRunner(other, '3.0.0');
 
