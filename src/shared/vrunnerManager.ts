@@ -299,7 +299,15 @@ export class VRunnerManager {
 	/** Ключ кэша версии для активного корня. */
 	private versionCacheKey(): string {
 		const root = this.getEffectiveRoot();
-		return root === undefined ? '' : projectRootKey(root);
+		if (root === undefined) {
+			return '';
+		}
+		if (!this.dockerEnabled()) {
+			return projectRootKey(root);
+		}
+		// У каждого образа и у этой машины vrunner свой
+		const image = vscode.workspace.getConfiguration('1c-platform-tools').get<string>('docker.image', '').trim();
+		return `${projectRootKey(root)}|docker|${image}`;
 	}
 
 	public getVRunnerPath(): string {
@@ -692,15 +700,17 @@ export class VRunnerManager {
 	 * @returns Разобранная версия или undefined
 	 */
 	private async detectVRunnerVersion(cacheKey: string): Promise<VRunnerVersion | undefined> {
+		const inDocker = this.dockerEnabled();
 		let version = await this.detectVRunnerVersionFromCli();
 
-		if (!version) {
+		// Установка в проекте описывает vrunner этой машины, а не образа
+		if (!version && !inDocker) {
 			version = await this.readVRunnerVersionFromOpmMetadata();
 		}
 
-		// В недоверенной папке vrunner не запускается, поэтому пустой итог не кэшируем:
-		// иначе версия осталась бы неопределённой до конца сеанса и после выдачи доверия
-		if (!version && !isWorkspaceTrusted()) {
+		// Пустой итог не кэшируем: в недоверенной папке vrunner не запускается, а Docker
+		// может быть ещё не запущен, и версия осталась бы неопределённой до конца сеанса
+		if (!version && (inDocker || !isWorkspaceTrusted())) {
 			return undefined;
 		}
 
@@ -731,6 +741,9 @@ export class VRunnerManager {
 	 * Без этого кэш версии живёт всю сессию, и после `opm install` панель
 	 * и команды продолжают работать со старой схемой.
 	 *
+	 * Настройки Docker выбирают, чей vrunner выполняет команды: после их смены
+	 * подписчики получают версию vrunner образа или этой машины.
+	 *
 	 * @returns Disposable наблюдателя
 	 */
 	public watchVRunnerInstallation(): vscode.Disposable {
@@ -754,6 +767,12 @@ export class VRunnerManager {
 			watcher.onDidCreate(redetect),
 			watcher.onDidChange(redetect),
 			watcher.onDidDelete(redetect),
+			vscode.workspace.onDidChangeConfiguration((event) => {
+				if (event.affectsConfiguration('1c-platform-tools.docker')) {
+					this._onDidChangeVRunnerVersion.fire(this.vrunnerVersionCacheByRoot.get(this.versionCacheKey()) ?? undefined);
+					void this.getVRunnerVersion();
+				}
+			}),
 			new vscode.Disposable(() => {
 				for (const timer of timers.values()) {
 					clearTimeout(timer);
@@ -1234,10 +1253,11 @@ export class VRunnerManager {
 	 * @returns Промис, который разрешается `true`, если нужно использовать Docker, иначе `false`
 	 */
 	public async shouldUseDocker(): Promise<boolean> {
-		const config = vscode.workspace.getConfiguration('1c-platform-tools');
-		const dockerEnabled = config.get<boolean>('docker.enabled', false);
-		
-		return dockerEnabled;
+		return this.dockerEnabled();
+	}
+
+	private dockerEnabled(): boolean {
+		return vscode.workspace.getConfiguration('1c-platform-tools').get<boolean>('docker.enabled', false);
 	}
 
 	/**
