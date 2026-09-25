@@ -12,7 +12,7 @@ import {
 	resolvePlatformVersionInRoots,
 } from '../../shared/platformBinary';
 import { projectPlatformRoots } from '../../shared/platformSettings';
-import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
+import { CONVENTIONAL_PATHS, projectPaths, type ProjectPaths } from '../../shared/projectPaths';
 import { BUILD_SUBDIRS } from '../../shared/pathDefaults';
 import { currentRoot, deepestProject, projectOf, runWithProject } from '../../shared/workspaceProjects';
 import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
@@ -62,6 +62,53 @@ export function resolveDebugPlatform(
 function templatePath(relative: string): string {
 	const normalized = relative.replace(/\\/g, '/').replace(/^\.?\//, '');
 	return normalized.length > 0 ? `\${workspaceFolder}/${normalized}` : '${workspaceFolder}';
+}
+
+/**
+ * Каталоги исходного кода проекта для адаптера отладки: конфигурация, расширения,
+ * внешние обработки и отчёты вместе с их сборками.
+ *
+ * @param paths - Раскладка проекта
+ * @param outPath - Каталог сборки проекта
+ * @param asPath - Запись каталога проекта в конфигурации отладки
+ */
+export function debugSourceFields(
+	paths: ProjectPaths | undefined,
+	outPath: string,
+	asPath: (relative: string) => string
+): Record<string, unknown> {
+	const fields: Record<string, unknown> = { rootProject: asPath(paths?.configuration?.dir ?? '.') };
+
+	// Расширения решения и тестовые: тесты YAxUnit живут отдельно от поставки,
+	// но отлаживать их нужно так же
+	const extensions = paths ? [...paths.extensions, ...paths.testExtensions].map((extension) => asPath(extension.dir)) : [];
+	if (extensions.length > 0) {
+		fields.extensions = extensions;
+	}
+
+	// Внешние обработки и отчёты: каталоги выгрузки конфигуратора всегда в шаблоне,
+	// несуществующие адаптер пропускает; проекты EDT лежат отдельно, поэтому идут
+	// каждый своим каталогом
+	const container = (value: string | undefined, fallback: string) =>
+		asPath(value === undefined || value === '.' ? fallback : value);
+	const externalSources = [
+		container(paths?.processorsContainer, CONVENTIONAL_PATHS.epf),
+		container(paths?.reportsContainer, CONVENTIONAL_PATHS.erf),
+		...(paths ? [...paths.processors, ...paths.reports, ...paths.testProcessors] : [])
+			.filter((external) => external.format === 'edt')
+			.map((external) => asPath(external.dir)),
+	];
+	fields.externalFilesSrc = [...new Set(externalSources)];
+
+	// Собранные .epf/.erf: сервер отладки адресует внешние модули по URL файла
+	const out = outPath.replace(/\\/g, '/').replace(/^\.?\//, '');
+	// Тестовые обработки собираются в свой каталог: без него их точки останова не привязать
+	fields.externalFilesBuilds = [
+		asPath(`${out}/${BUILD_SUBDIRS.epf}`),
+		asPath(`${out}/${BUILD_SUBDIRS.erf}`),
+		asPath(`${out}/${BUILD_SUBDIRS.testsEpf}`),
+	];
+	return fields;
 }
 
 /** Лежит ли в каталоге исходный код конфигурации: выгрузка конфигуратора или проект EDT. */
@@ -179,47 +226,13 @@ export class OnecDebugConfigurationProvoider implements vscode.DebugConfiguratio
 				: templatePath(fromFolder);
 		};
 
-		const configurationDir = paths?.configuration?.dir;
-		if (root && configurationDir === undefined) {
+		if (root && paths?.configuration?.dir === undefined) {
 			void vscode.window.showWarningMessage(
 				'Исходный код конфигурации в рабочей области не найден: укажите в конфигурации запуска каталог rootProject.'
 			);
 		}
-		const rootProject = asTemplate(configurationDir ?? '.');
 
-		// Расширения решения и тестовые: тесты YAxUnit живут отдельно от поставки,
-		// но отлаживать их нужно так же
-		const extensions = paths ? [...paths.extensions, ...paths.testExtensions].map((extension) => asTemplate(extension.dir)) : [];
-
-		const baseConfig: vscode.DebugConfiguration = { ...launchConfig, rootProject };
-		if (extensions.length > 0) {
-			(baseConfig as vscode.DebugConfiguration & { extensions: string[] }).extensions = extensions;
-		}
-
-		// Внешние обработки и отчёты: каталоги выгрузки конфигуратора всегда в шаблоне,
-		// несуществующие адаптер пропускает; проекты EDT лежат отдельно, поэтому идут
-		// каждый своим каталогом
-		const container = (value: string | undefined, fallback: string) =>
-			asTemplate(value === undefined || value === '.' ? fallback : value);
-		const externalSources = [
-			container(paths?.processorsContainer, CONVENTIONAL_PATHS.epf),
-			container(paths?.reportsContainer, CONVENTIONAL_PATHS.erf),
-			...(paths ? [...paths.processors, ...paths.reports, ...paths.testProcessors] : [])
-				.filter((external) => external.format === 'edt')
-				.map((external) => asTemplate(external.dir)),
-		];
-		(baseConfig as Record<string, unknown>).externalFilesSrc = [...new Set(externalSources)];
-
-		// Собранные .epf/.erf: сервер отладки адресует внешние модули по URL файла
-		const outPath = this.vrunner.getOutPath().replace(/\\/g, '/').replace(/^\.?\//, '');
-		// Тестовые обработки собираются в свой каталог: без него их точки останова не привязать
-		(baseConfig as Record<string, unknown>).externalFilesBuilds = [
-			asTemplate(`${outPath}/${BUILD_SUBDIRS.epf}`),
-			asTemplate(`${outPath}/${BUILD_SUBDIRS.erf}`),
-			asTemplate(`${outPath}/${BUILD_SUBDIRS.testsEpf}`),
-		];
-
-		return [baseConfig];
+		return [{ ...launchConfig, ...debugSourceFields(paths, this.vrunner.getOutPath(), asTemplate) }];
 	}
 
 	async resolveDebugConfiguration(

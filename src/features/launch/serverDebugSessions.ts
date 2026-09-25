@@ -8,9 +8,11 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { DEBUG_TYPE } from '../debug/debugConstants';
+import { debugSourceFields } from '../debug/debugConfigurations';
 import { projectPaths } from '../../shared/projectPaths';
 import { projectConfiguration } from '../../shared/projectConfiguration';
-import { sameProjectRoot, workspaceFolderOf } from '../../shared/workspaceProjects';
+import { VRunnerManager } from '../../shared/vrunnerManager';
+import { runWithProject, sameProjectRoot, workspaceFolderOf } from '../../shared/workspaceProjects';
 import type { PlatformServerManager, ServerState } from './platformServerManager';
 
 /** Адреса этой машины: порт отладки ibsrv слушает только на 127.0.0.1. */
@@ -91,8 +93,8 @@ export class ServerDebugSessions implements vscode.Disposable {
 
 	private async attachIn(root: string): Promise<void> {
 		const workspaceFolder = workspaceFolderOf(root);
-		const configuration = (await projectPaths(root)).configuration?.dir;
-		if (!workspaceFolder || configuration === undefined) {
+		const paths = await projectPaths(root);
+		if (!workspaceFolder || paths.configuration?.dir === undefined) {
 			vscode.window.showErrorMessage('Исходный код конфигурации в рабочей области не найден: отлаживать через сервер нечего.');
 			return;
 		}
@@ -100,7 +102,11 @@ export class ServerDebugSessions implements vscode.Disposable {
 			type: DEBUG_TYPE,
 			request: 'attach',
 			name: 'Отладка 1С (автономный сервер)',
-			rootProject: path.resolve(root, configuration),
+			...debugSourceFields(
+				paths,
+				runWithProject(root, () => VRunnerManager.getInstance().getOutPath()),
+				(relative) => path.resolve(root, relative)
+			),
 			debugServerHost: projectConfiguration(root).get<string>('server.host', 'localhost'),
 			debugServerPort: this.manager.debugPort,
 			autoAttachTypes: ['Server', 'ManagedClient'],
