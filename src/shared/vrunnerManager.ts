@@ -77,7 +77,7 @@ import { ACTIVE_ENV_OVERRIDES_STATE, ACTIVE_ENV_PROFILE_STATE, projectMemento } 
 import { currentRoot, projectRootKey, runWithProject } from './workspaceProjects';
 import { projectConfiguration } from './projectConfiguration';
 import { projectTerminal } from '../features/tasks/terminalProjects';
-import { isWorkspaceTrusted, untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
+import { untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
 
 const log = logger.scope('vrunner');
 
@@ -118,6 +118,13 @@ interface DockerPlan {
  * проблем с памятью при выполнении команд с большим выводом.
  */
 const MAX_EXEC_BUFFER_SIZE = 10 * 1024 * 1024;
+
+/**
+ * Таймаут запроса версии vrunner (`--version`/`version`): без него зависший
+ * холодный старт Docker-контейнера вешает детект бесконечно вместо того,
+ * чтобы завершиться неудачей и дать следующему вызову попробовать заново.
+ */
+const VRUNNER_VERSION_DETECT_TIMEOUT_MS = 10000;
 
 /**
  * Результат выполнения команды vrunner
@@ -647,7 +654,7 @@ export class VRunnerManager {
 	private async detectVRunnerVersionFromCli(): Promise<VRunnerVersion | undefined> {
 		for (const versionArgs of [['--version'], ['version']]) {
 			try {
-				const result = await this.executeVRunnerRaw(versionArgs);
+				const result = await this.executeVRunnerRaw(versionArgs, { timeoutMs: VRUNNER_VERSION_DETECT_TIMEOUT_MS });
 				if (!result.success) {
 					continue;
 				}
@@ -713,17 +720,18 @@ export class VRunnerManager {
 			version = await this.readVRunnerVersionFromOpmMetadata();
 		}
 
-		// Пустой итог не кэшируем: в недоверенной папке vrunner не запускается, а Docker
-		// может быть ещё не запущен, и версия осталась бы неопределённой до конца сеанса
-		if (!version && (inDocker || !isWorkspaceTrusted())) {
+		if (!version) {
+			// Неудачу не кэшируем вовсе (по аналогии с oscript/opm — см.
+			// resolveBinaryPath: "найденное держим до конца сессии... ненайденное
+			// перепроверяем"). Иначе один неудачный детект (например, Docker-
+			// контейнер ещё не успел стартовать на холодном старте) залипает как
+			// "не определена" до конца сессии, и все дальнейшие команды строятся
+			// по устаревшему предположению о версии CLI.
+			log.warn('Не удалось определить версию vrunner');
 			return undefined;
 		}
 
-		if (version) {
-			log.debug(`Определена версия vrunner: ${version.raw}`);
-		} else {
-			log.warn('Не удалось определить версию vrunner');
-		}
+		log.debug(`Определена версия vrunner: ${version.raw}`);
 
 		const previous = this.vrunnerVersionCacheByRoot.get(cacheKey);
 		this.vrunnerVersionCacheByRoot.set(cacheKey, version ?? null);
@@ -1953,7 +1961,7 @@ export class VRunnerManager {
 	 */
 	private async executeVRunnerRaw(
 		args: string[],
-		options?: { cwd?: string; env?: NodeJS.ProcessEnv }
+		options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }
 	): Promise<VRunnerExecutionResult> {
 		if (untrustedWorkspaceBlocks(`vrunner ${args[0] ?? ''}`.trim())) {
 			return untrustedExecutionResult();
@@ -1966,7 +1974,8 @@ export class VRunnerManager {
 				cwd: cwd,
 				env: this.childEnv(options?.env),
 				maxBuffer: MAX_EXEC_BUFFER_SIZE,
-				encoding: 'buffer' as const
+				encoding: 'buffer' as const,
+				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {})
 			};
 			const finish = (error: ExecException | null, stdout: Buffer, stderr: Buffer): void => {
 				const errorOutput = decodeProcessOutput(stderr);
