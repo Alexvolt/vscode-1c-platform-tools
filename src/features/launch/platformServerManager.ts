@@ -20,6 +20,7 @@ import * as fs from 'node:fs/promises';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { resolveFileIbAbsolutePath } from '../../shared/ibConnectionPath';
 import { logger } from '../../shared/logger';
+import { notifyQuiet } from '../../shared/notify';
 import { ProcessOutputDecoder } from '../../shared/processOutput';
 import { PLATFORM_PATH_SETTING_TITLE, resolvePlatformBinaryInRoots } from '../../shared/platformBinary';
 import { projectPlatformRoots } from '../../shared/platformSettings';
@@ -276,7 +277,7 @@ export class PlatformServerManager {
 		if (this._state === 'running' || this._state === 'starting') {
 			const owner = this.owner;
 			if (owner === undefined || sameProjectRoot(owner, workspaceRoot)) {
-				vscode.window.showInformationMessage('Автономный сервер уже запущен.');
+				notifyQuiet('Автономный сервер уже запущен');
 				return;
 			}
 			const action = await vscode.window.showWarningMessage(
@@ -386,7 +387,7 @@ export class PlatformServerManager {
 
 		this.setState('running');
 		this.output.appendLine(`Сервер готов: ${this.currentUrls.root}`);
-		vscode.window.showInformationMessage(`Автономный сервер 1С запущен: ${this.currentUrls.root}`);
+		notifyQuiet(`Автономный сервер 1С запущен: ${this.currentUrls.root}`);
 	}
 
 	/**
