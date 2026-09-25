@@ -40,7 +40,7 @@ export function writeFlakyRunner(root: string, version: string, failCount: numbe
 			'@echo off',
 			`set /p N=<"${counterFile}"`,
 			'set /a N=N+1',
-			`echo %N%>"${counterFile}"`,
+			`>"${counterFile}" echo %N%`,
 			`if %N% leq ${failCount} (`,
 			'  echo simulated cold-start failure 1>&2',
 			'  exit /b 1',
