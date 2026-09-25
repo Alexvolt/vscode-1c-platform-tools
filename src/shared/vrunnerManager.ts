@@ -1201,55 +1201,6 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Проверяет, поддерживает ли команда vrunner параметр --ibcmd
-	 * 
-	 * Команды, которые поддерживают --ibcmd:
-	 * - Операции с информационными базами: init-dev, update-dev, updatedb, dump, restore, dump-dt, load-dt
-	 * - Операции с конфигурацией: load, dump, dumpcf, compile, decompile
-	 * - Операции с расширениями: compileext, decompileext, unloadext, compileexttocfe, updateext
-	 * - Операции с внешними файлами: compileepf, decompileepf
-	 * 
-	 * Команды, которые НЕ поддерживают --ibcmd:
-	 * - run, designer (запуск GUI приложений)
-	 * - xunit, syntax-check, vanessa (тесты)
-	 * 
-	 * @param args - Аргументы команды vrunner (первый аргумент - имя команды)
-	 * @returns true, если команда поддерживает --ibcmd, иначе false
-	 */
-	public supportsIbcmd(args: string[]): boolean {
-		if (args.length === 0) {
-			return false;
-		}
-
-		const command = args[0];
-		
-		// Команды, которые поддерживают --ibcmd
-		const ibcmdSupportedCommands = [
-			// Информационные базы
-			'init-dev',
-			'update-dev',
-			'updatedb',
-			'dump',
-			'restore',
-
-			// Конфигурация
-			'load',       
-			'unload',     
-			'compile',    
-			'decompile',  
-
-			// Расширения
-			'compileext',
-			'decompileext',
-			'unloadext',
-			'compileexttocfe',
-			'updateext'
-		];
-
-		return ibcmdSupportedCommands.includes(command);
-	}
-
-	/**
 	 * Получает Docker-образ из настроек VS Code
 	 * 
 	 * Настройка берется из `1c-platform-tools.docker.image`.
@@ -1417,28 +1368,6 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Запрашивает подтверждение запуска в Docker для команды без поддержки --ibcmd.
-	 *
-	 * @param args - Аргументы команды vrunner (первый — имя команды)
-	 * @returns true, если можно продолжать (команда поддерживает --ibcmd или пользователь согласился)
-	 */
-	private async confirmDockerIbcmd(args: string[]): Promise<boolean> {
-		if (this.supportsIbcmd(args)) {
-			return true;
-		}
-		const commandName = args[0] || 'команда';
-		log.warn(`Команда "${commandName}" не поддерживает --ibcmd, необходимый для Docker`);
-		const action = await vscode.window.showWarningMessage(
-			`Команда "${commandName}" не поддерживает параметр --ibcmd, который необходим для работы в Docker. ` +
-			'Эта команда может не работать корректно в Docker-контейнере без графического интерфейса. ' +
-			'Продолжить выполнение?',
-			'Да',
-			'Нет'
-		);
-		return action === 'Да';
-	}
-
-	/**
 	 * Строит задачу VS Code для одиночной команды vrunner.
 	 *
 	 * Учитывает активные временные параметры профиля, режим Docker и построение
@@ -1473,9 +1402,6 @@ export class VRunnerManager {
 			if (!this.getEffectiveRoot()) {
 				log.error('Для использования Docker необходимо открыть рабочую область');
 				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
-				return undefined;
-			}
-			if (!(await this.confirmDockerIbcmd(finalArgs))) {
 				return undefined;
 			}
 		}
@@ -1576,9 +1502,6 @@ export class VRunnerManager {
 				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
 				return;
 			}
-			if (!(await this.confirmDockerIbcmd(finalArgsArray[0]))) {
-				return;
-			}
 			try {
 				command = this.dockerSequenceRun(finalArgsArray);
 			} catch (error) {
@@ -1647,9 +1570,6 @@ export class VRunnerManager {
 				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
 				return 1;
 			}
-			if (!(await this.confirmDockerIbcmd(finalArgsArray[0]))) {
-				return 1;
-			}
 			try {
 				command = this.dockerSequenceRun(finalArgsArray);
 			} catch (error) {
@@ -1689,7 +1609,6 @@ export class VRunnerManager {
 	 * При использовании Docker:
 	 * - Workspace монтируется в `/workspace` внутри контейнера
 	 * - Пути автоматически нормализуются для Docker-окружения
-	 * - Параметр `--ibcmd` используется автоматически (так как в Docker нет GUI)
 	 * 
 	 * @param args - Аргументы команды vrunner (например, ['init-dev', '--ibconnection', '/F./build/ib'])
 	 * @param options - Опции выполнения
@@ -1724,23 +1643,6 @@ export class VRunnerManager {
 				log.error('Для использования Docker необходимо открыть рабочую область');
 				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
 				return;
-			}
-
-			// Проверяем, поддерживает ли команда --ibcmd
-			if (!this.supportsIbcmd(args)) {
-				const commandName = args[0] || 'команда';
-				log.warn(`Команда "${commandName}" не поддерживает --ibcmd, необходимый для Docker`);
-				const action = await vscode.window.showWarningMessage(
-					`Команда "${commandName}" не поддерживает параметр --ibcmd, который необходим для работы в Docker. ` +
-					'Эта команда может не работать корректно в Docker-контейнере без графического интерфейса. ' +
-					'Продолжить выполнение?',
-					'Да',
-					'Нет'
-				);
-				
-				if (action !== 'Да') {
-					return;
-				}
 			}
 			
 			try {
@@ -1809,19 +1711,6 @@ export class VRunnerManager {
 				log.error('Для использования Docker необходимо открыть рабочую область');
 				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
 				return;
-			}
-			if (!this.supportsIbcmd(argsArray[0])) {
-				const commandName = argsArray[0][0] || 'команда';
-				log.warn(`Команда "${commandName}" не поддерживает --ibcmd, необходимый для Docker`);
-				const action = await vscode.window.showWarningMessage(
-					`Команда "${commandName}" не поддерживает параметр --ibcmd, который необходим для работы в Docker. ` +
-					'Продолжить выполнение?',
-					'Да',
-					'Нет'
-				);
-				if (action !== 'Да') {
-					return;
-				}
 			}
 			try {
 				const dockerImage = this.getDockerImage();
