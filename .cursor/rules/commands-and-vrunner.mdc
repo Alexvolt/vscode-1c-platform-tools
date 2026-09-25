@@ -14,7 +14,6 @@ alwaysApply: false
 
 - **Проверка workspace**: всегда `this.ensureWorkspace()` (не вызывать напрямую `getWorkspaceRoot()`).
 - **Выполнение в терминале**: `this.vrunner.executeVRunnerInTerminal(args)`; для проверок — `this.vrunner.executeVRunner()`.
-- **ibcmd**: `this.addIbcmdIfNeeded(args)` для добавления `--ibcmd` при необходимости (настройка или Docker).
 - **Параметр ИБ**: `await this.vrunner.getIbConnectionParam()` → использовать как `...ibConnectionParam` в аргументах.
 
 ## Пути (настройки `1c-platform-tools.paths.*`)
@@ -26,10 +25,11 @@ alwaysApply: false
 
 ## Docker и ibcmd
 
-- Docker: `await this.vrunner.shouldUseDocker()`; поддержка ibcmd: `this.vrunner.supportsIbcmd(args)`.
-- В Docker выполняются только команды, поддерживающие `--ibcmd`; иначе — предупреждение с отменой.
-- Нормализация аргументов для Docker: `this.vrunner.processCommandArgsForDocker()`; образ: `this.vrunner.getDockerImage()`.
-- Множественные команды: при Docker — каждая через `executeVRunnerInTerminal()`; без Docker — можно `executeCommandsInTerminal()` для последовательного запуска.
+- Режим Docker: `await this.vrunner.shouldUseDocker()`, настройка проекта `docker.enabled`. Внутри `this.vrunner.runOnThisMachine(...)` ответ отрицательный: так Предприятие и Конфигуратор с окном запускаются на этой машине, если на ней есть платформа.
+- `docker run` для всех путей выполнения собирает `VRunnerManager`: пути внутри проекта переводятся в `/workspace`, выгрузка EDT монтируется в `/edt-staging`, файл или база вне проекта останавливают команду до запуска контейнера. Команды сами аргументы для Docker не переводят.
+- Путь, который раннер прочитает из файла (конфиг YAxUnit, настройки Vanessa, отчёт xUnit), передавать через `await this.vrunner.runnerPath(path)`.
+- `--ibcmd` задаёт профиль запуска, команды его не добавляют.
+- `this.ensureOscriptAvailable()` в Docker локальный OneScript не требует; командам, которые сами запускают opm или oscript, нужен `this.ensureLocalOscriptAvailable()`.
 
 ## Именование методов
 

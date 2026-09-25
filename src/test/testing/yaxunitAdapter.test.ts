@@ -19,6 +19,7 @@ function vrunnerAt(workspaceRoot: string): VRunnerManager {
 		getWorkspaceRoot: () => workspaceRoot,
 		readActiveSettings: async () => ({ settings: {}, schema: 'v2' }),
 		planIntent: async () => [['run', 'enterprise']],
+		runnerPath: async (hostPath: string) => hostPath,
 	} as unknown as VRunnerManager;
 }
 
@@ -88,6 +89,7 @@ suite('yaxunitAdapter', () => {
 				report = intent.report;
 				return [['test', 'yaxunit']];
 			},
+			runnerPath: async (hostPath: string) => hostPath,
 		} as unknown as VRunnerManager;
 		const adapter = new YaxunitAdapter(vrunner);
 		try {

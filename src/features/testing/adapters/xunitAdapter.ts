@@ -282,7 +282,7 @@ export class XUnitAdapter implements TestFrameworkAdapter {
 		// позиционного пути, иначе 3.x не разбирает команду.
 		const reportFile = path.join(reportDir, 'xunit.xml');
 		const [args] = await this.vrunner.planIntent(
-			{ kind: 'test.xunit', testsPath: targetPath, reportsXunit: `jUnit:${reportFile}` }
+			{ kind: 'test.xunit', testsPath: targetPath, reportsXunit: `jUnit:${await this.vrunner.runnerPath(reportFile)}` }
 		);
 		return {
 			tool: 'vrunner',

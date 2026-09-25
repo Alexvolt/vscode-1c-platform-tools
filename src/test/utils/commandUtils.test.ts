@@ -1,4 +1,6 @@
 import * as assert from 'node:assert';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
 	detectShellType,
 	escapeCommandArg,
@@ -10,6 +12,7 @@ import {
 	buildProcessCommand,
 	dockerRunArgs,
 	joinCommands,
+	normalizeIbPathForDocker,
 	quoteExecutable,
 	type ShellType
 } from '../../utils/commandUtils';
@@ -198,7 +201,7 @@ suite('commandUtils', () => {
 	});
 
 	test('buildDockerCommand даёт контейнеру имя: по нему его останавливают при отмене', () => {
-		const result = buildDockerCommand('vrunner:8.3.27', ['vanessa'], '/home/ws', 'sh', '1cpt-run-test');
+		const result = buildDockerCommand('vrunner:8.3.27', ['vanessa'], '/home/ws', 'sh', { containerName: '1cpt-run-test' });
 		assert.strictEqual(
 			result,
 			`${shPrefix}docker run --rm --name 1cpt-run-test -v /home/ws:/workspace -w /workspace vrunner:8.3.27 vanessa`
@@ -212,13 +215,13 @@ suite('commandUtils', () => {
 
 	test('dockerRunArgs отдаёт путь проекта одним аргументом без кавычек', () => {
 		assert.deepStrictEqual(
-			dockerRunArgs('vrunner:8.3.27', ['vanessa', '--settings', 'env one.json'], String.raw`C:\ws & dir`, '1cpt-run-test'),
+			dockerRunArgs('vrunner:8.3.27', ['vanessa', '--settings', 'env one.json'], String.raw`C:\ws & dir`, { containerName: '1cpt-run-test' }),
 			['run', '--rm', '--name', '1cpt-run-test', '-v', String.raw`C:\ws & dir:/workspace`, '-w', '/workspace', 'vrunner:8.3.27', 'vanessa', '--settings', 'env one.json']
 		);
 	});
 
 	test('buildDockerCommandSequence тоже именует контейнер', () => {
-		const result = buildDockerCommandSequence('vrunner:8.3.27', [['compile']], '/home/ws', 'sh', '1cpt-run-test');
+		const result = buildDockerCommandSequence('vrunner:8.3.27', [['compile']], '/home/ws', 'sh', { containerName: '1cpt-run-test' });
 		assert.ok(
 			result.startsWith(`${shPrefix}docker run --rm --name 1cpt-run-test -v /home/ws:/workspace`),
 			`имя контейнера не попало в команду: ${result}`
@@ -329,6 +332,30 @@ suite('commandUtils', () => {
 	test('joinCommands обрабатывает одну команду', () => {
 		const result = joinCommands(['command1'], 'bash');
 		assert.strictEqual(result, 'command1', 'Одна команда должна возвращаться без разделителей');
+	});
+	test('dockerRunArgs: тома и параметры docker.runArgs идут до образа', () => {
+		assert.deepStrictEqual(
+			dockerRunArgs('vrunner:8.3.27', ['load'], '/home/ws', {
+				containerName: 'c',
+				mounts: [{ host: '/tmp/edt', container: '/edt-staging' }],
+				runArgs: ['--network', 'host'],
+			}),
+			['run', '--rm', '--name', 'c', '-v', '/home/ws:/workspace', '-v', '/tmp/edt:/edt-staging', '-w', '/workspace', '--network', 'host', 'vrunner:8.3.27', 'load']
+		);
+	});
+
+	test('buildDockerCommandSequence: параметры docker.runArgs стоят до точки входа', () => {
+		const result = buildDockerCommandSequence('vrunner:8.3.27', [['compile']], '/home/ws', 'sh', { runArgs: ['--network', 'host'] });
+		assert.ok(result.includes('-w /workspace --network host --entrypoint /bin/sh vrunner:8.3.27'), result);
+	});
+
+	test('normalizeIbPathForDocker: база внутри проекта становится относительной', () => {
+		const root = path.join(os.tmpdir(), 'ws');
+		const outside = path.join(os.tmpdir(), 'bases', 'erp');
+		assert.strictEqual(normalizeIbPathForDocker(`/F${path.join(root, 'build', 'ib')}`, root), '/F./build/ib');
+		assert.strictEqual(normalizeIbPathForDocker('/F./build/ib', root), '/F./build/ib');
+		assert.strictEqual(normalizeIbPathForDocker(`/F${outside}`, root), `/F${outside}`);
+		assert.strictEqual(normalizeIbPathForDocker(`/F${root}2`, root), `/F${root}2`);
 	});
 });
 

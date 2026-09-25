@@ -20,6 +20,7 @@ import * as fs from 'node:fs/promises';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { resolveFileIbAbsolutePath } from '../../shared/ibConnectionPath';
 import { logger } from '../../shared/logger';
+import { notifyQuiet } from '../../shared/notify';
 import { ProcessOutputDecoder } from '../../shared/processOutput';
 import { PLATFORM_PATH_SETTING_TITLE, resolvePlatformBinaryInRoots } from '../../shared/platformBinary';
 import { projectPlatformRoots } from '../../shared/platformSettings';
@@ -155,6 +156,9 @@ export class PlatformServerManager {
 	private activeConfig: { host: string; port: number; base: string } | undefined;
 	/** Публикует ли текущий процесс стандартный интерфейс OData: по конфигу на момент запуска. */
 	private activeODataPublished = false;
+	/** Порт отладки текущего процесса, если сервер запущен с отладкой. */
+	private activeDebugPort: number | undefined;
+	private readonly willStopHooks = new Set<() => Promise<void>>();
 	/** Резолвер промиса фактического завершения текущего процесса. */
 	private exitResolve: (() => void) | undefined;
 	/** Промис, который разрешается, когда текущий процесс полностью завершился. */
@@ -236,6 +240,21 @@ export class PlatformServerManager {
 		return this.activeConfig?.port;
 	}
 
+	/** Порт отладки запущенного сервера; без отладки не задан. */
+	public get debugPort(): number | undefined {
+		return this.ownerRoot === undefined ? undefined : this.activeDebugPort;
+	}
+
+	/**
+	 * Действие перед остановкой процесса сервера, пока он ещё отвечает.
+	 *
+	 * @param hook - Действие; остановка ждёт его завершения
+	 */
+	public onWillStop(hook: () => Promise<void>): vscode.Disposable {
+		this.willStopHooks.add(hook);
+		return new vscode.Disposable(() => this.willStopHooks.delete(hook));
+	}
+
 	/**
 	 * Запускает автономный сервер для проекта.
 	 *
@@ -258,7 +277,7 @@ export class PlatformServerManager {
 		if (this._state === 'running' || this._state === 'starting') {
 			const owner = this.owner;
 			if (owner === undefined || sameProjectRoot(owner, workspaceRoot)) {
-				vscode.window.showInformationMessage('Автономный сервер уже запущен.');
+				notifyQuiet('Автономный сервер уже запущен');
 				return;
 			}
 			const action = await vscode.window.showWarningMessage(
@@ -358,6 +377,7 @@ export class PlatformServerManager {
 
 		this.activeConfig = { host: params.host, port: params.port, base: params.base };
 		this.activeODataPublished = params.odata;
+		this.activeDebugPort = settings.debug ? settings.debugPort : undefined;
 		this.currentUrls = buildServerUrls(params.host, params.port, params.base);
 
 		const ready = await this.waitForReady(child);
@@ -367,7 +387,7 @@ export class PlatformServerManager {
 
 		this.setState('running');
 		this.output.appendLine(`Сервер готов: ${this.currentUrls.root}`);
-		vscode.window.showInformationMessage(`Автономный сервер 1С запущен: ${this.currentUrls.root}`);
+		notifyQuiet(`Автономный сервер 1С запущен: ${this.currentUrls.root}`);
 	}
 
 	/**
@@ -384,6 +404,13 @@ export class PlatformServerManager {
 			this.activeConfig = undefined;
 			this.runningIbPath = undefined;
 			this.owner = undefined;
+			return;
+		}
+
+		await Promise.all([...this.willStopHooks].map((hook) => hook().catch((error: unknown) => {
+			log.warn(`перед остановкой сервера: ${(error as Error).message}`);
+		})));
+		if (this.child !== child) {
 			return;
 		}
 

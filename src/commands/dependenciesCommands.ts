@@ -251,7 +251,7 @@ export class DependenciesCommands extends BaseCommand {
 		if (!workspaceRoot) {
 			return;
 		}
-		if (!(await this.ensureOscriptAvailable())) {
+		if (!(await this.ensureLocalOscriptAvailable())) {
 			return;
 		}
 
@@ -462,7 +462,7 @@ export class DependenciesCommands extends BaseCommand {
 		if (!workspaceRoot) {
 			return;
 		}
-		if (!(await this.ensureOscriptAvailable())) {
+		if (!(await this.ensureLocalOscriptAvailable())) {
 			return;
 		}
 

@@ -82,7 +82,7 @@ export class VanessaAdapter implements TestFrameworkAdapter {
 			'ВыполнитьСценарии': true,
 			'ЗавершитьРаботуСистемы': true,
 			'ДелатьОтчетВФорматеjUnit': true,
-			'ОтчетjUnit': { 'КаталогВыгрузкиjUnit': reportDir }
+			'ОтчетjUnit': { 'КаталогВыгрузкиjUnit': await this.vrunner.runnerPath(reportDir) }
 		};
 		const settingsPath = path.join(reportDir, 'vanessasettings.json');
 		await fs.writeFile(settingsPath, JSON.stringify(vanessaSettings, null, 2), 'utf8');
