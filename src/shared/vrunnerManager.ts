@@ -16,7 +16,20 @@ import {
 	buildDockerCommandSequence,
 	dockerRunArgs,
 	normalizeIbPathForDocker,
+	type DockerRunOptions,
 } from '../utils/commandUtils';
+import {
+	CONTAINER_WORKSPACE,
+	containerPath,
+	containerPathsInText,
+	fileInfobaseOutside,
+	hostPathOutside,
+	isInsideDir,
+	textTokens,
+	type DockerMount,
+} from './dockerPaths';
+import { edtTemporaryDir } from './edtStaging';
+import { isEdtProject } from './projectLayout';
 import { logger } from './logger';
 import { setTerminalOscriptBinDir } from './terminalEnv';
 import { dockerCommandRun, dockerContainerName } from './dockerRun';
@@ -65,6 +78,33 @@ import { projectTerminal } from '../features/tasks/terminalProjects';
 import { isWorkspaceTrusted, untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
 
 const log = logger.scope('vrunner');
+
+/** Временный каталог проекта EDT в контейнере. */
+const EDT_STAGING_IN_CONTAINER = '/edt-staging';
+
+/** Команды, которым база не нужна. */
+const NO_INFOBASE_COMMANDS = new Set(['version', '--version', 'help', '--help']);
+
+/**
+ * Значения аргументов команды: строка `--additional` разбирается на пути и слова.
+ *
+ * @param args - Аргументы команды vrunner
+ */
+function argumentValues(args: readonly string[]): string[] {
+	return args.flatMap((arg, index) => (index > 0 && args[index - 1] === '--additional' ? textTokens(arg) : [arg]));
+}
+
+/** Запуск в контейнере, подготовленный для всех способов выполнения. */
+interface DockerPlan {
+	/** Docker-образ */
+	image: string;
+	/** Аргументы команд с путями контейнера */
+	argsArray: string[][];
+	/** Каталог проекта для тома */
+	root: string;
+	/** Тома сверх каталога проекта */
+	options: DockerRunOptions;
+}
 
 /**
  * Максимальный размер буфера для выполнения команд (10 МБ)
@@ -1225,40 +1265,132 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Нормализует аргументы команды для работы в Docker-контейнере
-	 * 
-	 * Преобразует пути к информационной базе и другим файлам в формат, понятный внутри контейнера.
-	 * Выполняет следующие преобразования:
-	 * - Пути в формате 1С `/F./path` не изменяются (`.` уже указывает на `/workspace` внутри контейнера)
-	 * - Абсолютные пути workspace преобразуются в относительные от рабочей директории (например, `./build/ib`)
-	 * - Параметры команд (например, `--ibconnection`) остаются без изменений
-	 * 
-	 * @param args - Массив аргументов команды
-	 * @returns Массив нормализованных аргументов для Docker
+	 * Переносит пути аргументов в контейнер: путь внутри проекта становится
+	 * относительным от `/workspace`, путь в смонтированном каталоге получает его путь
+	 * в контейнере. Пути внутри `--additional` переводятся в пути контейнера.
+	 *
+	 * @param args - Аргументы команды vrunner
+	 * @param mounts - Каталоги хоста сверх каталога проекта
+	 * @returns Аргументы с путями контейнера
 	 */
-	public processCommandArgsForDocker(args: string[]): string[] {
+	public processCommandArgsForDocker(args: string[], mounts: readonly DockerMount[] = []): string[] {
 		const workspaceRoot = this.getEffectiveRoot();
 		if (!workspaceRoot) {
 			return args;
 		}
-		
 		return args.map((arg, index) => {
-			if (arg === '--ibconnection' && index + 1 < args.length) {
-				return arg;
-			}
-			
 			if (index > 0 && args[index - 1] === '--ibconnection') {
 				return normalizeIbPathForDocker(arg, workspaceRoot);
 			}
-			
-			if (path.isAbsolute(arg) && arg.startsWith(workspaceRoot)) {
-				const relativePath = path.relative(workspaceRoot, arg);
-				const unixPath = relativePath.replaceAll('\\', '/');
-				return `./${unixPath}`;
+			if (index > 0 && args[index - 1] === '--additional') {
+				return containerPathsInText(arg, [{ host: workspaceRoot, container: CONTAINER_WORKSPACE }, ...mounts]);
 			}
-			
-			return arg;
+			if (!path.isAbsolute(arg)) {
+				return arg;
+			}
+			if (isInsideDir(workspaceRoot, arg)) {
+				return `./${path.relative(workspaceRoot, arg).replaceAll('\\', '/')}`;
+			}
+			return containerPath(arg, mounts) ?? arg;
 		});
+	}
+
+	/**
+	 * Путь файла проекта так, как его видит раннер.
+	 *
+	 * В Docker проект смонтирован в `/workspace`: путь, который уходит внутрь файлов
+	 * настроек и составных аргументов, должен быть путём контейнера.
+	 *
+	 * @param hostPath - Абсолютный путь на этой машине
+	 * @returns Путь для раннера
+	 */
+	public async runnerPath(hostPath: string): Promise<string> {
+		const root = this.getEffectiveRoot();
+		if (!root || !(await this.shouldUseDocker())) {
+			return hostPath;
+		}
+		return containerPath(hostPath, [{ host: root, container: CONTAINER_WORKSPACE }]) ?? hostPath;
+	}
+
+	/**
+	 * Готовит запуск команд vrunner в контейнере.
+	 *
+	 * Контейнеру видны каталог проекта и временный каталог проекта EDT: путь или
+	 * файловая база вне них отклоняют запуск до старта контейнера.
+	 *
+	 * @param argsArray - Наборы аргументов команд vrunner
+	 * @returns Подготовленный запуск либо причина отказа
+	 */
+	private dockerPlan(argsArray: readonly string[][]): DockerPlan | { error: string } {
+		const root = this.getEffectiveRoot();
+		if (!root) {
+			return { error: 'Для использования Docker необходимо открыть рабочую область' };
+		}
+		let image: string;
+		try {
+			image = this.getDockerImage();
+		} catch (error) {
+			return { error: (error as Error).message };
+		}
+		const extra: DockerMount[] = isEdtProject(root)
+			? [{ host: edtTemporaryDir(root), container: EDT_STAGING_IN_CONTAINER }]
+			: [];
+		const visible: DockerMount[] = [{ host: root, container: CONTAINER_WORKSPACE }, ...extra];
+		const processed = argsArray.map((args) => this.processCommandArgsForDocker([...args], extra));
+		for (const args of processed) {
+			const outside = argumentValues(args)
+				.map((value) => hostPathOutside(value, visible, fsSync.existsSync))
+				.find((found) => found !== undefined);
+			if (outside !== undefined) {
+				return { error: `В Docker раннеру виден только каталог проекта, а ${outside} лежит вне его` };
+			}
+			const infobase = this.dockerInfobaseOutside(args, root);
+			if (infobase !== undefined) {
+				return { error: `В Docker раннеру виден только каталог проекта, а база ${infobase} лежит вне его` };
+			}
+		}
+		const used = (mount: DockerMount): boolean =>
+			processed.some((args) =>
+				argumentValues(args).some((value) => value === mount.container || value.startsWith(`${mount.container}/`))
+			);
+		return {
+			image,
+			argsArray: processed,
+			root,
+			options: { mounts: extra.filter(used) },
+		};
+	}
+
+	/**
+	 * Файловая база вне каталога проекта: из `--ibconnection` команды, иначе из файла
+	 * настроек (`--settings` команды или активного профиля).
+	 *
+	 * @param args - Аргументы команды с путями контейнера
+	 * @param root - Каталог проекта
+	 * @returns Путь базы из строки подключения или undefined
+	 */
+	private dockerInfobaseOutside(args: readonly string[], root: string): string | undefined {
+		if (args.length === 0 || NO_INFOBASE_COMMANDS.has(args[0])) {
+			return undefined;
+		}
+		const connectionAt = args.indexOf('--ibconnection');
+		if (connectionAt >= 0) {
+			const connection = args[connectionAt + 1];
+			return connection === undefined ? undefined : fileInfobaseOutside(connection, root);
+		}
+		const settingsAt = args.indexOf('--settings');
+		const settingsFile = settingsAt >= 0 ? args[settingsAt + 1] : this.getActiveEnvFile();
+		if (settingsFile === undefined) {
+			return undefined;
+		}
+		try {
+			const schema = this.activeSettingsSchema();
+			const layers = this.readSettingsLayersSync(root, settingsFile, schema);
+			const connection = this.profileOptionValue(layers, schema, 'ibconnection');
+			return connection === undefined ? undefined : fileInfobaseOutside(connection, root);
+		} catch {
+			return undefined;
+		}
 	}
 
 	/**
@@ -1398,14 +1530,6 @@ export class VRunnerManager {
 		const cwd = options?.cwd || this.getEffectiveRoot() || os.homedir();
 		const useDocker = await this.shouldUseDocker();
 
-		if (useDocker) {
-			if (!this.getEffectiveRoot()) {
-				log.error('Для использования Docker необходимо открыть рабочую область');
-				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
-				return undefined;
-			}
-		}
-
 		const built = this.buildExecRun(finalArgs, useDocker, options?.translateRaw === true);
 		if ('error' in built) {
 			log.error(`Ошибка при подготовке команды: ${built.error}`);
@@ -1497,19 +1621,13 @@ export class VRunnerManager {
 		let command: string | (() => CommandRun);
 
 		if (useDocker) {
-			if (!this.getEffectiveRoot()) {
-				log.error('Для использования Docker необходимо открыть рабочую область');
-				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
+			const docker = this.dockerSequenceRun(finalArgsArray);
+			if ('error' in docker) {
+				log.error(`Ошибка при подготовке команды Docker: ${docker.error}`);
+				vscode.window.showErrorMessage(docker.error);
 				return;
 			}
-			try {
-				command = this.dockerSequenceRun(finalArgsArray);
-			} catch (error) {
-				const errMsg = (error as Error).message;
-				log.error(`Ошибка при подготовке команды Docker: ${errMsg}`);
-				vscode.window.showErrorMessage(errMsg);
-				return;
-			}
+			command = docker.run;
 		} else {
 			// && одинаково работает в cmd и sh (оболочки spawn для задач)
 			command = finalArgsArray.map((args) => buildProcessCommand(this.getVRunnerPath(), args)).join(' && ');
@@ -1529,16 +1647,18 @@ export class VRunnerManager {
 	 * Запуск последовательности команд vrunner в одном контейнере.
 	 *
 	 * @param argsArray - Наборы аргументов команд vrunner
-	 * @returns Построитель запуска для задачи: новое имя контейнера на каждый запуск
-	 * @throws {Error} Если образ Docker не задан
+	 * @returns Построитель запуска для задачи (новое имя контейнера на каждый запуск) либо причина отказа
 	 */
-	private dockerSequenceRun(argsArray: string[][]): () => CommandRun {
-		const dockerImage = this.getDockerImage();
-		const processedArgsArray = argsArray.map((args) => this.processCommandArgsForDocker(args));
-		const root = this.getEffectiveRoot() ?? '';
-		return () => dockerCommandRun((containerName) =>
-			buildDockerCommandSequence(dockerImage, processedArgsArray, root, PROCESS_HOST_SHELL, containerName)
-		);
+	private dockerSequenceRun(argsArray: readonly string[][]): { run: () => CommandRun } | { error: string } {
+		const plan = this.dockerPlan(argsArray);
+		if ('error' in plan) {
+			return plan;
+		}
+		return {
+			run: () => dockerCommandRun((containerName) =>
+				buildDockerCommandSequence(plan.image, plan.argsArray, plan.root, PROCESS_HOST_SHELL, { ...plan.options, containerName })
+			),
+		};
 	}
 
 	/**
@@ -1565,19 +1685,13 @@ export class VRunnerManager {
 		let command: string | (() => CommandRun);
 
 		if (useDocker) {
-			if (!this.getEffectiveRoot()) {
-				log.error('Для использования Docker необходимо открыть рабочую область');
-				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
+			const docker = this.dockerSequenceRun(finalArgsArray);
+			if ('error' in docker) {
+				log.error(`Ошибка при подготовке команды Docker: ${docker.error}`);
+				vscode.window.showErrorMessage(docker.error);
 				return 1;
 			}
-			try {
-				command = this.dockerSequenceRun(finalArgsArray);
-			} catch (error) {
-				const errMsg = (error as Error).message;
-				log.error(`Ошибка при подготовке команды Docker: ${errMsg}`);
-				vscode.window.showErrorMessage(errMsg);
-				return 1;
-			}
+			command = docker.run;
 		} else {
 			command = finalArgsArray.map((args) => buildProcessCommand(this.getVRunnerPath(), args)).join(' && ');
 		}
@@ -1639,23 +1753,14 @@ export class VRunnerManager {
 		let command: string;
 		
 		if (useDocker) {
-			if (!this.getEffectiveRoot()) {
-				log.error('Для использования Docker необходимо открыть рабочую область');
-				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
+			const plan = this.dockerPlan([args]);
+			if ('error' in plan) {
+				log.error(`Ошибка при подготовке команды Docker: ${plan.error}`);
+				vscode.window.showErrorMessage(plan.error);
 				return;
 			}
-			
-			try {
-				const dockerImage = this.getDockerImage();
-				const processedArgs = this.processCommandArgsForDocker(args);
-				command = buildDockerCommand(dockerImage, processedArgs, this.getEffectiveRoot() ?? '', shellType);
-				log.debug(`Docker: образ=${dockerImage}, args=${processedArgs.join(' ')}`);
-			} catch (error) {
-				const errMsg = (error as Error).message;
-				log.error(`Ошибка при подготовке команды Docker: ${errMsg}`);
-				vscode.window.showErrorMessage(errMsg);
-				return;
-			}
+			command = buildDockerCommand(plan.image, plan.argsArray[0], plan.root, shellType, plan.options);
+			log.debug(`Docker: образ=${plan.image}, args=${plan.argsArray[0].join(' ')}`);
 		} else {
 			const vrunnerPath = this.getVRunnerPath();
 			const processedArgs = this.processCommandArgs(args, cwd, shellType);
@@ -1707,22 +1812,14 @@ export class VRunnerManager {
 		let command: string;
 
 		if (useDocker) {
-			if (!this.getEffectiveRoot()) {
-				log.error('Для использования Docker необходимо открыть рабочую область');
-				vscode.window.showErrorMessage('Для использования Docker необходимо открыть рабочую область');
+			const plan = this.dockerPlan(argsArray);
+			if ('error' in plan) {
+				log.error(`Ошибка при подготовке команды Docker: ${plan.error}`);
+				vscode.window.showErrorMessage(plan.error);
 				return;
 			}
-			try {
-				const dockerImage = this.getDockerImage();
-				const processedArgsArray = argsArray.map((args) => this.processCommandArgsForDocker(args));
-				command = buildDockerCommandSequence(dockerImage, processedArgsArray, this.getEffectiveRoot() ?? '', shellType);
-				log.debug(`Docker (последовательно): образ=${dockerImage}, команд=${processedArgsArray.length}`);
-			} catch (error) {
-				const errMsg = (error as Error).message;
-				log.error(`Ошибка при подготовке команды Docker: ${errMsg}`);
-				vscode.window.showErrorMessage(errMsg);
-				return;
-			}
+			command = buildDockerCommandSequence(plan.image, plan.argsArray, plan.root, shellType, plan.options);
+			log.debug(`Docker (последовательно): образ=${plan.image}, команд=${plan.argsArray.length}`);
 			const dockerTerminal = projectTerminal({ name: options?.name || '1C: Platform Tools', cwd, env: options?.env, root: this.getEffectiveRoot() });
 			if (!dockerTerminal) {
 				return;
@@ -1767,41 +1864,19 @@ export class VRunnerManager {
 			args = this.toCliArgs(args);
 		}
 		if (useDocker) {
-			const docker = this.dockerRunParts(args);
-			if ('error' in docker) {
-				return docker;
+			const plan = this.dockerPlan([args]);
+			if ('error' in plan) {
+				return plan;
 			}
 			return {
 				run: () => dockerCommandRun((containerName) =>
-					buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, containerName)
+					buildDockerCommand(plan.image, plan.argsArray[0], plan.root, PROCESS_HOST_SHELL, { ...plan.options, containerName })
 				),
 			};
 		}
 
 		const command = buildProcessCommand(this.getVRunnerPath(), args);
 		return { run: () => ({ command }) };
-	}
-
-	/**
-	 * Части запуска vrunner в Docker: образ, аргументы с путями контейнера и корень проекта.
-	 *
-	 * @param args - Аргументы команды vrunner
-	 * @returns Части запуска либо текст ошибки подготовки
-	 */
-	private dockerRunParts(args: string[]): { image: string; args: string[]; root: string } | { error: string } {
-		const root = this.getEffectiveRoot();
-		if (!root) {
-			return { error: 'Для использования Docker необходимо открыть рабочую область' };
-		}
-		try {
-			return {
-				image: this.getDockerImage(),
-				args: this.processCommandArgsForDocker(args),
-				root,
-			};
-		} catch (error) {
-			return { error: (error as Error).message };
-		}
 	}
 
 	/**
@@ -1868,15 +1943,15 @@ export class VRunnerManager {
 			const logCommand = (command: string): void => log.info(`exec: ${command} (cwd: ${cwd ?? 'не задан'})`);
 
 			if (useDocker) {
-				const docker = this.dockerRunParts(args);
-				if ('error' in docker) {
-					resolve({ success: false, stdout: '', stderr: docker.error, exitCode: 1 });
+				const plan = this.dockerPlan([args]);
+				if ('error' in plan) {
+					resolve({ success: false, stdout: '', stderr: plan.error, exitCode: 1 });
 					return;
 				}
-				const containerName = dockerContainerName();
-				logCommand(buildDockerCommand(docker.image, docker.args, docker.root, PROCESS_HOST_SHELL, containerName));
+				const options = { ...plan.options, containerName: dockerContainerName() };
+				logCommand(buildDockerCommand(plan.image, plan.argsArray[0], plan.root, PROCESS_HOST_SHELL, options));
 				// docker получает аргументы списком, без оболочки
-				execFile('docker', dockerRunArgs(docker.image, docker.args, docker.root, containerName), execOptions, finish);
+				execFile('docker', dockerRunArgs(plan.image, plan.argsArray[0], plan.root, options), execOptions, finish);
 				return;
 			}
 

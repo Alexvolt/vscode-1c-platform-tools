@@ -17,13 +17,19 @@ const EDT_TEST_MODULE = path.join(
 	EDT_WORKSPACE, 'tests', 'epf', 'Тесты_Арифметика', 'src', 'ExternalDataProcessors', 'Тесты_Арифметика', 'ObjectModule.bsl'
 );
 
-/** Раннер над фикстурой: намерение возвращается аргументом, чтобы план читался в проверке. */
-function vrunnerAt(workspaceRoot: string): VRunnerManager {
+/**
+ * Раннер над фикстурой: намерение возвращается аргументом, чтобы план читался в проверке.
+ *
+ * @param docker - Раннер в контейнере: проект смонтирован в /workspace
+ */
+function vrunnerAt(workspaceRoot: string, docker = false): VRunnerManager {
 	return {
 		getWorkspaceRoot: () => workspaceRoot,
 		getOutPath: () => 'build/out',
 		readActiveSettings: async () => ({ settings: {}, schema: 'v2' }),
 		planIntent: async (intent: VRunnerIntent) => [[JSON.stringify(intent)]],
+		runnerPath: async (hostPath: string) =>
+			docker ? `/workspace/${path.relative(workspaceRoot, hostPath).replaceAll('\\', '/')}` : hostPath,
 	} as unknown as VRunnerManager;
 }
 
@@ -177,6 +183,17 @@ suite('поиск тестов в раскладке EDT', () => {
 			src: path.join(DESIGNER_WORKSPACE, 'tests', 'epf', 'Тесты_Арифметика'),
 			out: path.join('build/out', 'tests', 'epf'),
 		});
+	});
+
+	test('в Docker отчёт xUnit указан путём контейнера', async () => {
+		const adapter = new XUnitAdapter(vrunnerAt(DESIGNER_WORKSPACE, true));
+		const module = path.join(
+			DESIGNER_WORKSPACE, 'tests', 'epf', 'Тесты_Арифметика', 'Тесты_Арифметика', 'Ext', 'ObjectModule.bsl'
+		);
+
+		const plan = await adapter.buildRunPlan({ fileUri: vscode.Uri.file(module) }, path.join(DESIGNER_WORKSPACE, 'run'));
+
+		assert.strictEqual((intentOf(plan.args) as { reportsXunit?: string }).reportsXunit, 'jUnit:/workspace/run/xunit.xml');
 	});
 
 	test('обработка EDT вне проекта не собирается молча', async () => {

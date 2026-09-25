@@ -12,9 +12,7 @@
  * @module edtRunner
  */
 
-import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { buildProcessCommand } from '../../utils/commandUtils';
@@ -22,6 +20,7 @@ import { createVRunnerTask, type TaskOutputChain } from '../tasks/vrunnerTask';
 import { logger } from '../../shared/logger';
 import { findEdtInstallations, pickEdtInstallation, type EdtInstallation } from '../../shared/edtLocator';
 import { isEdtProject } from '../../shared/projectLayout';
+import { edtTemporaryDir } from '../../shared/edtStaging';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import { currentRoot } from '../../shared/workspaceProjects';
 import { ensureWorkspaceTrusted, WORKSPACE_TRUST_REQUIRED } from '../../shared/workspaceTrust';
@@ -258,16 +257,6 @@ export function resolveEdt(settings: EdtSettings = readEdtSettings()): EdtInstal
 }
 
 /**
- * Своё место во временном каталоге для проекта EDT, открытого как рабочая область:
- * каталог сборки лежит внутри проекта, а рабочую область и выгрузки внутри проекта
- * EDT не принимает.
- */
-function temporaryProjectDir(workspaceRoot: string): string {
-	const key = createHash('sha1').update(path.resolve(workspaceRoot)).digest('hex').slice(0, 8);
-	return path.join(os.tmpdir(), '1c-platform-tools', `${path.basename(workspaceRoot)}-${key}`);
-}
-
-/**
  * Корень выгрузок моста: каталог сборки, а у проекта EDT, открытого как рабочая область,
  * временный каталог.
  *
@@ -275,7 +264,7 @@ function temporaryProjectDir(workspaceRoot: string): string {
  * @param buildPath - Каталог сборки проекта
  */
 export function edtStagingRoot(workspaceRoot: string, buildPath: string): string {
-	return isEdtProject(workspaceRoot) ? temporaryProjectDir(workspaceRoot) : buildPath;
+	return isEdtProject(workspaceRoot) ? edtTemporaryDir(workspaceRoot) : buildPath;
 }
 
 /**
@@ -294,7 +283,7 @@ export function edtWorkspaceDir(
 		return path.isAbsolute(configured) ? configured : path.join(workspaceRoot, configured);
 	}
 	if (isEdtProject(workspaceRoot)) {
-		return path.join(temporaryProjectDir(workspaceRoot), DEFAULT_WORKSPACE_DIR);
+		return path.join(edtTemporaryDir(workspaceRoot), DEFAULT_WORKSPACE_DIR);
 	}
 	return path.join(workspaceRoot, buildPath, DEFAULT_WORKSPACE_DIR);
 }
