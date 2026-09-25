@@ -3,6 +3,8 @@ import type { VRunnerIntent } from '../shared/vrunnerCli';
 import { confirmGuiCommandInRemote } from '../shared/remoteEnv';
 import { getRunEnterpriseCommandName, getRunDesignerCommandName } from '../features/tools/commandNames';
 import type { CommandExecutionOptions, StructuredCommandResult } from '../shared/commandExecutionTypes';
+import { resolvePlatformBinaryInRoots } from '../shared/platformBinary';
+import { projectPlatformRoots } from '../shared/platformSettings';
 
 /**
  * Команды для запуска 1С:Предприятие и Конфигуратора
@@ -44,6 +46,10 @@ export class RunCommands extends BaseCommand {
 	 * @returns Промис, который разрешается после запуска команды
 	 */
 	async runEnterprise(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
+		return this.runClient(() => this.startEnterprise(opts));
+	}
+
+	private async startEnterprise(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
 		const workspaceRoot = this.ensureWorkspace();
 		if (!workspaceRoot) {
 			return;
@@ -83,6 +89,10 @@ export class RunCommands extends BaseCommand {
 	 * @returns Промис, который разрешается после запуска команды
 	 */
 	async runDesigner(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
+		return this.runClient(() => this.startDesigner(opts));
+	}
+
+	private async startDesigner(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
 		const workspaceRoot = this.ensureWorkspace();
 		if (!workspaceRoot) {
 			return;
@@ -107,5 +117,27 @@ export class RunCommands extends BaseCommand {
 		const [args] = await this.vrunner.planIntent(intent, opts?.settingsFile, opts?.ibConnection);
 
 		return this.runVRunner(args, opts, commandName.title, undefined, commandName.id, true, window.restore);
+	}
+
+	/**
+	 * Запускает клиент 1С с окном. В режиме Docker он открывается на этой машине, если на ней
+	 * есть платформа, иначе в контейнере.
+	 *
+	 * @param start - Запуск клиента
+	 */
+	private async runClient(start: () => Promise<StructuredCommandResult | void>): Promise<StructuredCommandResult | void> {
+		if ((await this.vrunner.shouldUseDocker()) && !(await this.vrunner.runOnThisMachine(() => this.platformInstalled()))) {
+			return start();
+		}
+		return this.vrunner.runOnThisMachine(start);
+	}
+
+	/** Установлена ли платформа, которую запросит активный профиль запуска. */
+	private async platformInstalled(): Promise<boolean> {
+		// Файл профиля выбирается по версии vrunner
+		await this.vrunner.getVRunnerVersion();
+		const requested = await this.vrunner.getActiveV8Version();
+		const roots = projectPlatformRoots(this.vrunner.getWorkspaceRoot());
+		return resolvePlatformBinaryInRoots(roots, '1cv8', { requestedVersion: requested || undefined }) !== undefined;
 	}
 }

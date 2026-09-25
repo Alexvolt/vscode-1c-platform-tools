@@ -16,6 +16,16 @@ suite('Docker: режим проекта', () => {
 		await config().update('docker.enabled', undefined, vscode.ConfigurationTarget.Workspace);
 	});
 
+	test('клиент с окном выполняется на этой машине', async () => {
+		await config().update('docker.enabled', true, vscode.ConfigurationTarget.Workspace);
+		const vrunner = VRunnerManager.getInstance();
+
+		await runWithProject(PROJECT, async () => {
+			assert.strictEqual(await vrunner.shouldUseDocker(), true);
+			assert.strictEqual(await vrunner.runOnThisMachine(() => vrunner.shouldUseDocker()), false);
+		});
+	});
+
 	test('путь файла проекта для раннера в Docker ведёт в /workspace', async () => {
 		const vrunner = VRunnerManager.getInstance();
 		const report = path.join(PROJECT, 'build', 'test-reports', 'xunit.xml');

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
 import * as os from 'node:os';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
 	buildCommand,
 	joinCommands,
@@ -78,6 +79,9 @@ import { projectTerminal } from '../features/tasks/terminalProjects';
 import { isWorkspaceTrusted, untrustedWorkspaceBlocks, WORKSPACE_TRUST_REQUIRED } from './workspaceTrust';
 
 const log = logger.scope('vrunner');
+
+/** Запуск на этой машине в обход Docker: см. VRunnerManager.runOnThisMachine. */
+const onThisMachine = new AsyncLocalStorage<boolean>();
 
 /** Временный каталог проекта EDT в контейнере. */
 const EDT_STAGING_IN_CONTAINER = '/edt-staging';
@@ -791,7 +795,7 @@ export class VRunnerManager {
 		if (!this.vrunnerVersionCacheByRoot.has(projectRootKey(root))) {
 			return;
 		}
-		await runWithProject(root, () => this.getVRunnerVersion(true));
+		await runWithProject(root, () => this.runOnThisMachine(() => this.getVRunnerVersion(true)));
 	}
 
 	/**
@@ -1245,19 +1249,30 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Проверяет, нужно ли использовать Docker для выполнения команд
-	 * 
-	 * Docker используется только если пользователь явно включил настройку `docker.enabled = true`.
-	 * Автоматическое определение отключено - пользователь должен сам решить, использовать Docker или нет.
-	 * 
-	 * @returns Промис, который разрешается `true`, если нужно использовать Docker, иначе `false`
+	 * Выполнять ли команды vrunner в Docker: настройка `docker.enabled`.
+	 *
+	 * Внутри {@link runOnThisMachine} ответ всегда отрицательный.
+	 *
+	 * @returns true, если команды идут в контейнер
 	 */
 	public async shouldUseDocker(): Promise<boolean> {
 		return this.dockerEnabled();
 	}
 
 	private dockerEnabled(): boolean {
-		return vscode.workspace.getConfiguration('1c-platform-tools').get<boolean>('docker.enabled', false);
+		return onThisMachine.getStore() !== true
+			&& vscode.workspace.getConfiguration('1c-platform-tools').get<boolean>('docker.enabled', false);
+	}
+
+	/**
+	 * Выполняет команды vrunner на этой машине в обход Docker: у клиента 1С
+	 * с окном в контейнере нет экрана.
+	 *
+	 * @param action - Запуск команды
+	 * @returns Результат запуска
+	 */
+	public runOnThisMachine<T>(action: () => T): T {
+		return onThisMachine.run(true, action);
 	}
 
 	/**
