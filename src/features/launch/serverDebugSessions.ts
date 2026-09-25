@@ -10,13 +10,15 @@ import * as vscode from 'vscode';
 import { DEBUG_TYPE } from '../debug/debugConstants';
 import { debugSourceFields } from '../debug/debugConfigurations';
 import { projectPaths } from '../../shared/projectPaths';
-import { projectConfiguration } from '../../shared/projectConfiguration';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { runWithProject, sameProjectRoot, workspaceFolderOf } from '../../shared/workspaceProjects';
 import type { PlatformServerManager, ServerState } from './platformServerManager';
 
-/** Адреса этой машины: порт отладки ibsrv слушает только на 127.0.0.1. */
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+/** Порт отладки ibsrv слушает только на этом адресе, какой бы сетевой интерфейс ни стоял в server.host. */
+const DEBUG_SERVER_HOST = '127.0.0.1';
+
+/** Адреса этой машины. */
+const LOOPBACK_HOSTS = new Set(['localhost', DEBUG_SERVER_HOST, '::1', '[::1]']);
 
 /**
  * Подключена ли конфигурация отладки к порту отладки запущенного сервера.
@@ -107,7 +109,7 @@ export class ServerDebugSessions implements vscode.Disposable {
 				runWithProject(root, () => VRunnerManager.getInstance().getOutPath()),
 				(relative) => path.resolve(root, relative)
 			),
-			debugServerHost: projectConfiguration(root).get<string>('server.host', 'localhost'),
+			debugServerHost: DEBUG_SERVER_HOST,
 			debugServerPort: this.manager.debugPort,
 			autoAttachTypes: ['Server', 'ManagedClient'],
 		});
