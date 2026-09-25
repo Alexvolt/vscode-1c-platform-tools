@@ -155,6 +155,9 @@ export class PlatformServerManager {
 	private activeConfig: { host: string; port: number; base: string } | undefined;
 	/** Публикует ли текущий процесс стандартный интерфейс OData: по конфигу на момент запуска. */
 	private activeODataPublished = false;
+	/** Порт отладки текущего процесса, если сервер запущен с отладкой. */
+	private activeDebugPort: number | undefined;
+	private readonly willStopHooks = new Set<() => Promise<void>>();
 	/** Резолвер промиса фактического завершения текущего процесса. */
 	private exitResolve: (() => void) | undefined;
 	/** Промис, который разрешается, когда текущий процесс полностью завершился. */
@@ -234,6 +237,21 @@ export class PlatformServerManager {
 	/** HTTP-порт текущего/последнего запуска. */
 	public get port(): number | undefined {
 		return this.activeConfig?.port;
+	}
+
+	/** Порт отладки запущенного сервера; без отладки не задан. */
+	public get debugPort(): number | undefined {
+		return this.ownerRoot === undefined ? undefined : this.activeDebugPort;
+	}
+
+	/**
+	 * Действие перед остановкой процесса сервера, пока он ещё отвечает.
+	 *
+	 * @param hook - Действие; остановка ждёт его завершения
+	 */
+	public onWillStop(hook: () => Promise<void>): vscode.Disposable {
+		this.willStopHooks.add(hook);
+		return new vscode.Disposable(() => this.willStopHooks.delete(hook));
 	}
 
 	/**
@@ -358,6 +376,7 @@ export class PlatformServerManager {
 
 		this.activeConfig = { host: params.host, port: params.port, base: params.base };
 		this.activeODataPublished = params.odata;
+		this.activeDebugPort = settings.debug ? settings.debugPort : undefined;
 		this.currentUrls = buildServerUrls(params.host, params.port, params.base);
 
 		const ready = await this.waitForReady(child);
@@ -384,6 +403,13 @@ export class PlatformServerManager {
 			this.activeConfig = undefined;
 			this.runningIbPath = undefined;
 			this.owner = undefined;
+			return;
+		}
+
+		await Promise.all([...this.willStopHooks].map((hook) => hook().catch((error: unknown) => {
+			log.warn(`перед остановкой сервера: ${(error as Error).message}`);
+		})));
+		if (this.child !== child) {
 			return;
 		}
 

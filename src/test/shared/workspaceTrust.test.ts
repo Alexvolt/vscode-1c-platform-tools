@@ -16,6 +16,7 @@ import { launchEdtStart } from '../../features/ibases/edtStart';
 import { runEdtCommand } from '../../features/edt/edtRunner';
 import { startServerDebug } from '../../features/launch/platformServerFeature';
 import { PlatformServerManager } from '../../features/launch/platformServerManager';
+import type { ServerDebugSessions } from '../../features/launch/serverDebugSessions';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import { runWithProject } from '../../shared/workspaceProjects';
 import { TestingController } from '../../features/testing/testController';
@@ -241,7 +242,7 @@ suite('недоверенная папка: отладка через автон
 		const before = projectConfiguration(root).inspect<boolean>('server.debug')?.workspaceValue;
 		distrustWorkspace();
 		// Стоял бы гейт ниже вопроса, проверка повисла бы на неотвеченном окне
-		await runWithProject(root, () => startServerDebug({} as unknown as PlatformServerManager));
+		await runWithProject(root, () => startServerDebug({} as unknown as PlatformServerManager, {} as unknown as ServerDebugSessions));
 
 		assert.ok(trustQuestions > 0, 'отладка должна спросить про доверие');
 		assert.strictEqual(
