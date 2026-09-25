@@ -557,7 +557,7 @@ export class ExtensionsCommands extends BaseCommand {
 		}
 
 		const workspaceRoot = this.ensureWorkspace();
-		if (!workspaceRoot || !(await this.ensureOscriptAvailable())) {
+		if (!workspaceRoot || !(await this.ensureOscriptForExecution(opts))) {
 			return;
 		}
 		if (!(await this.vrunner.ensureProfileSettingsFile(true))) {

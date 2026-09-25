@@ -1,8 +1,10 @@
 import * as assert from 'node:assert';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import * as vscode from 'vscode';
 import { BaseCommand } from '../../commands/baseCommand';
 import { createTestContext } from '../fixtures/helpers/testContext';
+import type { CommandExecutionOptions } from '../../shared/commandExecutionTypes';
 
 /**
  * Тестовый класс для проверки методов BaseCommand
@@ -46,6 +48,13 @@ class TestCommand extends BaseCommand {
 	/**
 	 * Публичный метод для тестирования addIbcmdIfNeeded
 	 */
+
+	/**
+	 * Публичный метод для тестирования ensureOscriptForExecution
+	 */
+	public async testEnsureOscriptForExecution(opts?: CommandExecutionOptions): Promise<boolean> {
+		return this.ensureOscriptForExecution(opts);
+	}
 }
 
 suite('BaseCommand', () => {
@@ -122,6 +131,17 @@ suite('BaseCommand', () => {
 	test('ensureDirectoryExists возвращает true для существующей директории', async () => {
 		const exists = await testCommand.testEnsureDirectoryExists(testContext.workspacePath);
 		assert.strictEqual(exists, true, 'Существующая директория должна возвращать true');
+	});
+
+	test('ensureOscriptForExecution: при docker.enabled=true не требует локальный OneScript', async () => {
+		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		await config.update('docker.enabled', true, vscode.ConfigurationTarget.Workspace);
+		try {
+			const result = await testCommand.testEnsureOscriptForExecution({ wait: true });
+			assert.strictEqual(result, true, 'В docker-режиме локальный oscript/opm не нужен');
+		} finally {
+			await config.update('docker.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+		}
 	});
 });
 
