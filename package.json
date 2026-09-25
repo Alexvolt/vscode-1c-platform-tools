@@ -37,7 +37,8 @@
         "1c-platform-tools.edt.path",
         "1c-platform-tools.edt.vmargs",
         "1c-platform-tools.docker.enabled",
-        "1c-platform-tools.docker.image"
+        "1c-platform-tools.docker.image",
+        "1c-platform-tools.docker.runArgs"
       ]
     }
   },
@@ -4150,12 +4151,23 @@
           "1c-platform-tools.docker.enabled": {
             "type": "boolean",
             "default": false,
+            "scope": "resource",
             "description": "Использовать Docker для выполнения команд vrunner. Включает выполнение команд vrunner через Docker-контейнер вместо локального выполнения."
           },
           "1c-platform-tools.docker.image": {
             "type": "string",
             "default": "",
+            "scope": "resource",
             "description": "Docker-образ для выполнения команд vrunner. Образ должен содержать установленную платформу 1С:Предприятие и vanessa-runner. Пример: 'myregistry/onec-image:8.3.25' или 'localhost/onec-image:latest'. Если не указан, будет показана ошибка с инструкцией."
+          },
+          "1c-platform-tools.docker.runArgs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource",
+            "description": "Дополнительные параметры docker run, каждый отдельным элементом, например \"--network\", \"host\"."
           }
         }
       },

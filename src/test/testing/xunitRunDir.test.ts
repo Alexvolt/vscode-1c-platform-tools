@@ -16,6 +16,7 @@ function managerFor(workspaceRoot: string): VRunnerManager {
 		getOutPath: () => path.join('build', 'out'),
 		getWorkspaceRoot: () => workspaceRoot,
 		planIntent: async () => [['test', 'xunit']],
+		runnerPath: async (hostPath: string) => hostPath,
 		readActiveSettings: async () => {
 			throw new Error('в проекте нет файла настроек');
 		},

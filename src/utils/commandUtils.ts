@@ -27,6 +27,7 @@ import {
 	quoteExecutable,
 	type ShellType,
 } from './shellEscape';
+import { CONTAINER_WORKSPACE, isInsideDir, type DockerMount } from '../shared/dockerPaths';
 
 export {
 	escapeCommandArg,
@@ -302,32 +303,53 @@ export function joinCommands(commands: string[], shellType?: ShellType): string 
 	return joinShellCommands(commands, shellType || detectShellType());
 }
 
+/** Параметры запуска контейнера сверх образа и аргументов vrunner. */
+export interface DockerRunOptions {
+	/** Имя контейнера, чтобы остановить его при отмене */
+	containerName?: string;
+	/** Каталоги хоста сверх каталога проекта */
+	mounts?: readonly DockerMount[];
+	/** Параметры `docker run` из настройки docker.runArgs */
+	runArgs?: readonly string[];
+}
+
+/**
+ * Начало аргументов `docker run`: тома, рабочий каталог и параметры пользователя.
+ *
+ * @param workspaceRoot - Каталог проекта на хосте
+ * @param options - Параметры запуска
+ * @param hostPath - Запись пути хоста для оболочки
+ */
+function dockerRunPrefix(workspaceRoot: string, options: DockerRunOptions, hostPath: (value: string) => string): string[] {
+	return [
+		'run',
+		'--rm',
+		...(options.containerName ? ['--name', options.containerName] : []),
+		'-v',
+		`${hostPath(workspaceRoot)}:${CONTAINER_WORKSPACE}`,
+		...(options.mounts ?? []).flatMap((mount) => ['-v', `${hostPath(mount.host)}:${mount.container}`]),
+		'-w',
+		CONTAINER_WORKSPACE,
+		...(options.runArgs ?? []),
+	];
+}
+
 /**
  * Аргументы `docker run` для запуска vrunner в контейнере: проект монтируется в `/workspace`.
  *
  * @param dockerImage - Docker-образ с ENTRYPOINT vrunner
  * @param vrunnerArgs - Аргументы команды vrunner
  * @param workspaceRoot - Каталог проекта на хосте
- * @param containerName - Имя контейнера, чтобы остановить его при отмене
+ * @param options - Имя контейнера, дополнительные тома и параметры docker run
  * @returns Аргументы программы `docker`
  */
 export function dockerRunArgs(
 	dockerImage: string,
 	vrunnerArgs: string[],
 	workspaceRoot: string,
-	containerName?: string
+	options: DockerRunOptions = {}
 ): string[] {
-	return [
-		'run',
-		'--rm',
-		...(containerName ? ['--name', containerName] : []),
-		'-v',
-		`${workspaceRoot}:/workspace`,
-		'-w',
-		'/workspace',
-		dockerImage,
-		...vrunnerArgs,
-	];
+	return [...dockerRunPrefix(workspaceRoot, options, (value) => value), dockerImage, ...vrunnerArgs];
 }
 
 /**
@@ -345,7 +367,7 @@ export function dockerRunArgs(
  * @param vrunnerArgs - Аргументы команды vrunner (без префикса 'vrunner')
  * @param workspaceRoot - Корневая директория workspace (будет смонтирована в /workspace)
  * @param shellType - Тип оболочки терминала хоста (опционально, определяется автоматически)
- * @param containerName - Имя контейнера, чтобы остановить его при отмене
+ * @param options - Имя контейнера, дополнительные тома и параметры docker run
  * @returns Строка команды Docker для выполнения в терминале
  */
 export function buildDockerCommand(
@@ -353,12 +375,16 @@ export function buildDockerCommand(
 	vrunnerArgs: string[],
 	workspaceRoot: string,
 	shellType?: ShellType,
-	containerName?: string
+	options: DockerRunOptions = {}
 ): string {
 	const shell = shellType || detectShellType();
 	// ENTRYPOINT задан exec-формой: оболочки в контейнере нет, аргументы docker
 	// получает как argv, поэтому экранируем их для оболочки хоста.
-	const dockerArgs = dockerRunArgs(dockerImage, vrunnerArgs, normalizePathForShell(workspaceRoot, shell), containerName);
+	const dockerArgs = [
+		...dockerRunPrefix(workspaceRoot, options, (value) => normalizePathForShell(value, shell)),
+		dockerImage,
+		...vrunnerArgs,
+	];
 
 	return `${pathConversionPrefix(shell)}docker ${escapeCommandArgs(dockerArgs, shell)}`;
 }
@@ -371,14 +397,14 @@ export function buildDockerCommand(
  * @param vrunnerArgsArray - Массив наборов аргументов (каждый набор — одна команда vrunner)
  * @param workspaceRoot - Корневая директория workspace
  * @param shellType - Тип оболочки терминала хоста
- * @param containerName - Имя контейнера, чтобы остановить его при отмене
+ * @param options - Имя контейнера, дополнительные тома и параметры docker run
  */
 export function buildDockerCommandSequence(
 	dockerImage: string,
 	vrunnerArgsArray: string[][],
 	workspaceRoot: string,
 	shellType?: ShellType,
-	containerName?: string
+	options: DockerRunOptions = {}
 ): string {
 	const shell = shellType || detectShellType();
 	// Внутреннюю строку разбирает sh контейнера, поэтому она собирается по правилам sh.
@@ -387,13 +413,7 @@ export function buildDockerCommandSequence(
 		.map((args) => `vrunner ${escapeCommandArgs(args, 'sh')}`)
 		.join(' && ');
 	const dockerArgs = [
-		'run',
-		'--rm',
-		...(containerName ? ['--name', containerName] : []),
-		'-v',
-		`${normalizePathForShell(workspaceRoot, shell)}:/workspace`,
-		'-w',
-		'/workspace',
+		...dockerRunPrefix(workspaceRoot, options, (value) => normalizePathForShell(value, shell)),
 		'--entrypoint',
 		'/bin/sh',
 		dockerImage,
@@ -407,28 +427,21 @@ export function buildDockerCommandSequence(
 
 /**
  * Нормализует путь к информационной базе для работы в Docker-контейнере
- * 
- * Преобразует пути в формат, понятный внутри контейнера:
- * - Формат 1С `/F./path` **не** изменяется, так как `.` уже указывает на рабочую директорию контейнера (`/workspace`)
- * - Абсолютные пути workspace преобразуются в относительные от рабочей директории (например, `./build/ib`)
- * - Относительные пути остаются без изменений
- * 
- * @param ibPath - Путь к информационной базе (может быть в формате `/F./build/ib` или `./build/ib`)
+ *
+ * Абсолютный путь внутри каталога проекта становится относительным от рабочего
+ * каталога контейнера (`/workspace`): `/FC:\proj\build\ib` → `/F./build/ib`.
+ * Относительные пути и базы на сервере не меняются.
+ *
+ * @param ibPath - Строка подключения (`/F./build/ib`, `/F<абсолютный путь>`) или путь к базе
  * @param workspaceRoot - Корневая директория workspace
  * @returns Нормализованный путь для использования в Docker-контейнере
  */
 export function normalizeIbPathForDocker(ibPath: string, workspaceRoot: string): string {
-	if (ibPath.startsWith('/F.')) {
-		// Формат /F./path уже относительный от рабочей директории (`.` → /workspace),
-		// поэтому для Docker его менять не нужно
+	const fileBase = /^\/F/i.test(ibPath);
+	const location = fileBase ? ibPath.slice(2).replace(/^"|"$/g, '') : ibPath;
+	if (!path.isAbsolute(location) || !isInsideDir(workspaceRoot, location)) {
 		return ibPath;
 	}
-	
-	if (path.isAbsolute(ibPath) && ibPath.startsWith(workspaceRoot)) {
-		const relativePath = path.relative(workspaceRoot, ibPath);
-		const unixPath = relativePath.replaceAll('\\', '/');
-		return `./${unixPath}`;
-	}
-	
-	return ibPath;
+	const relative = `./${path.relative(workspaceRoot, location).replaceAll('\\', '/')}`;
+	return fileBase ? `/F${relative}` : relative;
 }

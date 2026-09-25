@@ -55,6 +55,10 @@ class TestCommand extends BaseCommand {
 	public async testEnsureOscriptForExecution(opts?: CommandExecutionOptions): Promise<boolean> {
 		return this.ensureOscriptForExecution(opts);
 	}
+
+	public async testEnsureOscriptAvailable(): Promise<boolean> {
+		return this.ensureOscriptAvailable();
+	}
 }
 
 suite('BaseCommand', () => {
@@ -139,6 +143,16 @@ suite('BaseCommand', () => {
 		try {
 			const result = await testCommand.testEnsureOscriptForExecution({ wait: true });
 			assert.strictEqual(result, true, 'В docker-режиме локальный oscript/opm не нужен');
+		} finally {
+			await config.update('docker.enabled', undefined, vscode.ConfigurationTarget.Workspace);
+		}
+	});
+
+	test('ensureOscriptAvailable: команды vrunner в docker-режиме не требуют локальный OneScript', async () => {
+		const config = vscode.workspace.getConfiguration('1c-platform-tools');
+		await config.update('docker.enabled', true, vscode.ConfigurationTarget.Workspace);
+		try {
+			assert.strictEqual(await testCommand.testEnsureOscriptAvailable(), true);
 		} finally {
 			await config.update('docker.enabled', undefined, vscode.ConfigurationTarget.Workspace);
 		}

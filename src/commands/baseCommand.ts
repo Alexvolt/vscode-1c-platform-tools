@@ -175,11 +175,25 @@ export abstract class BaseCommand {
 	}
 
 	/**
-	 * Проверяет наличие OneScript (oscript и opm). При отсутствии предлагает установить через OVM.
+	 * Проверяет OneScript для команд vrunner: в режиме Docker он берётся из образа.
 	 *
-	 * @returns Промис, который разрешается true, если oscript и opm доступны или пользователь запустил установку; false при отмене
+	 * @returns true, если команду можно запускать
 	 */
 	protected async ensureOscriptAvailable(): Promise<boolean> {
+		if (await this.vrunner.shouldUseDocker()) {
+			return true;
+		}
+		return this.ensureLocalOscriptAvailable();
+	}
+
+	/**
+	 * Проверяет OneScript (oscript и opm) на этой машине. При отсутствии предлагает установить через OVM.
+	 *
+	 * Нужен командам, которые запускают opm и oscript сами, в обход Docker.
+	 *
+	 * @returns Промис, который разрешается true, если oscript и opm доступны; false, если нет
+	 */
+	protected async ensureLocalOscriptAvailable(): Promise<boolean> {
 		const oscriptOk = await this.vrunner.checkOscriptAvailable();
 		const opmOk = await this.vrunner.checkOpmAvailable();
 		if (oscriptOk && opmOk) {
@@ -376,10 +390,8 @@ export abstract class BaseCommand {
 	 * Проверка OneScript: в UI — с предложением установки; при wait — только проверка.
 	 */
 	protected async ensureOscriptForExecution(opts?: CommandExecutionOptions): Promise<boolean> {
+		// В режиме Docker OneScript берётся из образа
 		if (await this.vrunner.shouldUseDocker()) {
-			// В docker-режиме OneScript уже есть внутри образа vrunner;
-			// executeVRunner* сами независимо проверяют shouldUseDocker()
-			// и хостовый oscript для реального выполнения не нужен.
 			return true;
 		}
 		if (opts?.wait === true) {
@@ -387,7 +399,7 @@ export abstract class BaseCommand {
 			const opmOk = await this.vrunner.checkOpmAvailable();
 			return oscriptOk && opmOk;
 		}
-		return this.ensureOscriptAvailable();
+		return this.ensureLocalOscriptAvailable();
 	}
 
 	/**

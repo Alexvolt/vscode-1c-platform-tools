@@ -198,14 +198,20 @@ export class YaxunitAdapter implements TestFrameworkAdapter {
 				modules: filter.modules ?? null,
 				tests: filter.tests ?? null,
 			},
-			reportPath: reportPathRaw,
+			// Путь внутри конфига читает 1С: в Docker это путь контейнера
+			reportPath: reportPathRaw === ownReport ? await this.vrunner.runnerPath(ownReport) : reportPathRaw,
 			reportFormat: baseConfig['reportFormat'] ?? 'jUnit',
 			closeAfterTests: baseConfig['closeAfterTests'] ?? true,
 		};
 		const configPath = path.join(reportDir, 'yaxunit-config.json');
 		await fs.writeFile(configPath, JSON.stringify(runConfig, null, 2), 'utf8');
 
-		const [args] = await this.vrunner.planIntent({ kind: 'test.yaxunit', configPath, ...runOptions, common });
+		const [args] = await this.vrunner.planIntent({
+			kind: 'test.yaxunit',
+			configPath: await this.vrunner.runnerPath(configPath),
+			...runOptions,
+			common,
+		});
 		return {
 			tool: 'vrunner',
 			args,
