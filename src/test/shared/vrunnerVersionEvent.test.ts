@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { VRunnerManager } from '../../shared/vrunnerManager';
-import { writeLocalRunner } from '../fixtures/helpers/vrunnerStub';
+import { writeLocalRunner, writeFlakyRunner } from '../fixtures/helpers/vrunnerStub';
 
 /**
  * Схема файла настроек зависит от версии раннера, а версия известна только после
@@ -77,5 +77,41 @@ suite('версия vanessa-runner: переустановка в другом �
 		await vrunner.runWithProjectRoot(root, () => vrunner.refreshVRunnerVersion(other));
 
 		assert.strictEqual(await vrunner.runWithProjectRoot(other, async () => vrunner.getCachedVRunnerVersionLabel()), undefined);
+	});
+});
+
+/**
+ * Неудачный детект (например, Docker-контейнер не успел стартовать на холодном
+ * старте) не должен залипать на всю сессию: следующий вызов обязан попробовать
+ * определить версию заново, а не отдавать зависшую неопределённость навсегда.
+ */
+suite('версия vanessa-runner: неудачный детект не кэшируется навсегда', () => {
+	const vrunner = VRunnerManager.getInstance();
+	let root: string;
+
+	setup(() => {
+		root = fs.mkdtempSync(path.join(os.tmpdir(), 'vrunner-flaky-'));
+	});
+
+	teardown(() => {
+		fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+	});
+
+	test('после провалившегося детекта следующий вызов переопределяет версию, а не отдаёт зависший undefined', async () => {
+		// Оба способа детекта (--version, version) должны провалиться один раз —
+		// имитация: контейнер/раннер ещё не был готов на самом первом вызове.
+		writeFlakyRunner(root, '3.0.1', 2);
+
+		await vrunner.runWithProjectRoot(root, async () => {
+			const first = await vrunner.getVRunnerVersion();
+			assert.strictEqual(first, undefined, 'первый детект должен провалиться (симулируем холодный старт)');
+
+			const second = await vrunner.getVRunnerVersion();
+			assert.strictEqual(
+				second?.raw,
+				'3.0.1',
+				'после неудачи следующий вызов должен переопределить версию, а не отдать зависший undefined'
+			);
+		});
 	});
 });
