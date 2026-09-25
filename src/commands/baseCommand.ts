@@ -376,6 +376,12 @@ export abstract class BaseCommand {
 	 * Проверка OneScript: в UI — с предложением установки; при wait — только проверка.
 	 */
 	protected async ensureOscriptForExecution(opts?: CommandExecutionOptions): Promise<boolean> {
+		if (await this.vrunner.shouldUseDocker()) {
+			// В docker-режиме OneScript уже есть внутри образа vrunner;
+			// executeVRunner* сами независимо проверяют shouldUseDocker()
+			// и хостовый oscript для реального выполнения не нужен.
+			return true;
+		}
 		if (opts?.wait === true) {
 			const oscriptOk = await this.vrunner.checkOscriptAvailable();
 			const opmOk = await this.vrunner.checkOpmAvailable();
