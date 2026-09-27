@@ -4800,9 +4800,10 @@
         "id": "1cplatformtools.projects.currentProjectHighlightForeground",
         "description": "Цвет подсветки текущего проекта в панели «1С: Проекты».",
         "defaults": {
-          "light": "#2fb15b",
+          "light": "#107c41",
           "dark": "#2fb15b",
-          "highContrast": "#2fb15b"
+          "highContrast": "#2fb15b",
+          "highContrastLight": "#107c41"
         }
       }
     ]
@@ -4817,7 +4818,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
     "test": "vscode-test && npm run test:node",
-    "test:node": "node --test out/test/shared/gitHead.node.js out/test/shared/ovmPaths.node.js out/test/shared/processOutput.node.js out/test/utils/shellArgvRoundtrip.node.js out/test/shared/executableLookup.node.js out/test/testing/mutatosRun.node.js out/test/testing/mutatosSources.node.js out/test/testing/mutatosReport.node.js out/test/spreadsheet/spreadsheetHtml.node.js out/test/features/odata.node.js",
+    "test:node": "node --test out/test/shared/gitHead.node.js out/test/shared/ovmPaths.node.js out/test/shared/processOutput.node.js out/test/utils/shellArgvRoundtrip.node.js out/test/shared/executableLookup.node.js out/test/testing/mutatosRun.node.js out/test/testing/mutatosSources.node.js out/test/testing/mutatosReport.node.js out/test/spreadsheet/spreadsheetHtml.node.js out/test/features/odata.node.js out/test/metadata/erTheme.node.js",
     "package": "vsce package",
     "changelog": "git-cliff --config cliff.toml --output CHANGELOG.md",
     "docs:dev": "vitepress dev docs",

@@ -30,6 +30,7 @@ import type {
 } from './messages';
 import { groupRelationKinds, humanVia, relationLabel, RELATION_SORT_ORDER } from './relationLabels';
 import { buildCytoscapeStyle } from './style';
+import { readErTheme, watchThemeChanges } from './themeDom';
 
 cytoscape.use(elk);
 
@@ -519,7 +520,7 @@ function rebuildCanvas(): void {
 		state.cy = cytoscape({
 			container: document.querySelector<HTMLDivElement>('#er-canvas'),
 			elements,
-			style: buildCytoscapeStyle(),
+			style: buildCytoscapeStyle(readErTheme()),
 			layout: buildLayout(state.currentLayout, elements.length),
 			wheelSensitivity: 1.5,
 			minZoom: 0.05,
@@ -1223,6 +1224,7 @@ function main(): void {
 	bindToolbar();
 	bindMessageHandlers();
 	setupCanvasResizeObserver();
+	watchThemeChanges(() => state.cy?.style().fromJson(buildCytoscapeStyle(readErTheme())).update());
 	consumeBootstrapInit();
 	vscode.postMessage({ type: 'ready' });
 }

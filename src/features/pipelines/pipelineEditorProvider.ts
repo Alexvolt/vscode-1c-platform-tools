@@ -379,7 +379,7 @@ const GROUP_COLORS = {
 const FALLBACK_COLORS = ['#569CD6', '#4EC9B0', '#C586C0', '#DCDCAA', '#CE9178', '#9CDCFE', '#B5CEA8', '#F0A868'];
 
 function groupOf(entry) {
-	return (entry && entry.category ? entry.category : 'Прочее').replace(/^1C:\s*/, '');
+	return (entry && entry.category ? entry.category : 'Прочее').replace(/^1С:\\s*/, '');
 }
 
 function colorForGroup(group) {
@@ -610,7 +610,7 @@ function renderPalette() {
 	for (const entry of catalog) {
 		const haystack = ((entry.title || '') + ' ' + entry.id + ' ' + (entry.category || '')).toLowerCase();
 		if (parts.length && !parts.every((part) => haystack.includes(part))) { continue; }
-		const group = (entry.category || 'Прочее').replace(/^1C:\\s*/, '');
+		const group = (entry.category || 'Прочее').replace(/^1С:\\s*/, '');
 		if (!groups.has(group)) { groups.set(group, []); }
 		groups.get(group).push(entry);
 	}
@@ -819,7 +819,7 @@ function inputPosition(node) {
 }
 
 function clearLinks() {
-	for (const path of [...links.querySelectorAll('path')]) { path.remove(); }
+	for (const path of [...links.querySelectorAll(':scope > path')]) { path.remove(); }
 }
 
 function renderLinks(preview) {
