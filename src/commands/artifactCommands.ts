@@ -64,7 +64,7 @@ export class ArtifactCommands extends BaseCommand {
 			return undefined;
 		}
 
-		const DEFAULT_LABEL = '$(file-opened) По умолчанию';
+		const DEFAULT_LABEL = '$(file) По умолчанию';
 		const defaultPath = path.join(defaultDir, defaultName);
 		const picked = await vscode.window.showQuickPick(
 			[
