@@ -15,7 +15,7 @@
  * (задача VS Code «Обновить каталоги опций vrunner»).
  *
  * Использование:
- *   node scripts/gen-vrunner-options.mjs --v3-ref v3.0.0_rc8   # скачать тег с GitHub
+ *   node scripts/gen-vrunner-options.mjs --v3-ref v3.0.0       # скачать тег с GitHub
  *   node scripts/gen-vrunner-options.mjs --v3-src <путь>       # локальный клон
  *   (без --v3-ref/--v3-src обновляется только каталог 2.x)
  */
