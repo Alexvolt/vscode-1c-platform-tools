@@ -1023,7 +1023,7 @@ async function loadFormViewerHtml(
 	const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'webview', 'form-viewer.css'));
 	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'webview', 'form-viewer.js'));
 	const nonce = createNonce();
-	const initialJson = JSON.stringify(viewModel).replaceAll('<', String.raw`<`);
+	const initialJson = JSON.stringify(viewModel).replaceAll('<', String.raw`\u003c`);
 	return template
 		.replaceAll('{{CSP_SOURCE}}', webview.cspSource)
 		.replaceAll('{{NONCE}}', nonce)
