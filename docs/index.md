@@ -10,7 +10,10 @@ hero:
     alt: ''
   actions:
     - theme: brand
-      text: Руководства по функциям
+      text: Начало работы
+      link: /getting-started
+    - theme: alt
+      text: Руководства
       link: /tools
     - theme: alt
       text: VS Code Marketplace
