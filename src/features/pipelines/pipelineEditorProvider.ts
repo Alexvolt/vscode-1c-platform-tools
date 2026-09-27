@@ -819,7 +819,7 @@ function inputPosition(node) {
 }
 
 function clearLinks() {
-	for (const path of [...links.querySelectorAll('path')]) { path.remove(); }
+	for (const path of [...links.querySelectorAll(':scope > path')]) { path.remove(); }
 }
 
 function renderLinks(preview) {
