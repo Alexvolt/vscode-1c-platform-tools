@@ -33,6 +33,7 @@ description: Тестирование 1С. Используй, когда пол
 | Выгрузить тестовые расширения | `1c-platform-tools.test.dumpExtensions`  |
 | Собрать тестовые расширения   | `1c-platform-tools.test.compileExtensions` |
 | Разобрать тестовые расширения | `1c-platform-tools.test.decompileExtensions` |
+| Добавить YAxUnit              | `1c-platform-tools.test.addYaxunit` |
 
 Тестовые расширения (YAxUnit и расширение с тестами) живут под каталогом тестов, собранные `*.cfe` — в каталоге сборки; команды расширений решения их не трогают.
 Перед прогоном YAxUnit расширения должны быть в базе: `test.loadExtensions`. В дереве команд и они,

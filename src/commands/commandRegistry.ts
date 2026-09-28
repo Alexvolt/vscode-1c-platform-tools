@@ -446,6 +446,9 @@ export function registerCommands(
 		registerVRunnerCommand('1c-platform-tools.test.decompileExtensions', (opts) =>
 			commands.extensions.decompileTests(opts)
 		),
+		registerVRunnerCommand('1c-platform-tools.test.addYaxunit', (opts) =>
+			commands.extensions.addYaxunit(opts)
+		),
 		registerVRunnerCommand('1c-platform-tools.test.compileEpf', (opts) =>
 			commands.test.buildTestEpf(opts)
 		),

@@ -33,6 +33,7 @@ description: Загрузка и выгрузка расширений конф�
 | Выгрузить тестовые расширения       | `1c-platform-tools.test.dumpExtensions`        |
 | Собрать тестовые *.cfe              | `1c-platform-tools.test.compileExtensions`       |
 | Разобрать тестовые *.cfe            | `1c-platform-tools.test.decompileExtensions`   |
+| Добавить YAxUnit                    | `1c-platform-tools.test.addYaxunit`            |
 
 Параметр `extensions` работает так же и отбирает тестовые расширения. Инструменты MCP:
 `test_loadExts`, `test_dumpExts`, `test_compileExts`, `test_decompileExts`.

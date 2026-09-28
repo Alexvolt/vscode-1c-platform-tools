@@ -69,6 +69,7 @@ import {
 	getBuildTestExtensionsCommandName,
 	getDumpTestExtensionsCommandName,
 	getDecompileTestExtensionsCommandName,
+	getAddYaxunitCommandName,
 	getBuildTestEpfCommandName,
 	getDecompileTestEpfCommandName,
 	getSetVersionConfigurationCommandName,
@@ -254,6 +255,7 @@ export const TREE_GROUPS: TreeGroup[] = [
 		sectionType: 'testEnvironment',
 		defaultCollapsibleState: 'collapsed',
 		commands: [
+			{ command: '1c-platform-tools.test.addYaxunit', title: getAddYaxunitCommandName().title, treeLabel: '⬇️ Добавить YAxUnit'},
 			{ command: '1c-platform-tools.test.loadExtensions', title: getLoadTestExtensionsCommandName().title, treeLabel: '📥 Загрузить тестовые расширения из исходного кода'},
 			{ command: '1c-platform-tools.test.dumpExtensions', title: getDumpTestExtensionsCommandName().title, treeLabel: '📤 Выгрузить тестовые расширения в исходный код'},
 			{ command: '1c-platform-tools.test.compileExtensions', title: getBuildTestExtensionsCommandName().title, treeLabel: '🔨 Собрать тестовые *.cfe из исходного кода'},

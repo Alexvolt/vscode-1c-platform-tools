@@ -865,6 +865,17 @@ export function getDumpTestExtensionsCommandName(): CommandNameAndTitle {
 }
 
 /**
+ * Получить название и заголовок для команды добавления YAxUnit
+ */
+export function getAddYaxunitCommandName(): CommandNameAndTitle {
+	return {
+		id: '1c-platform-tools.test.addYaxunit',
+		name: 'Добавить YAxUnit',
+		title: 'Добавить YAxUnit'
+	};
+}
+
+/**
  * Получить название и заголовок для команды разборки тестовых расширений
  */
 export function getDecompileTestExtensionsCommandName(): CommandNameAndTitle {

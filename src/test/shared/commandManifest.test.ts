@@ -97,6 +97,7 @@ suite('манифест команд', () => {
 		assert.deepStrictEqual(
 			group.commands.map((command) => command.command),
 			[
+				'1c-platform-tools.test.addYaxunit',
 				'1c-platform-tools.test.loadExtensions',
 				'1c-platform-tools.test.dumpExtensions',
 				'1c-platform-tools.test.compileExtensions',
