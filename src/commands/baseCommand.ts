@@ -30,10 +30,13 @@ import {
 import { runEdtExports, runEdtImports, type EdtBridgeContext } from '../features/edt/edtBridgeRunner';
 import { TaskOutputChain } from '../features/tasks/vrunnerTask';
 import {
+	EDT_NOT_FOUND_MESSAGE,
 	edtExitMessage,
 	edtFailureMessage,
 	edtProjectName,
 	edtStagingRoot,
+	readEdtSettings,
+	resolveEdt,
 	type EdtRunResult,
 } from '../features/edt/edtRunner';
 import { notifyQuiet } from '../shared/notify';
@@ -691,6 +694,10 @@ export abstract class BaseCommand {
 		}
 		if (workspaceRoot === undefined || (exports.length === 0 && imports.length === 0)) {
 			return { intents: rewritten };
+		}
+		// Мосту нужна EDT: без неё пишущая команда отработала бы впустую, результат не попал бы в проект
+		if (!resolveEdt(readEdtSettings(workspaceRoot))) {
+			return (await this.reportUnavailable(EDT_NOT_FOUND_MESSAGE, opts)) ?? 'blocked';
 		}
 		// Базовый проект у каждого шага свой: расширение чужой конфигурации к активной не относится
 		const baseOf = await this.edtBaseProjectResolver(workspaceRoot);

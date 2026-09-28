@@ -1302,6 +1302,13 @@ export class ExtensionsCommands extends BaseCommand {
 			}
 		}
 
+		const cfeFile = `${YAXUNIT_EXTENSION}.cfe`;
+		// Место проверяется до загрузки: без него скачанный файл некуда разобрать
+		const target = await this.cfeTarget(cwd, cfeFile, await this.layoutExtensions('tests'), 'tests');
+		if (target === undefined) {
+			return this.reportExportPrepareFailure(NO_PLACE_FOR_EDT_EXTENSION, opts, 'error');
+		}
+
 		const headers = githubHeaders(resolveGithubToken());
 		let releases: YaxunitRelease[];
 		try {
@@ -1319,7 +1326,6 @@ export class ExtensionsCommands extends BaseCommand {
 		}
 
 		const buildPath = this.vrunner.getOutPath();
-		const cfeFile = `${YAXUNIT_EXTENSION}.cfe`;
 		const cfePath = path.join(cwd, buildPath, BUILD_SUBDIRS.testsCfe, cfeFile);
 		// Файл заменяется только скачанным целиком: оборванная загрузка не портит прежний
 		const partPath = `${cfePath}.part`;
@@ -1336,10 +1342,6 @@ export class ExtensionsCommands extends BaseCommand {
 		}
 		log.info(`YAxUnit ${release.tag} загружен в ${cfePath}`);
 
-		const target = await this.cfeTarget(cwd, cfeFile, await this.layoutExtensions('tests'), 'tests');
-		if (target === undefined) {
-			return this.reportExportPrepareFailure(NO_PLACE_FOR_EDT_EXTENSION, opts, 'error');
-		}
 		const commandName = getAddYaxunitCommandName();
 		const intent: VRunnerIntent = {
 			kind: 'cfe.decompileCfeFile',
