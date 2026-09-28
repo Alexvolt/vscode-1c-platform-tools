@@ -4097,10 +4097,10 @@ async function loadMetadataObjectHtml(
 	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'resources', 'webview', 'metadata-object.js'));
 	const initialJson = JSON.stringify(viewModel).replaceAll('<', String.raw`\u003c`);
 	return template
-		.replaceAll('{{CSP_SOURCE}}', webview.cspSource)
-		.replaceAll('{{CSS_URI}}', cssUri.toString())
-		.replaceAll('{{JS_URI}}', jsUri.toString())
-		.replaceAll('{{INITIAL_JSON}}', initialJson)
-		.replaceAll('{{KIND_LABEL}}', escapeHtml(viewModel.objectKindLabel))
-		.replaceAll('{{OBJECT_NAME}}', escapeHtml(viewModel.internalName));
+		.replaceAll('{{CSP_SOURCE}}', () => webview.cspSource)
+		.replaceAll('{{CSS_URI}}', () => cssUri.toString())
+		.replaceAll('{{JS_URI}}', () => jsUri.toString())
+		.replaceAll('{{INITIAL_JSON}}', () => initialJson)
+		.replaceAll('{{KIND_LABEL}}', () => escapeHtml(viewModel.objectKindLabel))
+		.replaceAll('{{OBJECT_NAME}}', () => escapeHtml(viewModel.internalName));
 }

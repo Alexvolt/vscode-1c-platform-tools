@@ -199,7 +199,14 @@ function buildHtml(): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
 ${chromeStyles()}
-	.chrome-body { grid-template-columns: 236px minmax(0, 1fr) 288px; }
+	/* Боковые колонки сужаются раньше полотна: ему остаётся не меньше 320 px */
+	.chrome-body { grid-template-columns: minmax(160px, 236px) minmax(320px, 1fr) minmax(200px, 288px); }
+	/* В узком окне колонки встают друг под другом, чтобы полотну осталась ширина */
+	@media (max-width: 760px) {
+		.chrome-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(220px, 1fr) auto; }
+		.side.left { max-height: 28vh; border-right: none; border-bottom: 1px solid var(--line); }
+		.side.right { max-height: 36vh; border-left: none; border-top: 1px solid var(--line); }
+	}
 	/* Правая колонка: свойства сверху, список цепочек снизу со своим скроллом,
 	   чтобы длинный список не утаскивал свойства и палитру вниз */
 	.side.right { padding: 0; gap: 0; }
@@ -240,7 +247,10 @@ ${chromeStyles()}
 	.node::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
 		border-radius: 9px 0 0 9px; background: var(--accent); }
 	.node:hover { box-shadow: 0 5px 16px #0007; }
-	.node.selected { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder), 0 5px 16px #0007; }
+	/* Цвет основной кнопки непрозрачен во всех темах; в контрастной тёмной кнопка чёрная, там рамка активного элемента */
+	body { --pick: var(--vscode-button-background); }
+	body.vscode-high-contrast { --pick: var(--vscode-contrastActiveBorder); }
+	.node.selected { border-color: var(--pick); box-shadow: 0 0 0 1px var(--pick), 0 5px 16px #0007; }
 	.node.disabled { opacity: 0.45; }
 	.node.blank { border-style: dashed; }
 	.node .head { display: flex; gap: 7px; align-items: center; padding: 7px 10px 4px 13px; font-size: 0.7em;

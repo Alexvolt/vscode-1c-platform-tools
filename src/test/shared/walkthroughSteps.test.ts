@@ -98,4 +98,12 @@ suite('walkthrough: шаги', () => {
 		const html = simpleMarkdownToHtml('**Жирный** текст, `код` и [ссылка](../docs/automation.md).');
 		assert.strictEqual(html, '<strong>Жирный</strong> текст, <code>код</code> и ссылка.');
 	});
+
+	test('списки шага становятся списками, а не строками со звёздочкой', () => {
+		const html = simpleMarkdownToHtml('Можно:\n* **создать** проект;\n- открыть папку.\nДальше текст.');
+		assert.strictEqual(
+			html,
+			'Можно:<ul><li><strong>создать</strong> проект;</li><li>открыть папку.</li></ul>Дальше текст.'
+		);
+	});
 });

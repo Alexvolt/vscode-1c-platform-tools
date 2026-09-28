@@ -98,7 +98,9 @@ export class PlatformTreeItem extends vscode.TreeItem {
 	 * @param type - Тип элемента дерева
 	 * @returns Путь к иконке или ThemeIcon
 	 */
-	private getIconPath(type: TreeItemType): vscode.ThemeIcon | vscode.Uri | undefined {
+	private getIconPath(
+		type: TreeItemType
+	): vscode.ThemeIcon | vscode.Uri | { light: vscode.Uri; dark: vscode.Uri } | undefined {
 		switch (type) {
 			case TreeItemType.Task:
 				return new vscode.ThemeIcon('play');
@@ -125,7 +127,10 @@ export class PlatformTreeItem extends vscode.TreeItem {
 				return new vscode.ThemeIcon('rocket');
 			case TreeItemType.Subsystem:
 				if (this.extensionUri) {
-					return vscode.Uri.joinPath(this.extensionUri, 'resources', '1c-icon.svg');
+					return {
+						light: vscode.Uri.joinPath(this.extensionUri, 'resources', '1c-icon.svg'),
+						dark: vscode.Uri.joinPath(this.extensionUri, 'resources', '1c-icon-dark.svg'),
+					};
 				}
 				return new vscode.ThemeIcon('circle-outline');
 			case TreeItemType.Configuration:

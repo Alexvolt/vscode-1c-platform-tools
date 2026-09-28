@@ -186,6 +186,7 @@ export function registerMetadataFeature(
 		context,
 		metadataTreeProvider,
 		metadataTreeView,
+		metadataSearchProvider,
 		metadataFilterProvider,
 		propertyPaletteProvider,
 	} = params;
@@ -240,7 +241,7 @@ export function registerMetadataFeature(
 			if (answer !== reset) {
 				return;
 			}
-			metadataTreeProvider.setTextFilter('');
+			metadataSearchProvider.clear();
 			metadataFilterProvider.clear();
 		}
 		await vscode.commands.executeCommand('1c-platform-tools-metadata-tree.focus');

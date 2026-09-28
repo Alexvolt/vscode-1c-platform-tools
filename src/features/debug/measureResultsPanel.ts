@@ -102,18 +102,21 @@ function renderHtml(totalSeconds: number, rows: MeasureRow[]): string {
 	body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 0 12px; }
 	.summary { margin: 10px 0; display: flex; gap: 16px; align-items: center; }
 	input { background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-		border: 1px solid var(--vscode-input-border, transparent); padding: 3px 6px; min-width: 240px; }
+		border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 3px 6px; min-width: 240px; }
 	table { border-collapse: collapse; width: 100%; }
 	th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid var(--vscode-editorGroup-border); }
 	th { cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--vscode-editor-background); white-space: nowrap; }
 	th .dir { opacity: .7; }
 	td.num, th.num { text-align: right; white-space: nowrap; }
+	/* Код забирает остаток ширины и обрезается, чтобы числа справа оставались в окне */
 	td.code { font-family: var(--vscode-editor-font-family); white-space: nowrap; overflow: hidden;
-		text-overflow: ellipsis; max-width: 480px; }
+		text-overflow: ellipsis; max-width: 0; width: 45%; }
 	tbody tr { cursor: pointer; user-select: none; }
 	tbody tr:hover { background: var(--vscode-list-hoverBackground); }
-	tbody tr.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+	tbody tr.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground);
+		outline: 1px dotted var(--vscode-contrastActiveBorder, transparent); outline-offset: -1px; }
 	.bar { background: var(--vscode-progressBar-background); height: 3px; }
+	tbody tr.selected .bar { background: currentColor; opacity: .8; }
 	.muted { opacity: .7; }
 </style>
 </head>
@@ -162,7 +165,7 @@ function renderHtml(totalSeconds: number, rows: MeasureRow[]): string {
 			'<tr data-i="' + r._i + '">' +
 			'<td>' + esc(r.module) + '</td>' +
 			'<td class="num">' + r.line + '</td>' +
-			'<td class="code">' + esc(r.code) + '</td>' +
+			'<td class="code" title="' + esc(r.code).replace(/"/g, '&quot;') + '">' + esc(r.code) + '</td>' +
 			'<td class="num">' + r.count + '</td>' +
 			'<td class="num">' + fmt(r.ms) + '</td>' +
 			'<td class="num">' + fmt(r.ownMs) + '</td>' +

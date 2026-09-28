@@ -378,10 +378,10 @@ ${chromeStyles()}
 	h2 .count { color: var(--vscode-descriptionForeground); font-weight: 400; }
 	.group-title { font-size: 0.8em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vscode-descriptionForeground); margin: 18px 0 2px; }
 
-	.row { padding: 10px 0 8px; border-bottom: 1px solid var(--vscode-widget-border, #2a2a2a44); }
+	.row { padding: 10px 0 8px; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
 	.row-top { display: flex; gap: 12px; align-items: center; }
 	.key { font-family: var(--vscode-editor-font-family); font-size: 0.95em; min-width: 200px; flex-shrink: 0; }
-	.key .badge { font-family: var(--vscode-font-family); font-size: 0.75em; color: var(--vscode-descriptionForeground); border: 1px solid var(--vscode-widget-border, #5555); border-radius: 8px; padding: 0 6px; margin-left: 6px; }
+	.key .badge { font-family: var(--vscode-font-family); font-size: 0.75em; color: var(--vscode-descriptionForeground); border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; padding: 0 6px; margin-left: 6px; }
 	.control { flex: 1; min-width: 0; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 	.control input[type=text], .control select, .control textarea { width: 100%; }
 	.control:has(> .pick) { display: flex; gap: 6px; align-items: center; }

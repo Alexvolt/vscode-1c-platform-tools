@@ -242,7 +242,7 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 		min-width: 0;
 		padding: 3px 6px;
 		border-radius: 2px;
-		border: 1px solid var(--vscode-input-border, transparent);
+		border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 		background: var(--vscode-input-background);
 		color: var(--vscode-input-foreground);
 		font-family: inherit;
@@ -306,6 +306,8 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 	.row.is-selected {
 		background: var(--vscode-list-activeSelectionBackground);
 		color: var(--vscode-list-activeSelectionForeground);
+		outline: 1px dotted var(--vscode-contrastActiveBorder, transparent);
+		outline-offset: -1px;
 	}
 	.row-label {
 		flex: 0 0 45%;
@@ -330,6 +332,10 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 		color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-charts-blue));
 		opacity: 1;
 	}
+	.row.is-selected .row-state.is-extended {
+		color: inherit;
+		opacity: 0.8;
+	}
 	.row-value input[type="text"],
 	.row-value select {
 		width: 100%;
@@ -352,6 +358,16 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 		color: var(--vscode-input-foreground);
 		outline: 1px solid var(--vscode-focusBorder);
 		outline-offset: -1px;
+	}
+	/* Раскрытый список рисует браузер: фон ему нужен непрозрачный, а схема тёмная в тёмных темах */
+	.row-value select:focus,
+	.row-value select option {
+		background: var(--vscode-dropdown-background);
+		color: var(--vscode-dropdown-foreground);
+	}
+	body.vscode-dark,
+	body.vscode-high-contrast:not(.vscode-high-contrast-light) {
+		color-scheme: dark;
 	}
 	.row-value input[type="checkbox"] {
 		margin: 0;

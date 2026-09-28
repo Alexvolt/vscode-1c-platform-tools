@@ -205,15 +205,15 @@ async function loadMetadataSourceHtml(
 	).replaceAll('<', String.raw`\u003c`);
 	const supportJson = JSON.stringify(support ?? null).replaceAll('<', String.raw`\u003c`);
 	return template
-		.replaceAll('{{CSP_SOURCE}}', webview.cspSource)
-		.replaceAll('{{NONCE}}', nonce)
-		.replaceAll('{{BASE_CSS_URI}}', baseCssUri.toString())
-		.replaceAll('{{CSS_URI}}', cssUri.toString())
-		.replaceAll('{{JS_URI}}', jsUri.toString())
-		.replaceAll('{{SOURCE_KIND}}', escapeHtml(sourceKind))
-		.replaceAll('{{SOURCE_KIND_LABEL}}', escapeHtml(sourceKindLabelValue))
-		.replaceAll('{{SOURCE_LABEL}}', escapeHtml(sourceLabel))
-		.replaceAll('{{INITIAL_JSON}}', initialJson)
-		.replaceAll('{{DICTIONARIES_JSON}}', dictionariesJson)
-		.replaceAll('{{SUPPORT_JSON}}', supportJson);
+		.replaceAll('{{CSP_SOURCE}}', () => webview.cspSource)
+		.replaceAll('{{NONCE}}', () => nonce)
+		.replaceAll('{{BASE_CSS_URI}}', () => baseCssUri.toString())
+		.replaceAll('{{CSS_URI}}', () => cssUri.toString())
+		.replaceAll('{{JS_URI}}', () => jsUri.toString())
+		.replaceAll('{{SOURCE_KIND}}', () => escapeHtml(sourceKind))
+		.replaceAll('{{SOURCE_KIND_LABEL}}', () => escapeHtml(sourceKindLabelValue))
+		.replaceAll('{{SOURCE_LABEL}}', () => escapeHtml(sourceLabel))
+		.replaceAll('{{INITIAL_JSON}}', () => initialJson)
+		.replaceAll('{{DICTIONARIES_JSON}}', () => dictionariesJson)
+		.replaceAll('{{SUPPORT_JSON}}', () => supportJson);
 }

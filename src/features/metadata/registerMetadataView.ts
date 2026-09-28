@@ -58,9 +58,13 @@ export function registerMetadataView(
 		})
 	);
 
-	const metadataSearchProvider = new MetadataSearchViewProvider(context.extensionUri, (query) => {
-		metadataTreeProvider.setTextFilter(query);
-	});
+	const metadataSearchProvider = new MetadataSearchViewProvider(
+		context.extensionUri,
+		(query) => {
+			metadataTreeProvider.setTextFilter(query);
+		},
+		() => metadataTreeProvider.getTextFilter() ?? ''
+	);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(METADATA_SEARCH_VIEW_ID, metadataSearchProvider)
 	);

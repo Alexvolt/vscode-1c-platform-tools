@@ -479,7 +479,8 @@ ${chromeStyles()}
 	.toolbar .subtitle .connection { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 	.toolbar .subtitle .count { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 	.tabs { display: flex; gap: 4px; }
-	.tabs button.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+	.tabs button.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+		outline: 1px solid var(--vscode-contrastActiveBorder, transparent); outline-offset: 1px; }
 	.scroll { flex: 1; min-height: 0; overflow: auto; }
 	table { border-collapse: collapse; width: 100%; font-size: 0.88em; }
 	th, td { padding: 5px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
@@ -493,7 +494,8 @@ ${chromeStyles()}
 	tbody tr { cursor: default; }
 	tbody tr:hover { background: var(--vscode-list-hoverBackground); }
 	tbody tr.picked { background: var(--vscode-list-activeSelectionBackground);
-		color: var(--vscode-list-activeSelectionForeground); }
+		color: var(--vscode-list-activeSelectionForeground);
+		outline: 1px dotted var(--vscode-contrastActiveBorder, transparent); outline-offset: -1px; }
 	td.actions { text-align: right; }
 	td.actions button { margin-left: 4px; }
 	.state { padding: 14px 18px; color: var(--vscode-descriptionForeground); }

@@ -26,7 +26,7 @@ export const CHROME_LABELS = {
 export function chromeStyles(): string {
 	return /* css */ `
 	:root {
-		--line: var(--vscode-widget-border, #454545);
+		--line: var(--vscode-widget-border, var(--vscode-panel-border, #454545));
 		--ok: var(--vscode-charts-green, #89d185);
 		--fail: var(--vscode-charts-red, #f14c4c);
 	}
@@ -44,22 +44,28 @@ export function chromeStyles(): string {
 
 	input[type=text], input[type=number], input[type=password], textarea, select {
 		background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-		border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 5px 8px;
+		border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; padding: 5px 8px;
 		font-family: inherit; font-size: inherit; box-sizing: border-box; width: 100%;
 	}
+	/* Раскрытый список рисует браузер: фон ему нужен непрозрачный, а схема тёмная в тёмных темах */
+	select, option { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); }
+	select { border-color: var(--vscode-dropdown-border, var(--vscode-input-border, var(--vscode-panel-border))); }
+	body.vscode-dark, body.vscode-high-contrast:not(.vscode-high-contrast-light) { color-scheme: dark; }
 	input:focus, textarea:focus, select:focus { outline: 1px solid var(--vscode-focusBorder); }
 	textarea { font-family: var(--vscode-editor-font-family); min-height: 52px; resize: vertical; }
 
 	button {
 		background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
-		border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; white-space: nowrap; font-size: 0.9em;
+		border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border, transparent));
+		border-radius: 4px; padding: 4px 10px; cursor: pointer; white-space: nowrap; font-size: 0.9em;
 	}
 	button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 	button:disabled { opacity: 0.5; cursor: default; }
-	button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+	button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+		border-color: var(--vscode-button-border, transparent); }
 	button.primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
 	button.round { width: 34px; height: 34px; padding: 0; border-radius: 50%; font-size: 1.3em; line-height: 1; flex-shrink: 0; }
-	button.icon { background: none; color: var(--vscode-descriptionForeground); padding: 0 5px; }
+	button.icon { background: none; border-color: transparent; color: var(--vscode-descriptionForeground); padding: 0 5px; }
 	button.icon:hover { color: var(--vscode-foreground); background: none; }
 	button.danger:hover:not(:disabled) { color: var(--fail); }
 
@@ -70,14 +76,16 @@ export function chromeStyles(): string {
 		color: var(--vscode-list-activeSelectionForeground); border-color: var(--vscode-focusBorder); }
 	.list-item .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
 		background: var(--vscode-descriptionForeground); }
-	.list-item .text { min-width: 0; }
+	.list-item .text { min-width: 0; overflow-wrap: anywhere; }
 	.list-item .sub { font-size: 0.78em; opacity: 0.75; margin-top: 2px; overflow-wrap: anywhere; }
-	.list-item .remove { visibility: hidden; background: none; color: var(--vscode-descriptionForeground);
-		margin-left: auto; padding: 0 2px; font-size: 0.95em; }
+	.list-item .remove { visibility: hidden; background: none; border-color: transparent;
+		color: var(--vscode-descriptionForeground); margin-left: auto; padding: 0 2px; font-size: 0.95em; }
 	.list-item:hover .remove, .list-item.active .remove { visibility: visible; }
+	.list-item.active .remove { color: inherit; opacity: 0.8; }
 	.list-item .remove:hover { color: var(--fail); background: none; }
+	.list-item.active .remove:hover { opacity: 1; }
 
-	.toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+	.toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 	.toolbar .title { font-weight: 600; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 	.save-bar { display: flex; gap: 8px; align-items: center; justify-content: flex-end;

@@ -86,7 +86,7 @@ function extractShortDescription(description: string): string {
 
 function extractImageFromMarkdown(md: string): string {
 	const m = /!\[.*?\]\((?:images\/)?([^)]+)\)/.exec(md);
-	return m ? m[1] : 'placeholder.svg';
+	return m ? m[1] : '';
 }
 
 /**
@@ -157,7 +157,7 @@ async function loadWalkthroughData(context: vscode.ExtensionContext): Promise<Wa
 		const shortDescription = extractShortDescription(step.description);
 
 		let extendedContent = '';
-		let image = 'placeholder.svg';
+		let image = '';
 
 		const mdPath = step.media?.markdown;
 		if (mdPath) {
@@ -209,11 +209,29 @@ function escapeHtml(s: string): string {
  * @returns HTML для вставки в страницу
  */
 export function simpleMarkdownToHtml(s: string): string {
-	return escapeHtml(s)
-		.replaceAll(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-		.replaceAll(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-		.replaceAll(/`(.+?)`/g, '<code>$1</code>')
-		.replaceAll('\n', '<br>');
+	const inline = (line: string): string =>
+		escapeHtml(line)
+			.replaceAll(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+			.replaceAll(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+			.replaceAll(/`(.+?)`/g, '<code>$1</code>');
+	let html = '';
+	let inList = false;
+	s.split('\n').forEach((line, index) => {
+		const item = /^\s*[-*]\s+(.*)$/.exec(line);
+		if (item) {
+			html += (inList ? '' : '<ul>') + `<li>${inline(item[1])}</li>`;
+			inList = true;
+			return;
+		}
+		if (inList) {
+			html += '</ul>';
+			inList = false;
+		} else if (index > 0) {
+			html += '<br>';
+		}
+		html += inline(line);
+	});
+	return inList ? html + '</ul>' : html;
 }
 
 function buildWalkthroughWebviewContent(
@@ -262,8 +280,9 @@ function buildWalkthroughWebviewContent(
 		* { box-sizing: border-box; }
 		body { margin: 0; font-family: var(--vscode-font-family); color: var(--vscode-foreground); line-height: 1.5; background: var(--vscode-editor-background); }
 		.layout { display: flex; min-height: 100vh; }
-		.left { flex: 1; min-width: 0; padding: 1.5em 1.5em 2em; overflow-y: auto; }
-		.right { width: 340px; flex-shrink: 0; padding: 1.5em; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-widget-border); }
+		.left { flex: 2 1 0; min-width: 0; padding: 1.5em 1.5em 2em; overflow-y: auto; }
+		.right { flex: 3 1 0; min-width: 340px; padding: 1.5em; background: var(--vscode-sideBar-background);
+			border-left: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
 		.nav { display: flex; flex-direction: column; gap: 0.25em; margin-bottom: 1.5em; }
 		.nav-step {
 			display: flex; align-items: center; gap: 0.6em;
@@ -272,7 +291,8 @@ function buildWalkthroughWebviewContent(
 			cursor: pointer; text-align: left; font-size: 0.9em;
 		}
 		.nav-step:hover { background: var(--vscode-list-hoverBackground); }
-		.nav-step.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+		.nav-step.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground);
+			outline: 1px dotted var(--vscode-contrastActiveBorder, transparent); outline-offset: -1px; }
 		.nav-num {
 			width: 1.4em; height: 1.4em; display: flex; align-items: center; justify-content: center;
 			background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
@@ -284,20 +304,23 @@ function buildWalkthroughWebviewContent(
 		.step-content .lead { color: var(--vscode-descriptionForeground); margin: 0 0 0.75em; }
 		.step-content .extended { margin-bottom: 1em; color: var(--vscode-foreground); font-size: 0.95em; }
 		.step-content .extended strong { font-weight: 600; }
+		.step-content .extended ul { margin: 0.3em 0; padding-left: 1.4em; }
 		.step-content .extended code { background: var(--vscode-textCodeBlock-background); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
 		.commands { display: flex; flex-wrap: wrap; gap: 0.4em; margin-top: 0.75em; }
 		.cmd-btn {
 			background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-			border: none; padding: 0.45em 0.9em; border-radius: 4px;
+			border: 1px solid var(--vscode-button-border, transparent); padding: 0.45em 0.9em; border-radius: 4px;
 			cursor: pointer; font-size: 0.9em;
 		}
 		.cmd-btn:hover { opacity: 0.92; }
 		.media img {
-			width: 100%; max-width: 300px; height: auto; border-radius: 6px;
-			border: 1px solid var(--vscode-widget-border);
+			width: 100%; height: auto; border-radius: 6px; cursor: zoom-in;
+			border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
 		}
 		.right .media { margin-top: 0; }
-		.right .media img { max-width: 100%; }
+		.zoom { position: fixed; inset: 0; z-index: 10; overflow: auto; cursor: zoom-out; background: rgba(0, 0, 0, 0.85); }
+		.zoom[hidden] { display: none; }
+		.zoom img { display: block; margin: auto; max-width: none; max-height: none; }
 	</style>
 </head>
 <body>
@@ -309,11 +332,10 @@ function buildWalkthroughWebviewContent(
 			${stepsContent}
 		</div>
 		<div class="right">
-			<div class="media" id="right-media">
-				<img src="${imagesBaseUri}/${steps[0]?.image ?? 'placeholder.svg'}" alt="Шаг 1" />
-			</div>
+			<div class="media" id="right-media"></div>
 		</div>
 	</div>
+	<div class="zoom" id="zoom" hidden title="Закрыть"><img alt="" /></div>
 	<script>
 		(function() {
 			const vscode = acquireVsCodeApi();
@@ -322,13 +344,30 @@ function buildWalkthroughWebviewContent(
 			const imagesBase = '${imagesBaseUri}';
 			const imageNames = ${JSON.stringify(steps.map(s => s.image))};
 
+			const zoom = document.getElementById('zoom');
+
 			function showStep(i) {
 				steps.forEach((s, idx) => { s.style.display = idx === i ? 'block' : 'none'; });
 				document.querySelectorAll('.nav-step').forEach((b, idx) => { b.classList.toggle('active', idx === i); });
-				if (rightMedia && imageNames[i]) {
-					rightMedia.innerHTML = '<img src="' + imagesBase + '/' + imageNames[i] + '" alt="Шаг ' + (i+1) + '" />';
+				rightMedia.replaceChildren();
+				rightMedia.parentElement.hidden = !imageNames[i];
+				if (imageNames[i]) {
+					const img = document.createElement('img');
+					img.src = imagesBase + '/' + imageNames[i];
+					img.alt = 'Шаг ' + (i + 1);
+					img.title = 'Открыть в полном размере';
+					img.addEventListener('click', () => {
+						zoom.querySelector('img').src = img.src;
+						zoom.hidden = false;
+					});
+					rightMedia.appendChild(img);
 				}
+				vscode.setState({ step: i });
 			}
+			zoom.addEventListener('click', () => { zoom.hidden = true; });
+			document.addEventListener('keydown', (event) => {
+				if (event.key === 'Escape') { zoom.hidden = true; }
+			});
 			document.querySelectorAll('.nav-step').forEach((btn, i) => {
 				btn.addEventListener('click', () => showStep(i));
 			});
@@ -337,7 +376,9 @@ function buildWalkthroughWebviewContent(
 					vscode.postMessage({ type: 'runCommand', command: btn.dataset.command });
 				});
 			});
-			showStep(0);
+			// Панель без retainContextWhenHidden: после переключения вкладки страница строится заново
+			const saved = vscode.getState();
+			showStep(saved && saved.step >= 0 && saved.step < steps.length ? saved.step : 0);
 		})();
 	</script>
 </body>
