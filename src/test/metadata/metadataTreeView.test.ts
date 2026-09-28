@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import {
 	MetadataLeafTreeItem,
 	MetadataMdGroupTreeItem,
+	MetadataMdSubgroupTreeItem,
 	MetadataObjectNodeTreeItem,
 	MetadataSourceNoteTreeItem,
 	MetadataSourceTreeItem,
@@ -16,6 +17,7 @@ import {
 	objectAcceptsChildNodes,
 	metadataObjectOwnsFile,
 	objectChildFromFilePath,
+	metadataCommandConfiguration,
 } from '../../features/metadata/metadataTreeView';
 import { resolveMetadataOpen, type ProjectMetadataTreeDto } from '../../features/metadata/metadataTreeService';
 import { metadataLeafReadsObjectProperties } from '../../features/properties/metadataPaletteSource';
@@ -758,5 +760,54 @@ suite('metadataTreeView: раскладка проекта', () => {
 		await provider.syncWithProjectLayout();
 
 		assert.strictEqual(fired, 0);
+	});
+});
+
+suite('metadataTreeView: конфигурация для команды дерева', () => {
+	const extensionModules = new MetadataMdSubgroupTreeItem(
+		'ext:_ДемоРасширение',
+		'common',
+		'common_commonmodule',
+		'Общие модули',
+		'symbol-module',
+		false,
+		'C:/ws/src/cfe/_ДемоРасширение/Configuration.xml',
+		'C:/ws/src/cfe/_ДемоРасширение'
+	);
+	const mainCatalogs = new MetadataMdGroupTreeItem(
+		'main',
+		'catalogs',
+		'Справочники',
+		'library',
+		true,
+		false,
+		'C:/ws/src/cf/Configuration.xml',
+		'C:/ws/src/cf'
+	);
+	const extension = {
+		cfgPath: 'C:/ws/src/cfe/_ДемоРасширение/Configuration.xml',
+		cfRoot: 'C:/ws/src/cfe/_ДемоРасширение',
+	};
+
+	test('кнопка у группы расширения ведёт в расширение, даже если выделена основная конфигурация', () => {
+		// Кнопка «+» в строке группы выделение не меняет: конфигурацию даёт узел, на котором её нажали
+		assert.deepStrictEqual(metadataCommandConfiguration([extensionModules], mainCatalogs), extension);
+		// Из контекстного меню приходят узел и список выделенных
+		assert.deepStrictEqual(metadataCommandConfiguration([extensionModules, [mainCatalogs]], mainCatalogs), extension);
+	});
+
+	test('без узла в аргументах конфигурацию даёт выделение', () => {
+		assert.deepStrictEqual(metadataCommandConfiguration(['COMMON_MODULE'], extensionModules), extension);
+		assert.deepStrictEqual(metadataCommandConfiguration([], mainCatalogs), {
+			cfgPath: 'C:/ws/src/cf/Configuration.xml',
+			cfRoot: 'C:/ws/src/cf',
+		});
+	});
+
+	test('узел без путей пропускается, а без узлов дерева конфигурации нет', () => {
+		const noPaths = new MetadataMdGroupTreeItem('main', 'catalogs', 'Справочники', 'library', true, false, undefined, undefined);
+
+		assert.deepStrictEqual(metadataCommandConfiguration([noPaths], extensionModules), extension);
+		assert.strictEqual(metadataCommandConfiguration(['COMMON_MODULE'], undefined), undefined);
 	});
 });
