@@ -13,6 +13,7 @@ import {
 	getBuildTestExtensionsCommandName,
 	getDumpTestExtensionsCommandName,
 	getDecompileTestExtensionsCommandName,
+	getAddYaxunitCommandName,
 	getLoadTestExtensionsCommandName,
 	getDecompileExtensionCommandName,
 	getUpdateExtensionsInInfobaseCommandName
@@ -54,11 +55,45 @@ import { resolveProjectLayout } from '../shared/projectLayout';
 import { CONVERTED_CONFIGURATION_DIR, convertSourcesWithEdt, designerExtensionBase } from '../features/edt/edtConvert';
 import { EDT_NOT_FOUND_MESSAGE, readEdtSettings, resolveEdt } from '../features/edt/edtRunner';
 import { readSourceProperty } from '../features/metadata/sourceProperties';
+import { fetchJson, githubHeaders, resolveGithubToken, showStatus, streamDownload } from '../shared/githubReleaseLoader';
+import {
+	latestYaxunitRelease,
+	parseYaxunitReleases,
+	YAXUNIT_EXTENSION,
+	yaxunitReleasesUrl,
+	type YaxunitRelease
+} from '../features/testing/yaxunitReleases';
 
 /** Цель выгрузки, у которой каталог уже известен. */
 type PlacedDumpTarget = ExtensionDumpTarget & { dir: string };
 
 const log = logger.scope('commands');
+
+/** Подсказка, когда релизы YAxUnit недоступны. */
+const YAXUNIT_OFFLINE_HINT =
+	'YAxUnit не загружен: GitHub недоступен. Скачайте YAxUnit-<версия>.cfe из https://github.com/bia-technologies/yaxunit/releases, ' +
+	'положите в каталог сборки тестовых расширений и выполните «Разобрать тестовые расширения».';
+
+/**
+ * Выбор версии YAxUnit: последний стабильный релиз первым, остальные от новых к старым.
+ *
+ * @param releases - Релизы с файлом расширения
+ * @returns Выбранный релиз либо undefined при отмене
+ */
+async function pickYaxunitRelease(releases: readonly YaxunitRelease[]): Promise<YaxunitRelease | undefined> {
+	const latest = latestYaxunitRelease(releases);
+	const ordered = latest ? [latest, ...releases.filter((release) => release !== latest)] : [...releases];
+	const picked = await vscode.window.showQuickPick(
+		ordered.map((release) => ({
+			label: release.tag,
+			description: release === latest ? 'последний стабильный' : release.prerelease ? 'предварительный' : undefined,
+			detail: release.assetName,
+			release,
+		})),
+		{ title: 'Версия YAxUnit', placeHolder: 'Релиз, который добавить в тестовые расширения' }
+	);
+	return picked?.release;
+}
 
 /**
  * Команды для работы с расширениями конфигурации
@@ -1232,6 +1267,88 @@ export class ExtensionsCommands extends BaseCommand {
 		}
 
 		return this.runIntentsSequential(intents, opts, commandName.title, commandName.id);
+	}
+
+	/**
+	 * Добавляет YAxUnit в тестовые расширения: скачивает файл расширения из релиза в каталог
+	 * сборки тестовых расширений и разбирает его в исходный код, как «Разобрать тестовые расширения».
+	 *
+	 * Версию выбирают из списка релизов; вызов агентом берёт последний стабильный релиз.
+	 *
+	 * @param opts - Опции выполнения
+	 * @returns void в UI-режиме, StructuredCommandResult при wait: true
+	 */
+	async addYaxunit(opts?: CommandExecutionOptions): Promise<StructuredCommandResult | void> {
+		const cwd = this.getExecutionCwd(opts);
+		if (!cwd) {
+			if (opts?.wait === true) {
+				return this.executionError(
+					'Укажите projectPath или откройте рабочую область с проектом 1С'
+				);
+			}
+			this.ensureWorkspace();
+			return;
+		}
+		if (!(await this.ensureOscriptForExecution(opts))) {
+			if (opts?.wait === true) {
+				return this.executionError('OneScript (oscript) или opm не найдены');
+			}
+			return;
+		}
+		{
+			const gate = await this.settingsGate(opts);
+			if (gate) {
+				return gate === 'blocked' ? undefined : gate;
+			}
+		}
+
+		const headers = githubHeaders(resolveGithubToken());
+		let releases: YaxunitRelease[];
+		try {
+			releases = parseYaxunitReleases(await fetchJson(yaxunitReleasesUrl(), headers));
+		} catch (error) {
+			log.warn(`Список релизов YAxUnit не получен: ${String(error)}`);
+			return this.reportExportPrepareFailure(YAXUNIT_OFFLINE_HINT, opts, 'error');
+		}
+		if (releases.length === 0) {
+			return this.reportExportPrepareFailure('В релизах YAxUnit не найден файл расширения *.cfe.', opts, 'error');
+		}
+		const release = opts === undefined ? await pickYaxunitRelease(releases) : latestYaxunitRelease(releases);
+		if (release === undefined) {
+			return;
+		}
+
+		const buildPath = this.vrunner.getOutPath();
+		const cfeFile = `${YAXUNIT_EXTENSION}.cfe`;
+		const cfePath = path.join(cwd, buildPath, BUILD_SUBDIRS.testsCfe, cfeFile);
+		// Файл заменяется только скачанным целиком: оборванная загрузка не портит прежний
+		const partPath = `${cfePath}.part`;
+		const status = showStatus(`Загрузка YAxUnit ${release.tag}…`);
+		try {
+			await streamDownload(release.assetUrl, partPath, { ...headers, Accept: 'application/octet-stream' });
+			await fs.rename(partPath, cfePath);
+		} catch (error) {
+			await fs.rm(partPath, { force: true }).catch(() => undefined);
+			log.warn(`YAxUnit ${release.tag} не загружен: ${String(error)}`);
+			return this.reportExportPrepareFailure(YAXUNIT_OFFLINE_HINT, opts, 'error');
+		} finally {
+			status.dispose();
+		}
+		log.info(`YAxUnit ${release.tag} загружен в ${cfePath}`);
+
+		const target = await this.cfeTarget(cwd, cfeFile, await this.layoutExtensions('tests'), 'tests');
+		if (target === undefined) {
+			return this.reportExportPrepareFailure(NO_PLACE_FOR_EDT_EXTENSION, opts, 'error');
+		}
+		const commandName = getAddYaxunitCommandName();
+		const intent: VRunnerIntent = {
+			kind: 'cfe.decompileCfeFile',
+			file: this.pathForCmd(path.join(buildPath, BUILD_SUBDIRS.testsCfe, cfeFile)),
+			extensionName: target.extensionName,
+			out: this.pathForCmd(target.out),
+			common: await this.vrunner.getIbConnectionParam(),
+		};
+		return this.runIntentsSequential([intent], opts, commandName.title, commandName.id);
 	}
 
 	/**

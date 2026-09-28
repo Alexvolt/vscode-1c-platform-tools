@@ -90,6 +90,10 @@ export const AGENT_COMMAND_DESCRIPTIONS: Record<string, AgentCommandDescription>
 		title: 'Разобрать собранные тестовые *.cfe в исходный код тестовых расширений: так раскладывают полученный со стороны YAxUnit.cfe; параметр extensions отбирает нужные',
 		category: TESTING,
 	},
+	'1c-platform-tools.test.addYaxunit': {
+		title: 'Добавить YAxUnit в тестовые расширения: скачать последний стабильный релиз YAxUnit.cfe с GitHub и разобрать его в исходный код',
+		category: TESTING,
+	},
 	'1c-platform-tools.test.compileEpf': {
 		title: 'Собрать обработки с тестами из исходного кода',
 		category: TESTING,

@@ -55,7 +55,8 @@ description: Операции с платформой 1С в этом проек
 
 Тестовые расширения (YAxUnit и расширение с тестами) лежат под каталогом тестов (`tests`, имя задаёт
 настройка `test.directoryName`) и обслуживаются своими командами: `1c-platform-tools.test.loadExtensions`,
-`test.dumpExtensions`, `test.compileExtensions`, `test.decompileExtensions`.
+`test.dumpExtensions`, `test.compileExtensions`, `test.decompileExtensions`; YAxUnit в них добавляет
+`test.addYaxunit`.
 
 ## Внешние обработки и отчёты
 
