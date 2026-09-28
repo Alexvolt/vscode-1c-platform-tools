@@ -82,12 +82,11 @@ import {
 	defaultMetadataLeafOpenCommand,
 	isMetadataCommonForm,
 	MetadataLeafTreeItem,
-	MetadataMdGroupTreeItem,
-	MetadataMdSubgroupTreeItem,
 	MetadataObjectNodeTreeItem,
 	MetadataObjectSectionTreeItem,
 	MetadataSourceTreeItem,
 	childNodeSupport,
+	metadataCommandConfiguration,
 	metadataCommandRoot,
 	objectModuleFilePath,
 	objectModuleKindsForType,
@@ -253,17 +252,11 @@ export function registerMetadataFeature(
 	/** Находки проверки выгрузки живут в своей коллекции: их снимает и ставит только проверка. */
 	const dumpValidation = new DumpValidationDiagnostics();
 
-	function resolveCfPathsFromMetadataTree(): { cfgPath: string; cfRoot: string } | undefined {
-		const sel = metadataTreeView.selection[0];
-		if (sel instanceof MetadataMdGroupTreeItem || sel instanceof MetadataMdSubgroupTreeItem) {
-			if (sel.configurationXmlAbs && sel.metadataRootAbs) {
-				return { cfgPath: sel.configurationXmlAbs, cfRoot: sel.metadataRootAbs };
-			}
-		}
-		if (sel instanceof MetadataLeafTreeItem) {
-			if (sel.configurationXmlAbs && sel.metadataRootAbs) {
-				return { cfgPath: sel.configurationXmlAbs, cfRoot: sel.metadataRootAbs };
-			}
+	/** Конфигурация для команды дерева: по узлу или выделению, из палитры команд основная. */
+	function resolveCfPathsFromMetadataTree(commandArgs: readonly unknown[] = []): { cfgPath: string; cfRoot: string } | undefined {
+		const fromTree = metadataCommandConfiguration(commandArgs, metadataTreeView.selection[0]);
+		if (fromTree) {
+			return fromTree;
 		}
 		const cfgPath = metadataTreeProvider.configurationXml;
 		const cfRoot = metadataTreeProvider.resolveCfRoot();
@@ -1433,7 +1426,7 @@ export function registerMetadataFeature(
 						void vscode.window.showInformationMessage('Выберите группу метаданных для добавления.');
 						return;
 					}
-					const paths = resolveCfPathsFromMetadataTree();
+					const paths = resolveCfPathsFromMetadataTree(commandArgs);
 					if (!paths) {
 						void vscode.window.showInformationMessage('Нет открытой папки проекта или выгрузки CF.');
 						return;

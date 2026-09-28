@@ -502,6 +502,34 @@ ${this.tooltip}` : hint;
 
 }
 
+/**
+ * Конфигурация, к которой относится команда дерева: основная или расширение.
+ *
+ * Кнопка в строке дерева выделение не меняет, поэтому узел из аргументов команды важнее
+ * выделения: иначе объект уходил бы не в то расширение или в основную конфигурацию.
+ *
+ * @param commandArgs Аргументы команды: узел, на котором её вызвали, и выделенные узлы
+ * @param selected Выделенный узел дерева
+ * @returns Пути `Configuration.xml` и корня выгрузки либо пусто, если ни один узел их не дал
+ */
+export function metadataCommandConfiguration(
+	commandArgs: readonly unknown[],
+	selected: unknown
+): { cfgPath: string; cfRoot: string } | undefined {
+	for (const node of [...commandArgs, selected]) {
+		if (
+			(node instanceof MetadataMdGroupTreeItem ||
+				node instanceof MetadataMdSubgroupTreeItem ||
+				node instanceof MetadataLeafTreeItem) &&
+			node.configurationXmlAbs &&
+			node.metadataRootAbs
+		) {
+			return { cfgPath: node.configurationXmlAbs, cfRoot: node.metadataRootAbs };
+		}
+	}
+	return undefined;
+}
+
 const METADATA_OBJECT_XML_SUBDIR_BY_TYPE: Record<string, string> = {
 	Catalog: 'Catalogs',
 	Constant: 'Constants',
