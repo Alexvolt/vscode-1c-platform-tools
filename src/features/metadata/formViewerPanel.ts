@@ -1025,12 +1025,12 @@ async function loadFormViewerHtml(
 	const nonce = createNonce();
 	const initialJson = JSON.stringify(viewModel).replaceAll('<', String.raw`\u003c`);
 	return template
-		.replaceAll('{{CSP_SOURCE}}', webview.cspSource)
-		.replaceAll('{{NONCE}}', nonce)
-		.replaceAll('{{CSS_URI}}', cssUri.toString())
-		.replaceAll('{{JS_URI}}', jsUri.toString())
-		.replaceAll('{{INITIAL_JSON}}', initialJson)
-		.replaceAll('{{FORM_TITLE}}', escapeHtml(viewModel.formTitle || viewModel.title));
+		.replaceAll('{{CSP_SOURCE}}', () => webview.cspSource)
+		.replaceAll('{{NONCE}}', () => nonce)
+		.replaceAll('{{CSS_URI}}', () => cssUri.toString())
+		.replaceAll('{{JS_URI}}', () => jsUri.toString())
+		.replaceAll('{{INITIAL_JSON}}', () => initialJson)
+		.replaceAll('{{FORM_TITLE}}', () => escapeHtml(viewModel.formTitle || viewModel.title));
 }
 
 function createNonce(): string {

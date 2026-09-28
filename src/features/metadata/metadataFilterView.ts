@@ -218,7 +218,7 @@ export class MetadataFilterViewProvider implements vscode.WebviewViewProvider {
 		box-sizing: border-box;
 		padding: 3px 22px 3px 6px;
 		border-radius: 2px;
-		border: 1px solid var(--vscode-input-border, transparent);
+		border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 		background: var(--vscode-input-background);
 		color: var(--vscode-input-foreground);
 		font-family: inherit;
@@ -298,8 +298,13 @@ export class MetadataFilterViewProvider implements vscode.WebviewViewProvider {
 		align-items: center;
 		gap: 6px;
 		cursor: pointer;
+		min-width: 0;
+	}
+	label.name span {
 		overflow: hidden;
 		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
 	}
 	.empty-note {
 		padding: 4px 8px;
@@ -320,7 +325,8 @@ export class MetadataFilterViewProvider implements vscode.WebviewViewProvider {
 		cursor: pointer;
 		color: var(--vscode-descriptionForeground);
 	}
-	body.vscode-dark {
+	body.vscode-dark,
+	body.vscode-high-contrast:not(.vscode-high-contrast-light) {
 		color-scheme: dark;
 	}
 </style>
@@ -384,7 +390,7 @@ export class MetadataFilterViewProvider implements vscode.WebviewViewProvider {
 				'<div class="row" style="padding-left:' + (4 + depth * 8) + 'px">' +
 				twisty +
 				box +
-				'<label class="name">' + icon + '<span>' + escapeHtml(node.name) + '</span></label>' +
+				'<label class="name" title="' + escapeHtml(node.name) + '">' + icon + '<span>' + escapeHtml(node.name) + '</span></label>' +
 				'</div>';
 			const children = hasChildren && !isCollapsed
 				? visibleChildren.map((child) => rowHtml(child, depth + 1)).join('')

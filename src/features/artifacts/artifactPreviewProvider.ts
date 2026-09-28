@@ -105,7 +105,8 @@ function buildHtml(
 	body { padding: 32px; color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
 	header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 	header img { width: 48px; height: 48px; }
-	body.vscode-dark .light, body.vscode-high-contrast .light, body:not(.vscode-dark):not(.vscode-high-contrast) .dark { display: none; }
+	body.vscode-dark .light, body.vscode-high-contrast:not(.vscode-high-contrast-light) .light,
+		body:not(.vscode-dark):not(.vscode-high-contrast) .dark, body.vscode-high-contrast-light .dark { display: none; }
 	h1 { margin: 0; font-size: 1.5em; font-weight: 600; word-break: break-all; }
 	.kind { color: var(--vscode-descriptionForeground); margin-top: 4px; }
 	dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 24px; margin: 0 0 24px; }

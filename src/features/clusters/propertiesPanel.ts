@@ -248,10 +248,11 @@ ${chromeStyles()}
 	.field input, .field select { padding: 3px 6px; }
 	/* Каркас оформляет только текст, число и пароль: дате нужны те же цвета */
 	.field input[type=datetime-local] { background: var(--vscode-input-background);
-		color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent);
+		color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 		border-radius: 4px; font-family: inherit; font-size: inherit; }
 	/* Календарь и стрелки рисует браузер: без подсказки о теме они остаются светлыми */
-	body.vscode-dark input[type=datetime-local] { color-scheme: dark; }
+	body.vscode-dark input[type=datetime-local],
+		body.vscode-high-contrast:not(.vscode-high-contrast-light) input[type=datetime-local] { color-scheme: dark; }
 	.field.flag { grid-template-columns: 210px minmax(0, 1fr); }
 	.field.flag label { order: 1; text-align: right; }
 	.field.flag input { order: 2; width: auto; justify-self: start; }

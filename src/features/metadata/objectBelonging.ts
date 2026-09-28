@@ -71,19 +71,8 @@ const BADGE_KINDS = {
 
 type BadgeKind = keyof typeof BADGE_KINDS;
 
-/** Тема пиктограммы: от неё зависит подложка под замком. */
+/** Тема пиктограммы: от неё зависит оттенок значка запрета. */
 export type IconTheme = 'light' | 'dark';
-
-/**
- * Подложка под замком - кружок цвета панели.
- *
- * Пиктограммы монохромные, всего два серых, поэтому любой цвет значка рано или поздно садится
- * на заливку того же тона. Кольцо фона отделяет замок от пиктограммы при любом её рисунке.
- */
-const BADGE_BACKING: Readonly<Record<IconTheme, string>> = {
-	light: '#F3F3F3',
-	dark: '#252526',
-};
 
 /** Подсказки к режимам поддержки в дереве. */
 export const SUPPORT_HINTS: Readonly<Record<'editable' | 'locked', string>> = {
@@ -106,6 +95,17 @@ function round(value: number): string {
 	return String(Math.round(value * 100) / 100);
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * Значок на пиктограмме.
+ *
+ * `cut` - фигура, которую вырезают из пиктограммы под значком: так значок отделён от рисунка
+ * прозрачным кольцом и не зависит от цвета панели и выделения. `hole` - то, что вырезают из
+ * самого значка (буква, косая черта).
+ */
+type Badge = { paint: string; cut?: string; hole?: string };
+
 /**
  * Накладывает значок заимствования на пиктограмму.
  *
@@ -120,79 +120,105 @@ export function composeAdoptedSvg(baseSvg: string): string {
  * Накладывает значки на пиктограмму.
  *
  * @param kinds Виды значков; каждый стоит в своём углу, поэтому складываются без наложения
- * @param theme Тема пиктограммы: от неё зависит цвет подложки под замком
+ * @param theme Тема пиктограммы: от неё зависит оттенок значка запрета
  */
 export function composeBadgeSvg(baseSvg: string, kinds: readonly BadgeKind[], theme: IconTheme): string {
 	const box = viewBox(baseSvg);
+	const openTag = baseSvg.indexOf('<svg');
+	const bodyStart = openTag < 0 ? -1 : baseSvg.indexOf('>', openTag) + 1;
 	const close = baseSvg.lastIndexOf('</svg>');
-	if (!box || close < 0 || kinds.length === 0) {
+	if (!box || bodyStart <= 0 || close < bodyStart || kinds.length === 0) {
 		return baseSvg;
 	}
-	const badges = kinds.map((kind) => badgeSvg(box, kind, theme)).join('');
-	return baseSvg.slice(0, close) + badges + baseSvg.slice(close);
+	const badges = kinds.map((kind) => badgeSvg(box, kind, theme));
+	const area = `x="${round(box.x)}" y="${round(box.y)}" width="${round(box.width)}" height="${round(box.height)}"`;
+	const mask = (id: string, shapes: string): string =>
+		`\t\t<mask id="${id}" maskUnits="userSpaceOnUse" ${area}>` +
+		`<rect ${area} fill="#FFFFFF"/>${shapes}</mask>\n`;
+	const cuts = badges.map((badge) => badge.cut ?? '').join('');
+	let defs = cuts ? mask('badge-cut', cuts) : '';
+	let paints = '';
+	badges.forEach((badge, index) => {
+		if (badge.hole) {
+			defs += mask(`badge-hole-${index}`, badge.hole);
+			paints += `\t<g mask="url(#badge-hole-${index})">\n${badge.paint}\t</g>\n`;
+		} else {
+			paints += badge.paint;
+		}
+	});
+	let body = baseSvg.slice(bodyStart, close);
+	if (cuts) {
+		body = `\n\t<g mask="url(#badge-cut)">${body}\t</g>\n`;
+	}
+	return (
+		baseSvg.slice(0, bodyStart) +
+		(defs ? `\n\t<defs>\n${defs}\t</defs>` : '') +
+		body +
+		paints +
+		baseSvg.slice(close)
+	);
 }
 
-function badgeSvg(
-	box: { x: number; y: number; width: number; height: number },
-	kind: BadgeKind,
-	theme: IconTheme
-): string {
+function badgeSvg(box: Box, kind: BadgeKind, theme: IconTheme): Badge {
 	const paint = BADGE_KINDS[kind];
 	const color = theme === 'dark' && 'darkColor' in paint ? paint.darkColor : paint.color;
 	if (kind === 'support') {
 		const side = box.width * SUPPORT_GEOMETRY.side;
 		const x = box.x + box.width * SUPPORT_GEOMETRY.centerX - side / 2;
 		const y = box.y + box.height * SUPPORT_GEOMETRY.centerY - side / 2;
-		return (
-			`\t<rect x="${round(x)}" y="${round(y)}" width="${round(side)}" height="${round(side)}"` +
-			` rx="${round(box.width * SUPPORT_GEOMETRY.radius)}" fill="${paint.color}"/>\n`
-		);
+		return {
+			paint:
+				`\t<rect x="${round(x)}" y="${round(y)}" width="${round(side)}" height="${round(side)}"` +
+				` rx="${round(box.width * SUPPORT_GEOMETRY.radius)}" fill="${paint.color}"/>\n`,
+		};
 	}
 	if (kind === 'editingOff') {
 		const centerX = box.x + box.width * EDITING_OFF_GEOMETRY.centerX;
 		const centerY = box.y + box.height * EDITING_OFF_GEOMETRY.centerY;
 		const radius = box.width * EDITING_OFF_GEOMETRY.radius;
-		const bar = box.width * EDITING_OFF_GEOMETRY.bar / 2;
-		return (
-			`	<circle cx="${round(centerX)}" cy="${round(centerY)}" r="${round(radius)}"` +
-			` fill="${color}" stroke="${BADGE_BACKING[theme]}"` +
-			` stroke-width="${round(box.width * EDITING_OFF_GEOMETRY.stroke)}"/>
-` +
-			`	<path d="M ${round(centerX - bar)} ${round(centerY + bar)}` +
-			` L ${round(centerX + bar)} ${round(centerY - bar)}"` +
-			` stroke="${BADGE_BACKING[theme]}" stroke-width="${round(box.width * EDITING_OFF_GEOMETRY.stroke)}"` +
-			` stroke-linecap="round" fill="none"/>
-`
-		);
+		const bar = (box.width * EDITING_OFF_GEOMETRY.bar) / 2;
+		const stroke = box.width * EDITING_OFF_GEOMETRY.stroke;
+		return {
+			paint: `\t<circle cx="${round(centerX)}" cy="${round(centerY)}" r="${round(radius)}" fill="${color}"/>\n`,
+			cut: `<circle cx="${round(centerX)}" cy="${round(centerY)}" r="${round(radius + stroke / 2)}" fill="#000000"/>`,
+			hole:
+				`<path d="M ${round(centerX - bar)} ${round(centerY + bar)}` +
+				` L ${round(centerX + bar)} ${round(centerY - bar)}"` +
+				` stroke="#000000" stroke-width="${round(stroke)}" stroke-linecap="round" fill="none"/>`,
+		};
 	}
 	const cx = box.x + box.width * BADGE_GEOMETRY.centerX;
 	const cy = box.y + box.height * BADGE_GEOMETRY.centerY;
 	if (kind === 'locked') {
-		return (
-			`\t<circle cx="${round(cx)}" cy="${round(cy + box.width * 0.06)}"` +
-			` r="${round(box.width * 0.26)}" fill="${BADGE_BACKING[theme]}"/>\n` +
-			lockBadgeSvg(box, cx, cy, paint.color)
-		);
+		return {
+			paint: lockBadgeSvg(box, cx, cy, paint.color),
+			cut:
+				`<circle cx="${round(cx)}" cy="${round(cy + box.width * 0.06)}"` +
+				` r="${round(box.width * 0.26)}" fill="#000000"/>`,
+		};
 	}
-	// Заимствование: залитый кружок с буквой, вырезанной цветом панели. Тонкий
-	// контур с текстом в размере дерева не читался
+	// Заимствование: залитый кружок с вырезанной буквой. Тонкий контур с текстом в размере
+	// дерева не читался
+	const radius = box.width * BADGE_GEOMETRY.radius;
 	const half = (box.width * BADGE_GEOMETRY.letterHeight) / 2;
 	const side = (box.width * BADGE_GEOMETRY.letterWidth) / 2;
-	return (
-		`\t<circle cx="${round(cx)}" cy="${round(cy)}" r="${round(box.width * BADGE_GEOMETRY.radius)}"` +
-		` fill="${paint.color}" stroke="${BADGE_BACKING[theme]}"` +
-		` stroke-width="${round(box.width * BADGE_GEOMETRY.stroke)}"/>\n` +
-		`\t<path d="M ${round(cx - side)} ${round(cy + half)} L ${round(cx)} ${round(cy - half)}` +
-		` L ${round(cx + side)} ${round(cy + half)} M ${round(cx - side * 0.62)} ${round(cy + half * 0.3)}` +
-		` L ${round(cx + side * 0.62)} ${round(cy + half * 0.3)}"` +
-		` fill="none" stroke="${BADGE_BACKING[theme]}" stroke-width="${round(box.width * 0.055)}"` +
-		` stroke-linecap="round" stroke-linejoin="round"/>\n`
-	);
+	return {
+		paint: `\t<circle cx="${round(cx)}" cy="${round(cy)}" r="${round(radius)}" fill="${paint.color}"/>\n`,
+		cut:
+			`<circle cx="${round(cx)}" cy="${round(cy)}"` +
+			` r="${round(radius + (box.width * BADGE_GEOMETRY.stroke) / 2)}" fill="#000000"/>`,
+		hole:
+			`<path d="M ${round(cx - side)} ${round(cy + half)} L ${round(cx)} ${round(cy - half)}` +
+			` L ${round(cx + side)} ${round(cy + half)} M ${round(cx - side * 0.62)} ${round(cy + half * 0.3)}` +
+			` L ${round(cx + side * 0.62)} ${round(cy + half * 0.3)}"` +
+			` fill="none" stroke="#000000" stroke-width="${round(box.width * 0.055)}"` +
+			` stroke-linecap="round" stroke-linejoin="round"/>`,
+	};
 }
 
 /** Маленький замок: дужка и корпус в правом верхнем углу пиктограммы. */
 function lockBadgeSvg(
-	box: { x: number; y: number; width: number; height: number },
+	box: Box,
 	cx: number,
 	cy: number,
 	color: string
@@ -241,7 +267,7 @@ function composedIconPath(
 	kinds: readonly BadgeKind[]
 ): string | undefined {
 	const suffix = kinds.join('-');
-	// Тема в ключе: подложка под замком у светлой и тёмной разная, даже когда
+	// Тема в ключе: значок запрета у светлой и тёмной разный, даже когда
 	// пиктограмма у них одна
 	const cacheKey = `${suffix} ${variant} ${baseFsPath}`;
 	if (composedIcons.has(cacheKey)) {

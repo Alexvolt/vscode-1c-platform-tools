@@ -155,13 +155,13 @@ async function loadHtml(
 	const nonce = randomUUID();
 	const initialJson = JSON.stringify(info).replaceAll('<', String.raw`\u003c`);
 	return template
-		.replaceAll('{{CSP_SOURCE}}', webview.cspSource)
-		.replaceAll('{{NONCE}}', nonce)
-		.replaceAll('{{BASE_CSS_URI}}', baseCssUri.toString())
-		.replaceAll('{{CSS_URI}}', cssUri.toString())
-		.replaceAll('{{JS_URI}}', jsUri.toString())
-		.replaceAll('{{TITLE}}', escapeHtml(title))
-		.replaceAll('{{INITIAL_JSON}}', initialJson);
+		.replaceAll('{{CSP_SOURCE}}', () => webview.cspSource)
+		.replaceAll('{{NONCE}}', () => nonce)
+		.replaceAll('{{BASE_CSS_URI}}', () => baseCssUri.toString())
+		.replaceAll('{{CSS_URI}}', () => cssUri.toString())
+		.replaceAll('{{JS_URI}}', () => jsUri.toString())
+		.replaceAll('{{TITLE}}', () => escapeHtml(title))
+		.replaceAll('{{INITIAL_JSON}}', () => initialJson);
 }
 
 function escapeHtml(value: string): string {

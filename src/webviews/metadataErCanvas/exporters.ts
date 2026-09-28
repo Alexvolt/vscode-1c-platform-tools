@@ -13,6 +13,7 @@ import type { Core, EdgeSingular, NodeSingular } from 'cytoscape';
 import { exportDrawio } from '../../features/metadata/er/erExporters/drawioExporter';
 import { exportMermaid } from '../../features/metadata/er/erExporters/mermaidExporter';
 import type { ErExportFormat, ErExportRequest, ErExportResult } from '../../features/metadata/er/erTypes';
+import { boxExit, type NodeBox } from './geometry';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -65,13 +66,6 @@ function getBgColor(): string {
 	return value || '#1e1e1e';
 }
 
-interface NodeBox {
-	readonly x: number;
-	readonly y: number;
-	readonly width: number;
-	readonly height: number;
-}
-
 function nodeBox(node: NodeSingular): NodeBox {
 	const bb = node.boundingBox({ includeLabels: true });
 	return { x: bb.x1, y: bb.y1, width: bb.w, height: bb.h };
@@ -111,7 +105,7 @@ function buildSvg(cy: Core): string {
 	setAttrs(marker, {
 		id: 'arrow',
 		viewBox: '0 0 10 10',
-		refX: '9',
+		refX: '10',
 		refY: '5',
 		markerWidth: '8',
 		markerHeight: '8',
@@ -127,8 +121,9 @@ function buildSvg(cy: Core): string {
 		if (!source || !target || source.length === 0 || target.length === 0) {
 			return;
 		}
-		const sp = source.position();
-		const tp = target.position();
+		// Концы связи на краях узлов: от центра к центру стрелку закрыл бы прямоугольник цели
+		const sp = boxExit(nodeBox(source), target.position());
+		const tp = boxExit(nodeBox(target), source.position());
 		const x1 = sp.x + offsetX;
 		const y1 = sp.y + offsetY;
 		const x2 = tp.x + offsetX;

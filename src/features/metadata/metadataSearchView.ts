@@ -13,9 +13,14 @@ const INPUT_DEBOUNCE_MS = 250;
 export class MetadataSearchViewProvider implements vscode.WebviewViewProvider {
 	private _view: vscode.WebviewView | undefined;
 
+	/**
+	 * @param _currentQuery Запрос, которым сейчас отобрано дерево. Скрытая панель теряет
+	 * страницу, VS Code загружает её заново, и поле берёт запрос отсюда
+	 */
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
-		private readonly _onQueryChanged: (query: string) => void
+		private readonly _onQueryChanged: (query: string) => void,
+		private readonly _currentQuery: () => string = () => ''
 	) {}
 
 	resolveWebviewView(view: vscode.WebviewView): void {
@@ -23,7 +28,11 @@ export class MetadataSearchViewProvider implements vscode.WebviewViewProvider {
 		view.webview.options = { enableScripts: true, localResourceRoots: [this._extensionUri] };
 		view.webview.html = this.html();
 		view.webview.onDidReceiveMessage((msg: unknown) => {
-			if (typeof msg === 'object' && msg !== null && (msg as { type?: string }).type === 'search') {
+			const type = typeof msg === 'object' && msg !== null ? (msg as { type?: string }).type : undefined;
+			if (type === 'ready') {
+				this.showQuery(this._currentQuery());
+			}
+			if (type === 'search') {
 				const query = (msg as { query?: unknown }).query;
 				this._onQueryChanged(typeof query === 'string' ? query : '');
 			}
@@ -67,7 +76,7 @@ export class MetadataSearchViewProvider implements vscode.WebviewViewProvider {
 		box-sizing: border-box;
 		padding: 3px 22px 3px 6px;
 		border-radius: 2px;
-		border: 1px solid var(--vscode-input-border, transparent);
+		border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 		background: var(--vscode-input-background);
 		color: var(--vscode-input-foreground);
 		font-family: inherit;
@@ -143,6 +152,7 @@ export class MetadataSearchViewProvider implements vscode.WebviewViewProvider {
 				clearBtn.classList.toggle('hidden', input.value.length === 0);
 			}
 		});
+		vscodeApi.postMessage({ type: 'ready' });
 	</script>
 </body>
 </html>`;

@@ -64,6 +64,21 @@ suite('Просмотр формы: разметка и скрипт', () => {
 		}
 	});
 
+	test('данные подставляются в шаблоны функцией, а не строкой замены', () => {
+		// В строке замены работают шаблоны $` $' $& $$: «Цена в $`» в синониме ломает скрипт панели
+		const featuresRoot = path.resolve(__dirname, '../../..', 'src', 'features');
+		const files = (fs.readdirSync(featuresRoot, { recursive: true }) as string[]).filter((name) => name.endsWith('.ts'));
+		const unsafe: string[] = [];
+		for (const name of files) {
+			const text = fs.readFileSync(path.join(featuresRoot, name), 'utf8');
+			for (const match of text.matchAll(/\.replaceAll\('\{\{(\w+)\}\}', (?!\(\) =>|')/g)) {
+				unsafe.push(`${name}: ${match[1]}`);
+			}
+		}
+		assert.deepStrictEqual(unsafe, []);
+		assert.strictEqual('{{X}}'.replaceAll('{{X}}', () => 'Цена в $`'), 'Цена в $`');
+	});
+
 	test('наборы видов элементов названы теми же видами, что и список видов', () => {
 		const script = read('form-viewer.js');
 		const known = new Set(listBetween(script, 'const TYPE_LABELS', '\n\t};', /(\w+):/g));

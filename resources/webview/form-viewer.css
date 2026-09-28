@@ -5,6 +5,13 @@ body {
 	font-size: var(--vscode-font-size);
 	color: var(--vscode-foreground);
 	background: var(--vscode-editor-background);
+	/* Цвет выбора: основная кнопка непрозрачна во всех темах; в контрастной тёмной она чёрная,
+	   там рамка активного элемента */
+	--pick: var(--vscode-button-background);
+}
+
+body.vscode-high-contrast {
+	--pick: var(--vscode-contrastActiveBorder);
 }
 
 .form-page {
@@ -128,6 +135,7 @@ body {
 
 .pane-tabs {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 2px;
 	padding: 4px 6px 0 6px;
 	border-bottom: 1px solid var(--vscode-panel-border);
@@ -154,7 +162,7 @@ body {
 
 .pane-tab.is-active {
 	opacity: 1;
-	border-bottom-color: var(--vscode-focusBorder);
+	border-bottom-color: var(--pick);
 }
 
 .pane-body {
@@ -201,6 +209,8 @@ body {
 .tree-row.is-selected {
 	background: var(--vscode-list-activeSelectionBackground);
 	color: var(--vscode-list-activeSelectionForeground);
+	outline: 1px dotted var(--vscode-contrastActiveBorder, transparent);
+	outline-offset: -1px;
 }
 
 .tree-twisty {
@@ -606,7 +616,7 @@ body {
 }
 
 .pv-button {
-	border: 1px solid var(--vscode-button-border, transparent);
+	border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-button-border, transparent));
 	background: var(--vscode-button-secondaryBackground, var(--vscode-badge-background));
 	color: var(--vscode-button-secondaryForeground, var(--vscode-badge-foreground));
 	border-radius: 3px;
@@ -762,7 +772,7 @@ body {
 }
 
 .pv-selected {
-	outline: 1px solid var(--vscode-focusBorder);
+	outline: 2px solid var(--pick);
 	outline-offset: 1px;
 }
 

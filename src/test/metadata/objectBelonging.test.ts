@@ -25,12 +25,15 @@ suite('Принадлежность объекта расширения', () => 
 	test('значок встаёт в правый верхний угол холста', () => {
 		const marked = composeAdoptedSvg(icon('0 0 48 48'));
 
-		// Кружок с буквой, вырезанной цветом панели: контур с текстом в размере дерева не читался
+		// Кружок с вырезанной буквой: контур с текстом в размере дерева не читался
 		assert.ok(marked.includes('fill="#E1B74D"'), 'значка нет в разметке');
-		assert.ok(marked.includes('stroke="#F3F3F3"'), 'у значка нет подложки');
+		assert.ok(marked.includes('mask="url(#badge-hole-0)"'), 'буква не вырезана из значка');
 		assert.ok(attr(marked, 'cx') > 24 && attr(marked, 'cx') < 48, 'значок ушёл из правой половины');
 		assert.ok(attr(marked, 'cy') > 0 && attr(marked, 'cy') < 24, 'значок ушёл из верхней половины');
-		assert.ok(marked.indexOf('<circle') > marked.indexOf('<path'), 'значок должен лежать поверх пиктограммы');
+		assert.ok(
+			marked.indexOf('fill="#E1B74D"') > marked.indexOf('<path d="M6'),
+			'значок должен лежать поверх пиктограммы'
+		);
 	});
 
 	test('значок считается по холсту, а не по одному размеру', () => {
@@ -48,9 +51,9 @@ suite('Принадлежность объекта расширения', () => 
 	});
 });
 
-/** Число атрибута у первого элемента указанного вида. */
+/** Число атрибута у первого нарисованного элемента указанного вида: маски в `defs` пропускаются. */
 function shapeAttr(svg: string, shape: string, name: string): number {
-	const at = svg.indexOf(`<${shape}`);
+	const at = svg.indexOf(`<${shape}`, Math.max(0, svg.indexOf('</defs>')));
 	assert.ok(at >= 0, `в разметке нет ${shape}`);
 	const found = new RegExp(`${name}="([-\\d.]+)"`).exec(svg.slice(at));
 	assert.ok(found, `у ${shape} нет ${name}`);
@@ -84,14 +87,16 @@ suite('Значки поддержки на пиктограмме', () => {
 		assert.ok(marked.includes('#E8952D'), 'замок не янтарный');
 	});
 
-	test('под замком подложка цвета панели, своя на каждую тему', () => {
-		// Пиктограммы монохромные: без подложки значок садится на заливку того же тона
-		const dark = composeBadgeSvg(icon('0 0 48 48'), ['locked'], 'dark');
-		const light = composeBadgeSvg(icon('0 0 48 48'), ['locked'], 'light');
+	test('под замком пиктограмма вырезана, а не закрашена цветом панели', () => {
+		// Пиктограммы монохромные: без выреза значок садится на заливку того же тона. Цвет
+		// панели зависит от темы и выделения, поэтому кольцо прозрачное
+		const marked = composeBadgeSvg(icon('0 0 48 48'), ['locked'], 'light');
+		const base = marked.indexOf('<path d="M6');
 
-		assert.ok(dark.includes('#252526'), 'в тёмной теме нет подложки');
-		assert.ok(light.includes('#F3F3F3'), 'в светлой теме нет подложки');
-		assert.ok(dark.indexOf('<circle') < dark.indexOf('<path d="M '), 'подложка должна лежать под замком');
+		assert.ok(marked.lastIndexOf('<g mask="url(#badge-cut)">', base) >= 0, 'пиктограмма не под маской');
+		assert.ok(marked.indexOf('<circle') < base, 'вырез должен быть в маске, а не поверх пиктограммы');
+		assert.ok(!/#F3F3F3|#252526/.test(marked), 'подложка цвета панели');
+		assert.ok(marked.indexOf('<path d="M ', base) > base, 'замок должен лежать поверх пиктограммы');
 	});
 
 	test('третий значок: изменение конфигурации не включено', () => {

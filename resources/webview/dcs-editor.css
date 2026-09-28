@@ -8,16 +8,16 @@
 	resize: vertical;
 	background: var(--vscode-input-background);
 	color: var(--vscode-input-foreground);
-	border: 1px solid var(--vscode-input-border);
+	border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 	border-radius: 2px;
 	padding: 8px;
 	font-family: var(--vscode-editor-font-family, monospace);
 	font-size: var(--vscode-editor-font-size, 13px);
-	outline: none;
 	box-sizing: border-box;
 }
 .dcs-query:focus {
-	border-color: var(--vscode-focusBorder);
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
 }
 .dcs-actions {
 	margin-top: 8px;
@@ -35,11 +35,11 @@
 .dcs-add-grid input {
 	background: var(--vscode-input-background);
 	color: var(--vscode-input-foreground);
-	border: 1px solid var(--vscode-input-border);
+	border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
 	border-radius: 2px;
 	padding: 4px 8px;
-	outline: none;
 }
 .dcs-add-grid input:focus {
-	border-color: var(--vscode-focusBorder);
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
 }

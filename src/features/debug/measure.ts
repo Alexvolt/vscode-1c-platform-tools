@@ -153,13 +153,13 @@ function updateStatusBar(): void {
 
 function applyDecorations(): void {
 	if (!decorationType) {
-		// Колонка фиксированной ширины на каждой строке (пустая — где данных нет):
+		// Колонка одной ширины на каждой строке (пустая — где данных нет):
 		// код всех строк сдвигается одинаково и не ломает выравнивание.
+		// Ширину задаёт каждая декорация: она своя у каждого модуля.
 		decorationType = vscode.window.createTextEditorDecorationType({
 			before: {
 				color: new vscode.ThemeColor('editorCodeLens.foreground'),
 				margin: '0 1.5em 0 0',
-				width: '21ch',
 			},
 		});
 	}
@@ -178,25 +178,26 @@ function buildDecorations(document: vscode.TextDocument): vscode.DecorationOptio
 		return [];
 	}
 
-	const total = results!.totalSeconds;
 	const byLine = new Map(module.lines.map((l) => [l.line - 1, l]));
+	const labels = new Map(module.lines.map((l) => [l.line - 1, measureLabel(l, results!.totalSeconds)]));
+	// Колонка по самой длинной подписи модуля: короче она наезжала бы на код
+	const width = `${Math.max(0, ...[...labels.values()].map((label) => label.length)) + 1}ch`;
 	const options: vscode.DecorationOptions[] = [];
 	for (let line0 = 0; line0 < document.lineCount; line0++) {
 		const line = byLine.get(line0);
 		if (!line) {
 			options.push({
 				range: new vscode.Range(line0, 0, line0, 0),
-				renderOptions: { before: { contentText: '' } },
+				renderOptions: { before: { contentText: '', width } },
 			});
 			continue;
 		}
-		const percent = total > 0 ? ((line.seconds / total) * 100).toFixed(1) : '0.0';
-		const server = line.serverCall ? ' ⚡' : '';
 		options.push({
 			range: new vscode.Range(line0, 0, line0, 0),
 			renderOptions: {
 				before: {
-					contentText: `${line.count} × ${formatSeconds(line.seconds)} · ${percent} %${server}`,
+					contentText: labels.get(line0),
+					width,
 				},
 			},
 			hoverMessage: new vscode.MarkdownString(
@@ -208,6 +209,21 @@ function buildDecorations(document: vscode.TextDocument): vscode.DecorationOptio
 		});
 	}
 	return options;
+}
+
+/**
+ * Подпись замера строки.
+ *
+ * Молния с селектором текстового начертания: без него она рисуется цветным эмодзи
+ * шире символа.
+ */
+export function measureLabel(
+	line: Pick<MeasureLine, 'count' | 'seconds' | 'serverCall'>,
+	totalSeconds: number
+): string {
+	const percent = totalSeconds > 0 ? ((line.seconds / totalSeconds) * 100).toFixed(1) : '0.0';
+	const server = line.serverCall ? ' \u26A1\uFE0E' : '';
+	return `${line.count} × ${formatSeconds(line.seconds)} · ${percent} %${server}`;
 }
 
 function samePath(left: string, right: string): boolean {
