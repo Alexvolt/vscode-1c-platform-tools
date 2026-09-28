@@ -10,6 +10,7 @@ import {
 	externalKindOfHead,
 	invalidateProjectLayout,
 	invalidateProjectLayoutsContaining,
+	invalidateProjectLayoutsForFile,
 	isTestPath,
 	markerIn,
 	resolveProjectLayout,
@@ -184,6 +185,34 @@ suite('раскладка проекта', () => {
 		// Каталог вне корней ничьим не считается
 		assert.strictEqual(rootOfDirectory(layout, path.join(EDT_WORKSPACE, 'dp')), undefined);
 		assert.strictEqual(rootOfDirectory(layout, EDT_WORKSPACE), undefined);
+	});
+
+	test('проект EDT в корне: тестовые расширения и обработки лежат в его каталоге тестов', async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), 'edt-root-'));
+		try {
+			fs.cpSync(path.join(EDT_WORKSPACE, 'ssl31'), root, { recursive: true });
+			fs.cpSync(path.join(EDT_WORKSPACE, 'tests'), path.join(root, 'tests'), { recursive: true });
+			const layout = await resolveProjectLayout(root);
+
+			assert.strictEqual(layout.configuration?.dir, root);
+			assert.deepStrictEqual(layout.testExtensions.map((item) => relative(root, item.dir)), ['tests/cfe/yaxunit-test']);
+			assert.deepStrictEqual(layout.testProcessors.map((item) => item.name), ['Тесты_Арифметика']);
+			const testExtension = path.join(root, 'tests', 'cfe', 'yaxunit-test');
+			assert.strictEqual(rootOfDirectory(layout, path.join(testExtension, 'src'))?.dir, testExtension);
+
+			// Новое тестовое расширение сбрасывает раскладку, файл метаданных конфигурации нет
+			assert.strictEqual(
+				invalidateProjectLayoutsForFile(path.join(root, 'src', 'Catalogs', 'Валюты', 'Валюты.mdo')),
+				false
+			);
+			assert.strictEqual(
+				invalidateProjectLayoutsForFile(path.join(root, 'tests', 'cfe', 'YAXUNIT', 'src', 'Configuration', 'Configuration.mdo')),
+				true
+			);
+		} finally {
+			invalidateProjectLayout(root);
+			fs.rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	test('вложенность каталогов: тот же, внутри, снаружи и сосед с общим началом', () => {

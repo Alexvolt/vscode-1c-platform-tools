@@ -540,6 +540,17 @@ async function walkProjectDirectory(root: string, skip: ReadonlySet<string>, sto
 }
 
 /**
+ * Каталог тестов внутри конфигурации: обход заходит в него, когда конфигурация
+ * лежит в самом корне обхода, например проект EDT с `packagedef`. Каталог лежит
+ * вне `src` и метаданными конфигурации не считается.
+ *
+ * @returns Каталог либо undefined у расширения
+ */
+function testsInsideConfiguration(root: SourceRoot): string | undefined {
+	return root.isExtension ? undefined : path.join(root.dir, testsDirectoryName(root.dir));
+}
+
+/**
  * Обход дерева: найденный корень не обходится, остальное идёт до конца, поэтому
  * расширение из репозитория, вложенного в каталог расширений, находится вместе с остальными.
  * Подпроект ниже корня обхода обходится своим обходом.
@@ -555,6 +566,11 @@ async function walk(root: string, skip: ReadonlySet<string>, stops: ReadonlySet<
 	const here = await readRoot(root);
 	if (here) {
 		found.roots.push(here);
+		// Конфигурация в корне обхода сама проект 1С: каталог тестов лежит в ней, как у выгрузки в каталоге проекта
+		const tests = top ? testsInsideConfiguration(here) : undefined;
+		if (tests !== undefined && fssync.existsSync(tests)) {
+			await walk(tests, skip, stops, found, false);
+		}
 		return;
 	}
 	let entries: fssync.Dirent[];
@@ -690,11 +706,6 @@ function excludedFromEntry(entry: CacheEntry, directory: string): boolean {
 	return hasSkippedSegment(relative, entry.skip) || [...entry.stops].some((stop) => sameOrUnder(directory, stop));
 }
 
-/** Корни конфигураций и расширений, в которые обход не заходит. */
-function sourceRootsOf(layout: ProjectLayout): SourceRoot[] {
-	return [...(layout.configuration ? [layout.configuration] : []), ...layout.others, ...layout.extensions, ...layout.testExtensions];
-}
-
 /** Каталоги внешних объектов обоих форматов. */
 function externalDirectoriesOf(layout: ProjectLayout): string[] {
 	return externalObjectsOf(layout).map((item) => item.dir);
@@ -710,7 +721,7 @@ function externalObjectsOf(layout: ProjectLayout): Array<{ dir: string; format: 
 
 /**
  * Видит ли законченный обход файл описания: файл вне подпроектов и найденных
- * корней, описание найденной конфигурации или расширения, описание в верхних
+ * корней или в каталоге тестов конфигурации, описание найденной конфигурации или расширения, описание в верхних
  * каталогах внешнего объекта. Файл подпроекта проекта видит, если его видит обход подпроекта.
  */
 function layoutSeesFile(layout: ProjectLayout, file: string): boolean {
@@ -722,8 +733,10 @@ function layoutSeesFile(layout: ProjectLayout, file: string): boolean {
 	if (layout.subProjects.some((dir) => sameOrUnder(directory, dir))) {
 		return false;
 	}
-	const root = sourceRootsOf(layout).find((item) => sameOrUnder(directory, item.dir));
-	if (root) {
+	// Каталог тестов внутри конфигурации обход проходит, как каталоги вне корней
+	const root = rootOfDirectory(layout, directory);
+	const tests = root === undefined ? undefined : testsInsideConfiguration(root);
+	if (root && !(tests !== undefined && sameOrUnder(directory, tests))) {
 		const key = directoryKey(file);
 		return key === directoryKey(path.join(root.dir, DESIGNER_MARKER)) || key === directoryKey(path.join(root.dir, EDT_MARKER));
 	}
