@@ -1,14 +1,21 @@
 {
   "name": "1c-platform-tools",
   "displayName": "1C: Platform Tools",
-  "description": "Расширение для Visual Studio Code с инструментами разработки для экосистемы 1C. Предоставляет удобный интерфейс для работы с проектами 1C, включая разбор обработок, отчетов и конфигураций.",
+  "description": "Разработка на 1С:Предприятии в VS Code (Cursor, Windsurf, VSCodium): проекты конфигуратора, 1С:EDT и OneScript, метаданные, vanessa-runner, тесты, отладка и MCP.",
   "keywords": [
     "1c",
     "1с",
     "1c platform",
     "1c enterprise",
     "1с предприятие",
-    "bsl"
+    "bsl",
+    "edt",
+    "1c edt",
+    "onescript",
+    "oscript",
+    "vanessa-runner",
+    "mcp",
+    "cursor"
   ],
   "version": "0.9.7",
   "publisher": "yellow-hammer",

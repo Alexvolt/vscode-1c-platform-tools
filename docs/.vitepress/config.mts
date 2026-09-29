@@ -89,7 +89,7 @@ export default defineConfig({
 	lang: 'ru-RU',
 	title: '1C: Platform Tools',
 	description:
-		'Расширение Visual Studio Code для разработки 1С: панели инструментов, метаданные, отладка, тестирование, автоматизация, AI и MCP.',
+		'Расширение Visual Studio Code (Cursor, Windsurf, VSCodium) для разработки на 1С: проекты конфигуратора, 1С:EDT и OneScript, метаданные, отладка, тестирование, автоматизация и MCP.',
 	base: '/vscode-1c-platform-tools/',
 	srcExclude: ['README.md'],
 	cleanUrls: true,
