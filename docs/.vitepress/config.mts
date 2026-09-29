@@ -75,6 +75,16 @@ const guides = [
 	{ text: 'Сочетания клавиш', link: '/keyboard' },
 ];
 
+// Якоря заголовков как на GitHub, где ссылки docs тоже работают
+const slugify = (text: string): string =>
+	text
+		.normalize('NFC')
+		.trim()
+		.toLowerCase()
+		.replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, '')
+		.replace(/ /g, '-')
+		.replace(/^(\d)/, '_$1');
+
 export default defineConfig({
 	lang: 'ru-RU',
 	title: '1C: Platform Tools',
@@ -85,6 +95,7 @@ export default defineConfig({
 	cleanUrls: true,
 	lastUpdated: true,
 	head: [['link', { rel: 'icon', type: 'image/png', href: '/vscode-1c-platform-tools/favicon.png' }]],
+	markdown: { anchor: { slugify } },
 	vite: { plugins: [sharedAssetsPlugin()] },
 	async buildEnd(siteConfig) {
 		for (const [name, source] of Object.entries(sharedAssets)) {
