@@ -21,7 +21,7 @@ import { projectConfiguration } from '../../shared/projectConfiguration';
 import {
 	currentRoot,
 	onDidChangeCurrentProject,
-	outsideProject,
+	onDidChangeProjects,
 	projectsSnapshot,
 	sameProjectRoot,
 	workspaceFolderOf,
@@ -29,11 +29,7 @@ import {
 import { inCurrentProject, projectLabel } from '../../commands/projectScope';
 import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 import type { StructuredCommandResult } from '../../shared/commandExecutionTypes';
-
-/** Изменяемая ссылка на признак проекта 1С. */
-interface ProjectRef {
-	current: boolean;
-}
+import { launchStatusVisible } from './launchStatusScope';
 
 /**
  * Открывает один из адресов публикации во внешнем браузере.
@@ -408,13 +404,9 @@ function stateLabel(state: ServerState): string {
  * Регистрирует фичу автономного сервера: менеджер, статус-бар, команды.
  *
  * @param context - Контекст расширения
- * @param isProjectRef - Изменяемая ссылка на признак проекта 1С
  * @returns Массив Disposable
  */
-export function registerPlatformServerFeature(
-	context: vscode.ExtensionContext,
-	isProjectRef: ProjectRef
-): vscode.Disposable[] {
+export function registerPlatformServerFeature(context: vscode.ExtensionContext): vscode.Disposable[] {
 	const vrunner = VRunnerManager.getInstance(context);
 	const manager = new PlatformServerManager(vrunner, context);
 	const debugSessions = new ServerDebugSessions(manager);
@@ -428,7 +420,7 @@ export function registerPlatformServerFeature(
 	statusItem.command = '1c-platform-tools.server.menu';
 
 	const refresh = (): void => {
-		if (!isProjectRef.current || (manager.ownerRoot === undefined && outsideProject(() => currentRoot()) === undefined)) {
+		if (manager.ownerRoot === undefined && !launchStatusVisible(vrunner)) {
 			statusItem.hide();
 			return;
 		}
@@ -459,6 +451,8 @@ export function registerPlatformServerFeature(
 		vrunner.onDidChangeVRunnerVersion(() => void manager.onActiveProfileChanged()),
 		// Сервер при смене проекта продолжает работать для своего проекта
 		onDidChangeCurrentProject(() => refresh()),
+		onDidChangeProjects(() => refresh()),
+		vscode.window.onDidChangeActiveTextEditor(() => refresh()),
 		vscode.commands.registerCommand('1c-platform-tools.server.menu', uiOnlyHandler('Меню сервера открывается пользователем; агенту доступны server.start, server.stop, server.restart.', inCurrentProject(() => showServerMenu(manager, debugSessions)))),
 		vscode.commands.registerCommand('1c-platform-tools.server.start', inCurrentProject((arg?: unknown) =>
 			isAgentOptions(arg) ? startForAgent(manager, debugSessions) : startServer(manager, debugSessions)

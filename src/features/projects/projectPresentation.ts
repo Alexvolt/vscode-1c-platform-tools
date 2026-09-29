@@ -3,9 +3,13 @@
  * @module projects/projectPresentation
  */
 
+import * as path from 'node:path';
 import { SOURCE_FORMAT_LABELS } from '../../shared/activeConfiguration';
+import { PROJECT_KIND_LABELS } from '../../shared/projectKind';
 import type { SourceRoot } from '../../shared/projectLayout';
 import {
+	isFolderRootProject,
+	packagedefTargetDir,
 	projectDisplayName,
 	sameProjectRoot,
 	type ProjectCandidate,
@@ -19,6 +23,27 @@ export function isCurrentProject(project: WorkspaceProject, selectedRoot: string
 	return selectedRoot !== undefined && sameProjectRoot(project.root, selectedRoot);
 }
 
+/** Относительный путь через `/`. */
+function relativeLocation(from: string, to: string): string {
+	return path.relative(from, to).split(path.sep).join('/');
+}
+
+/** Проекты в корне папок рабочей области, затем найденные внутри папок; порядок внутри частей прежний. */
+export function folderRootProjectsFirst<T extends WorkspaceProject>(projects: readonly T[]): T[] {
+	return [...projects.filter(isFolderRootProject), ...projects.filter((project) => !isFolderRootProject(project))];
+}
+
+/**
+ * Каталог проекта, найденного обходом в папке без `packagedef`, от каталога над
+ * папкой рабочей области: `папка/fixtures` у `папка/fixtures/проект`. У проекта в
+ * корне папки и у подпроекта его нет.
+ */
+export function nestedProjectLocation(project: WorkspaceProject): string | undefined {
+	return project.subProject || isFolderRootProject(project)
+		? undefined
+		: relativeLocation(path.dirname(project.folder), path.dirname(project.root));
+}
+
 /** Формат и имя конфигурации. */
 export function configurationParts(configuration: SourceRoot | undefined): string[] {
 	if (!configuration) {
@@ -27,16 +52,25 @@ export function configurationParts(configuration: SourceRoot | undefined): strin
 	return [SOURCE_FORMAT_LABELS[configuration.format], configuration.name].filter((part) => part.length > 0);
 }
 
+/** Формат и имя конфигурации проекта, а без конфигурации его вид. */
+function projectKindParts(project: WorkspaceProject): string[] {
+	if (project.configuration) {
+		return configurationParts(project.configuration);
+	}
+	return project.kind ? [PROJECT_KIND_LABELS[project.kind]] : [];
+}
+
 /** Что добавить в описание строки проекта. */
 export interface ProjectDescriptionDetails {
-	/** Путь подпроекта от корневого проекта. */
+	/** Путь подпроекта от корневого проекта или {@link nestedProjectLocation}. */
 	location?: string;
 	/** Имя активного профиля. */
 	profile?: string;
 }
 
 /**
- * Описание строки проекта: «текущий», путь от корневого проекта, формат, конфигурация, профиль.
+ * Описание строки проекта: «текущий», путь от корневого проекта, формат и
+ * конфигурация или вид проекта, профиль.
  *
  * @param project - Проект
  * @param current - Проект текущий
@@ -46,12 +80,12 @@ export function projectDescription(project: WorkspaceProject, current: boolean, 
 	return [
 		...(current ? ['текущий'] : []),
 		...(details.location ? [details.location] : []),
-		...configurationParts(project.configuration),
+		...projectKindParts(project),
 		...(details.profile ? [details.profile] : []),
 	].join(SEPARATOR);
 }
 
-/** Подсказка проекта: путь, формат, конфигурация. */
+/** Подсказка проекта: путь, формат и конфигурация или вид проекта. */
 export function projectTooltip(project: WorkspaceProject): string {
 	const lines = [project.root];
 	if (project.configuration) {
@@ -59,6 +93,8 @@ export function projectTooltip(project: WorkspaceProject): string {
 		if (project.configuration.name) {
 			lines.push(`Конфигурация: ${project.configuration.name}`);
 		}
+	} else if (project.kind) {
+		lines.push(`Вид: ${PROJECT_KIND_LABELS[project.kind]}`);
 	}
 	return lines.join('\n');
 }
@@ -68,10 +104,19 @@ export function candidateName(candidate: ProjectCandidate): string {
 	return candidate.displayName ?? candidate.name;
 }
 
+/** Каталог конфигурации папки без `packagedef`, когда `packagedef` для неё ставится не в корень папки. */
+function candidateConfigurationLocation(candidate: ProjectCandidate): string | undefined {
+	return candidate.kind === 'folder' && !sameProjectRoot(packagedefTargetDir(candidate.configuration), candidate.root)
+		? relativeLocation(candidate.root, candidate.configuration.dir)
+		: undefined;
+}
+
 /** Описание не проекта. */
 export function candidateDescription(candidate: ProjectCandidate): string {
+	const location = candidateConfigurationLocation(candidate);
 	return [
 		...(candidate.kind === 'extraConfiguration' ? ['вторая конфигурация'] : []),
+		...(location ? [location] : []),
 		...configurationParts(candidate.configuration),
 	].join(SEPARATOR);
 }

@@ -1,6 +1,8 @@
 import * as assert from 'node:assert';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { sameProjectRoot } from '../../shared/workspaceProjects';
+import { normalizeProjectRoot, sameProjectRoot, type ProjectCandidate } from '../../shared/workspaceProjects';
+import { candidateDescription } from '../../features/projects/projectPresentation';
 import {
 	WorkspaceProjectsTreeProvider,
 	type WorkspaceProjectsNode,
@@ -126,6 +128,55 @@ suite('проекты: вид «Рабочая область»', () => {
 			localProvider.dispose();
 			local.instance.dispose();
 			copy.dispose();
+		}
+	});
+
+	test('проекты из папки без packagedef: после проектов в корне папок, значок подмодуля и путь, текущий по умолчанию в корне папки', async () => {
+		const local = await detectedProjects([at('монорепозиторий'), PROJECT]);
+		const localProvider = new WorkspaceProjectsTreeProvider(local.source, profileOf);
+		try {
+			const top = localProvider.getChildren();
+			const icon = (node: WorkspaceProjectsNode) => localProvider.getTreeItem(node).iconPath as vscode.ThemeIcon;
+
+			assert.deepStrictEqual(
+				top.map((node) => row(localProvider, node)),
+				[
+					['проект', 'текущий · Конфигуратор · Основная · dev', 'workspaceProjectCurrent', PROJECT],
+					['библиотека', 'монорепозиторий · Конфигуратор · Библиотека', 'workspaceProject', at('монорепозиторий', 'библиотека')],
+					['приложение', 'монорепозиторий · Конфигуратор · Приложение', 'workspaceProject', at('монорепозиторий', 'приложение')],
+				]
+			);
+			assert.deepStrictEqual(top.map((node) => icon(node).id), ['repo', 'file-submodule', 'file-submodule']);
+			assert.strictEqual(icon(top[1]).color?.id, 'gitDecoration.submoduleResourceForeground');
+
+			const items = projectPickItems(local.source.snapshotNow(), local.source.selectedRoot()).filter((item) => item.kind === undefined);
+			assert.deepStrictEqual(
+				items.map((item) => [item.label, item.description, (item.iconPath as vscode.ThemeIcon | undefined)?.id]),
+				[
+					['проект', 'текущий · Конфигуратор · Основная', 'check'],
+					['подпроект', 'src/cfe/подпроект · Конфигуратор · Подпроект', 'file-submodule'],
+					['библиотека', 'монорепозиторий · Конфигуратор · Библиотека', 'file-submodule'],
+					['приложение', 'монорепозиторий · Конфигуратор · Приложение', 'file-submodule'],
+					['модуль', 'src/cfe/модуль · Конфигуратор · Модуль', 'file-submodule'],
+				]
+			);
+		} finally {
+			localProvider.dispose();
+			local.instance.dispose();
+		}
+	});
+
+	test('проект без конфигурации подписан видом', async () => {
+		const scripts = at('инструменты', 'tools', 'deploy');
+		const local = await detectedProjects([scripts]);
+		const localProvider = new WorkspaceProjectsTreeProvider(local.source, () => undefined);
+		try {
+			const [project] = localProvider.getChildren();
+			assert.deepStrictEqual(row(localProvider, project), ['deploy', 'текущий · OneScript', 'workspaceProjectCurrent', scripts]);
+			assert.strictEqual(localProvider.getTreeItem(project).tooltip, `${scripts}\nВид: OneScript`);
+		} finally {
+			localProvider.dispose();
+			local.instance.dispose();
 		}
 	});
 
@@ -293,6 +344,20 @@ suite('проекты: окно выбора и описание видов', ()
 			local.instance.dispose();
 			copy.dispose();
 		}
+	});
+
+	test('не проект с конфигурацией глубже места packagedef показывает её каталог', () => {
+		const root = normalizeProjectRoot(path.join(path.sep, 'w', 'инструмент'));
+		const candidate = (dir: string): ProjectCandidate => ({
+			root,
+			name: 'инструмент',
+			folder: root,
+			kind: 'folder',
+			configuration: { dir: path.join(root, dir), format: 'designer', name: 'Проверка', isExtension: false },
+		});
+
+		assert.strictEqual(candidateDescription(candidate(path.join('test', 'fixtures', 'cf'))), 'test/fixtures/cf · Конфигуратор · Проверка');
+		assert.strictEqual(candidateDescription(candidate(path.join('src', 'cf'))), 'Конфигуратор · Проверка');
 	});
 
 	test('с одним проектом описание вида пустое', async () => {

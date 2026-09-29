@@ -4,6 +4,7 @@
  */
 
 import type { StructuredCommandResult } from '../../shared/commandExecutionTypes';
+import type { ProjectKind } from '../../shared/projectKind';
 import type { SourceFormat } from '../../shared/projectLayout';
 import { readActiveProfileName } from '../../shared/projectState';
 import {
@@ -21,6 +22,8 @@ export interface ProjectListEntry {
 	name: string;
 	parent?: string;
 	subProject: boolean;
+	/** Вид проекта; нет, пока обнаружение не закончено. */
+	kind?: ProjectKind;
 	format?: SourceFormat;
 	configuration?: string;
 	current: boolean;
@@ -74,6 +77,9 @@ export function buildProjectList(
 		};
 		if (project.parent !== undefined) {
 			entry.parent = project.parent;
+		}
+		if (project.kind) {
+			entry.kind = project.kind;
 		}
 		if (project.configuration) {
 			entry.format = project.configuration.format;

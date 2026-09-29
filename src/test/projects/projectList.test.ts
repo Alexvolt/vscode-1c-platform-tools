@@ -30,7 +30,7 @@ suite('проекты: список и выбор текущего проект�
 		fixture.instance.dispose();
 	});
 
-	test('список: текущий корень, проекты с форматом и конфигурацией, не проекты с видом', async () => {
+	test('список: текущий корень, проекты с видом, форматом и конфигурацией, не проекты с видом', async () => {
 		const result = await listProjectsResult(fixture.source, (root) => (sameProjectRoot(root, PROJECT) ? 'dev' : undefined));
 
 		assert.strictEqual(result.success, true);
@@ -38,9 +38,9 @@ suite('проекты: список и выбор текущего проект�
 		assert.deepStrictEqual(result.data, {
 			current: PROJECT,
 			projects: [
-				{ root: PROJECT, name: 'проект', subProject: false, format: 'designer', configuration: 'Основная', current: true, profile: 'dev' },
-				{ root: SUB_PROJECT, name: 'подпроект', parent: PROJECT, subProject: true, format: 'designer', configuration: 'Подпроект', current: false },
-				{ root: TWO_CONFIGURATIONS, name: 'две-конфигурации', subProject: false, format: 'designer', configuration: 'Первая', current: false },
+				{ root: PROJECT, name: 'проект', subProject: false, kind: 'designer', format: 'designer', configuration: 'Основная', current: true, profile: 'dev' },
+				{ root: SUB_PROJECT, name: 'подпроект', parent: PROJECT, subProject: true, kind: 'designer', format: 'designer', configuration: 'Подпроект', current: false },
+				{ root: TWO_CONFIGURATIONS, name: 'две-конфигурации', subProject: false, kind: 'designer', format: 'designer', configuration: 'Первая', current: false },
 			],
 			candidates: [
 				{ root: NOT_PROJECT, name: 'без-packagedef', kind: 'folder' },

@@ -8,10 +8,13 @@ import { ProjectStorage } from './storage';
 import { StorageProvider } from './storageProvider';
 import { AutodetectProvider } from './autodetectProvider';
 import { TagNode } from './nodes';
+import { ProjectKinds } from './projectKinds';
 
 export class ProjectsProviders {
 	readonly storageProvider: StorageProvider;
 	readonly autodetectProvider: AutodetectProvider;
+	/** Виды проектов для списков. */
+	readonly kinds: ProjectKinds;
 
 	private readonly storageTreeView: vscode.TreeView<vscode.TreeItem>;
 	private readonly autodetectTreeView: vscode.TreeView<vscode.TreeItem>;
@@ -28,8 +31,9 @@ export class ProjectsProviders {
 		this.context = context;
 		this.projectStorage = projectStorage;
 		this.locator = locator;
-		this.storageProvider = new StorageProvider(projectStorage, context, stack);
-		this.autodetectProvider = new AutodetectProvider(locator, stack);
+		this.kinds = new ProjectKinds(context.globalState);
+		this.storageProvider = new StorageProvider(projectStorage, context, stack, this.kinds);
+		this.autodetectProvider = new AutodetectProvider(locator, stack, this.kinds);
 
 		this.storageTreeView = vscode.window.createTreeView('1c-platform-tools-projects-favorites', {
 			treeDataProvider: this.storageProvider,
@@ -41,6 +45,8 @@ export class ProjectsProviders {
 		});
 
 		context.subscriptions.push(
+			this.kinds,
+			this.kinds.onDidChange(() => this.refreshAll()),
 			this.storageTreeView.onDidExpandElement((e) => this.handleStorageExpandChange(e, true)),
 			this.storageTreeView.onDidCollapseElement((e) => this.handleStorageExpandChange(e, false))
 		);

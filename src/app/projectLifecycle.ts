@@ -24,6 +24,8 @@ export interface RegisterProjectCreatedHandlerParams {
 	metadataTreeProvider: RefreshableProvider;
 	/** Пересобрать дерево панели тестирования (проект создан → появились каталоги тестов) */
 	rebuildTesting?: () => void;
+	/** Были ли проекты, когда панели читались впервые. */
+	hadProjects: boolean;
 }
 
 /**
@@ -41,7 +43,7 @@ export async function detectAndSetInitialProjectContext(): Promise<boolean> {
  * Перечитывает панели, когда в окне появился первый проект или пропал последний.
  *
  * Если в том же обнаружении сменился текущий проект, панели обновляются сами по
- * смене проекта.
+ * смене проекта. Проекты, найденные до подписки, сверяются сразу.
  *
  * @returns Подписка на проекты
  */
@@ -49,28 +51,31 @@ export function registerProjectCreatedHandler(
 	params: RegisterProjectCreatedHandlerParams
 ): vscode.Disposable {
 	const { treeDataProvider, artifactsProvider, metadataTreeProvider, rebuildTesting } = params;
-	let hadProjects = hasProjects();
+	let hadProjects = params.hadProjects;
 	let knownRoot = currentRoot();
 
-	return vscode.Disposable.from(
+	const sync = (): void => {
+		const has = hasProjects();
+		if (has === hadProjects) {
+			return;
+		}
+		hadProjects = has;
+		if (!sameRoot(currentRoot(), knownRoot)) {
+			return;
+		}
+		treeDataProvider.refresh();
+		artifactsProvider.refresh();
+		metadataTreeProvider.refresh();
+		rebuildTesting?.();
+	};
+	const subscription = vscode.Disposable.from(
 		onDidChangeCurrentProject((change) => {
 			knownRoot = change.current;
 		}),
-		onDidChangeProjects(() => {
-			const has = hasProjects();
-			if (has === hadProjects) {
-				return;
-			}
-			hadProjects = has;
-			if (!sameRoot(currentRoot(), knownRoot)) {
-				return;
-			}
-			treeDataProvider.refresh();
-			artifactsProvider.refresh();
-			metadataTreeProvider.refresh();
-			rebuildTesting?.();
-		})
+		onDidChangeProjects(sync)
 	);
+	sync();
+	return subscription;
 }
 
 /**

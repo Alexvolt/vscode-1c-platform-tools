@@ -13,7 +13,7 @@ description: Операции с платформой 1С в этом проек
 
 ## Проекты окна
 
-Проект 1С это каталог с `packagedef`; в окне их может быть несколько. Команды выполняются в текущем проекте. Список проектов и текущий проект возвращает `1c-platform-tools.project.list` с аргументом `{ "wait": true }` (MCP `project_list`); без аргумента команда открывает окно выбора у пользователя. Сделать проект текущим можно командой `1c-platform-tools.project.select` с `{ "root": "<корень>" }` (MCP `project_select`): выбор меняется и у пользователя. Каталог без `packagedef`, в том числе из `candidates` списка проектов, делает проектом `1c-platform-tools.project.initialize` с `{ "root": "<каталог>", "wait": true }` (MCP `project_init` с каталогом в `projectPath`). `projectPath` в вызове MCP выполняет одну команду в указанном проекте и текущий не меняет.
+Проект это каталог с `packagedef`; в окне их может быть несколько. Команды выполняются в текущем проекте. Список проектов с их видом (`kind`: `designer`, `edt`, `onec` без исходного кода 1С, `onescript`) и текущий проект возвращает `1c-platform-tools.project.list` с аргументом `{ "wait": true }` (MCP `project_list`); без аргумента команда открывает окно выбора у пользователя. Сделать проект текущим можно командой `1c-platform-tools.project.select` с `{ "root": "<корень>" }` (MCP `project_select`): выбор меняется и у пользователя. Каталог без `packagedef`, в том числе из `candidates` списка проектов, делает проектом `1c-platform-tools.project.initialize` с `{ "root": "<каталог>", "wait": true }` (MCP `project_init` с каталогом в `projectPath`). `projectPath` в вызове MCP выполняет одну команду в указанном проекте и текущий не меняет.
 
 ## Информационные базы
 

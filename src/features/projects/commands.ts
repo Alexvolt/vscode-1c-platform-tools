@@ -110,7 +110,7 @@ export function registerProjectsCommands(
 	// Настроить избранное (QuickPick с флажками)
 	disposables.push(
 		vscode.commands.registerCommand('1c-platform-tools.projects.configureFavorites', async () => {
-			const changed = await pickFavoritesToConfigure(projectStorage, locator, stack);
+			const changed = await pickFavoritesToConfigure(projectStorage, locator, stack, providers.kinds);
 			if (changed) {
 				providers.refreshStorage();
 				notifyQuiet('Избранное обновлено');
@@ -128,7 +128,8 @@ export function registerProjectsCommands(
 				InvocationSource.Palette,
 				stack,
 				context,
-				windowProjects
+				windowProjects,
+				providers.kinds
 			);
 			await openPickedProject(pick, false, InvocationSource.Palette, stack, context, windowProjects);
 		})
@@ -144,7 +145,8 @@ export function registerProjectsCommands(
 				InvocationSource.Palette,
 				stack,
 				context,
-				windowProjects
+				windowProjects,
+				providers.kinds
 			);
 			await openPickedProject(pick, true, InvocationSource.Palette, stack, context, windowProjects);
 		})
@@ -305,7 +307,7 @@ export function registerProjectsCommands(
 				const count = vscode.workspace.workspaceFolders?.length ?? 0;
 				void vscode.workspace.updateWorkspaceFolders(count, 0, { uri });
 			} else {
-				void pickProjects(projectStorage, locator, false, InvocationSource.SideBar, stack, context).then(
+				void pickProjects(projectStorage, locator, false, InvocationSource.SideBar, stack, context, undefined, providers.kinds).then(
 					async (pick) => {
 						if (pick) {
 							const uri = vscode.Uri.file(expandHomePath(pick.item.rootPath));

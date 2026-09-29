@@ -20,6 +20,7 @@ import { runMdSparrowParamsRead, supportEnabled } from './mdSparrowParams';
 import { mdSparrowSchemaFlagFromConfigurationXml } from './mdSparrowSchemaVersion';
 import { offerGithubTokenOnRateLimit } from '../../shared/githubToken';
 import { configurationScope } from '../../shared/activeConfiguration';
+import { detectProjectKind } from '../../shared/projectKind';
 import { currentRoot, outsideProject, sameProjectRoot } from '../../shared/workspaceProjects';
 import { METADATA_EXPANDED_SOURCES_STATE, projectMemento } from '../../shared/projectState';
 import { ADOPTED_HINT, SUPPORT_HINTS, adoptedIcon, initAdoptedIcons, isAdopted, supportIcon } from './objectBelonging';
@@ -1467,6 +1468,8 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 	private readonly _subsystemsBySource = new Map<string, Map<string, MetadataLeafTreeItem>>();
 	/** Конфигурация, чей состав прочитан в дерево. */
 	private _contentConfigurationDir: string | undefined;
+	/** Дерево показывает проект OneScript: метаданных 1С в нём нет. */
+	private _showsOneScript = false;
 
 	constructor(private readonly _context: vscode.ExtensionContext) {
 		initAdoptedIcons(path.join(_context.globalStorageUri.fsPath, 'metadata-tree-icons'));
@@ -1483,15 +1486,15 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		await refreshing;
 	}
 
-	/** Раскладка проекта изменилась: дерево перечитывается, когда сменилась конфигурация проекта. */
+	/** Раскладка проекта изменилась: дерево перечитывается, когда сменилась конфигурация или вид проекта. */
 	async syncWithProjectLayout(): Promise<void> {
 		const root = this._workspaceRoot;
 		if (!root) {
 			return;
 		}
 		try {
-			const scope = await configurationScope(root);
-			if (scope.configuration?.dir !== this._contentConfigurationDir) {
+			const [scope, kind] = await Promise.all([configurationScope(root), detectProjectKind(root)]);
+			if (scope.configuration?.dir !== this._contentConfigurationDir || (kind === 'onescript') !== this._showsOneScript) {
 				await this.refresh();
 			}
 		} catch (e) {
@@ -1634,8 +1637,21 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 
 		const root = this.selectedRoot();
 		this._workspaceRoot = root;
+		this._showsOneScript = false;
 		if (!root) {
 			this._lastError = 'Нет открытой папки workspace';
+			this._onDidChange.fire(undefined);
+			return;
+		}
+
+		const kind = await detectProjectKind(root).catch(() => undefined);
+		if (generation !== this._refreshGeneration) {
+			return;
+		}
+		if (kind === 'onescript') {
+			this._showsOneScript = true;
+			this._contentConfigurationDir = undefined;
+			this._lastError = 'В проекте OneScript нет метаданных 1С';
 			this._onDidChange.fire(undefined);
 			return;
 		}

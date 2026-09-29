@@ -574,16 +574,16 @@ export class PlatformServerManager {
 	 * Реакция на смену активного профиля запуска.
 	 *
 	 * Профиль задаёт строку подключения к ИБ (`--ibconnection`), а автономный
-	 * сервер публикует именно её каталог. При смене профиля конфиг публикации
-	 * проекта перегенерируется под новую ИБ; если сервер этого проекта уже
-	 * запущен на другой базе — пользователю предлагается перезапуск.
+	 * сервер публикует именно её каталог. Конфиг публикации проекта, который
+	 * публикует другую базу, перегенерируется под ИБ профиля; если сервер этого
+	 * проекта уже запущен на другой базе — пользователю предлагается перезапуск.
 	 */
 	public async onActiveProfileChanged(): Promise<void> {
 		const workspaceRoot = currentRoot();
 		if (!workspaceRoot) {
 			return;
 		}
-		await this.regeneratePublicationConfig(workspaceRoot);
+		await this.regeneratePublicationConfig(workspaceRoot, true);
 		this.setState(this._state); // обновить панель/статус под новый профиль
 
 		const owner = this.ownerRoot;
@@ -605,25 +605,34 @@ export class PlatformServerManager {
 	}
 
 	/**
-	 * Перегенерирует файл конфига публикации под текущий выбор сервисов.
+	 * Перегенерирует существующий конфиг публикации под текущий выбор сервисов.
 	 *
-	 * Серверные параметры сохраняются из существующего файла; путь к ИБ берётся из
-	 * активного env-профиля. Если файловой ИБ нет — перегенерация пропускается
-	 * (файл будет создан при следующем запуске).
+	 * Конфига нет, пока сервер не запускали и конфиг не открывали: его создаст
+	 * запуск. Серверные параметры сохраняются из существующего файла; путь к ИБ
+	 * берётся из активного env-профиля. Если файловой ИБ нет — перегенерация
+	 * пропускается.
+	 *
+	 * @param workspaceRoot - Корень проекта
+	 * @param onlyOtherInfobase - Перегенерировать, только когда конфиг публикует не базу профиля
 	 */
-	private async regeneratePublicationConfig(workspaceRoot: string | undefined): Promise<void> {
+	private async regeneratePublicationConfig(workspaceRoot: string | undefined, onlyOtherInfobase = false): Promise<void> {
 		if (!workspaceRoot) {
+			return;
+		}
+		const settings = this.readSettings(workspaceRoot);
+		const configPath = this.getConfigPath(workspaceRoot, settings);
+		const published = await fs.readFile(configPath, 'utf8').then(parseServerConfigParams, () => undefined);
+		if (!published) {
 			return;
 		}
 		const ibPath = await this.resolveFileInfobasePath(workspaceRoot, true);
 		if (!ibPath) {
 			return;
 		}
-		const settings = this.readSettings(workspaceRoot);
-		const dataDir = this.getDataDir(workspaceRoot, settings);
-		const configPath = path.join(dataDir, 'publication.yaml');
+		if (onlyOtherInfobase && published.dbPath !== undefined && sameProjectRoot(published.dbPath, ibPath)) {
+			return;
+		}
 		const params = await this.readConfigParams(configPath, settings);
-		await fs.mkdir(dataDir, { recursive: true });
 		await this.writeConfigFile(
 			configPath,
 			{ host: params.host, port: params.port, base: params.base, distributeLicenses: params.distributeLicenses },

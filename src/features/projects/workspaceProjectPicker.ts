@@ -6,13 +6,20 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
+	isFolderRootProject,
 	projectDisplayName,
 	projectRootKey,
 	type ProjectCandidate,
 	type WorkspaceProject,
 	type WorkspaceProjectsSnapshot,
 } from '../../shared/workspaceProjects';
-import { candidateDescription, candidateName, isCurrentProject, projectDescription } from './projectPresentation';
+import {
+	candidateDescription,
+	candidateName,
+	isCurrentProject,
+	nestedProjectLocation,
+	projectDescription,
+} from './projectPresentation';
 import type { WorkspaceProjectsSource } from './workspaceProjectsSource';
 
 /** Что выбрано в окне. */
@@ -31,7 +38,7 @@ interface ProjectGroup {
 	subProjects: WorkspaceProject[];
 }
 
-/** Проекты по корневым проектам в порядке списка. */
+/** Проекты по корневым проектам: сначала группы проектов в корне папок, затем найденных внутри папок. */
 function projectGroups(projects: readonly WorkspaceProject[]): ProjectGroup[] {
 	const byKey = new Map(projects.map((project) => [projectRootKey(project.root), project]));
 	const topOf = (project: WorkspaceProject): WorkspaceProject => {
@@ -55,7 +62,8 @@ function projectGroups(projects: readonly WorkspaceProject[]): ProjectGroup[] {
 			group.subProjects.push(project);
 		}
 	}
-	return [...groups.values()];
+	const ordered = [...groups.values()];
+	return [...ordered.filter((group) => isFolderRootProject(group.root)), ...ordered.filter((group) => !isFolderRootProject(group.root))];
 }
 
 /** Путь подпроекта от корневого проекта через `/`. */
@@ -82,8 +90,10 @@ export function workspaceProjectItems(
 		const top = project === group.root;
 		return {
 			label: top ? projectDisplayName(project, snapshot.projects) : project.name,
-			description: projectDescription(project, current, top ? {} : { location: locationIn(group.root, project) }),
-			iconPath: new vscode.ThemeIcon(current ? 'check' : top ? 'repo' : 'file-submodule'),
+			description: projectDescription(project, current, {
+				location: top ? nestedProjectLocation(project) : locationIn(group.root, project),
+			}),
+			iconPath: new vscode.ThemeIcon(current ? 'check' : isFolderRootProject(project) ? 'repo' : 'file-submodule'),
 			pick: { kind: 'project', root: project.root },
 		};
 	};

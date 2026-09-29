@@ -10,6 +10,8 @@ import { UNTAGGED_LABEL } from './constants';
 import { type FavoriteEntry, ProjectStorage } from './storage';
 import { ProjectsStack } from './stack';
 import { NoTagNode, ProjectNode, TagNode } from './nodes';
+import type { ProjectKinds } from './projectKinds';
+import { PROJECT_KIND_LABELS } from '../../shared/projectKind';
 
 const EXPANSION_STATE_KEY = '1c-platform-tools.projects.favorites.tagsExpansionState';
 
@@ -49,7 +51,8 @@ export class StorageProvider implements vscode.TreeDataProvider<ProjectNode | Ta
 	constructor(
 		private readonly store: ProjectStorage,
 		private readonly context: vscode.ExtensionContext,
-		private readonly recent: ProjectsStack
+		private readonly recent: ProjectsStack,
+		private readonly kinds?: Pick<ProjectKinds, 'kindOf'>
 	) {}
 
 	static async clearExpansionState(ctx: vscode.ExtensionContext): Promise<void> {
@@ -134,11 +137,17 @@ export class StorageProvider implements vscode.TreeDataProvider<ProjectNode | Ta
 		return sorted.map((e) => {
 			const fullPath = expandHomePath(e.description);
 			const proj = this.store.getByName(e.label);
+			const kind = this.kinds?.kindOf(fullPath);
+			const detail = [
+				kind && PROJECT_KIND_LABELS[kind],
+				dupes.has(e.label.toLowerCase()) ? path.basename(path.dirname(fullPath)) : undefined,
+			].filter((part): part is string => part !== undefined);
 			return new ProjectNode(e.label, vscode.TreeItemCollapsibleState.None, {
 				name: e.label,
 				path: fullPath,
-				detail: dupes.has(e.label.toLowerCase()) ? path.basename(path.dirname(fullPath)) : undefined,
+				detail: detail.length > 0 ? detail.join(' · ') : undefined,
 				tags: proj?.tags,
+				kind,
 			}, {
 				command: '1c-platform-tools.projects.open',
 				title: '',

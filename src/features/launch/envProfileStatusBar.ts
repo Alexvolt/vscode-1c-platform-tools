@@ -33,7 +33,7 @@ export function ensureEnvProfileStatusBar(): vscode.StatusBarItem {
 /**
  * Обновляет содержимое статусной строки по текущему состоянию профиля
  *
- * @param visible - Показывать ли элемент (только для проектов 1С с открытой рабочей областью)
+ * @param visible - Показывать ли элемент: выбранный проект и открытый файл в проекте 1С
  */
 export function refreshEnvProfileStatusBar(visible: boolean): void {
 	const item = ensureEnvProfileStatusBar();

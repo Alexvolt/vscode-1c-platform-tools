@@ -102,7 +102,7 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 	const { testingFeatureDisposables, rebuildTesting } = registerTestingFlow(isProjectRef);
 	const edtDisposables = registerEdtFeature();
 	const launchFeatureDisposables = registerLaunchFeature(context, isProjectRef);
-	const platformServerDisposables = registerPlatformServerFeature(context, isProjectRef);
+	const platformServerDisposables = registerPlatformServerFeature(context);
 	const diagnosticsFeatureDisposables = registerDiagnosticsFeature();
 	context.subscriptions.push(
 		vscode.window.registerTerminalLinkProvider(
@@ -117,6 +117,7 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 			artifactsProvider,
 			metadataTreeProvider,
 			rebuildTesting,
+			hadProjects: isProject,
 		})
 	);
 

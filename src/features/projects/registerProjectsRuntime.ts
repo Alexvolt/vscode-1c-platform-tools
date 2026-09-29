@@ -62,7 +62,7 @@ export async function registerProjectsRuntime(
 	showStatusBar(projectStorage, oneCLocator);
 	const onProjectsChanged = (): void => {
 		showStatusBar(projectStorage, oneCLocator);
-		providers.autodetectProvider.refresh();
+		providers.refreshAll();
 	};
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeWorkspaceFolders(() => {

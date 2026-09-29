@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import { readActiveProfileName } from '../../shared/projectState';
 import {
+	isFolderRootProject,
 	projectDisplayName,
 	projectRootKey,
 	sameProjectRoot,
@@ -18,7 +19,9 @@ import {
 	candidateDescription,
 	candidateName,
 	candidateTooltip,
+	folderRootProjectsFirst,
 	isCurrentProject,
+	nestedProjectLocation,
 	projectDescription,
 	projectTooltip,
 } from './projectPresentation';
@@ -97,9 +100,9 @@ export class WorkspaceProjectsTreeProvider implements vscode.TreeDataProvider<Wo
 	getChildren(element?: WorkspaceProjectsNode): WorkspaceProjectsNode[] {
 		const snapshot = this.source.snapshotNow();
 		if (!element) {
-			const top = snapshot.projects
-				.filter((project) => !this.knownParent(snapshot, project.parent))
-				.map((project) => this.projectNode(project));
+			const top = folderRootProjectsFirst(snapshot.projects.filter((project) => !this.knownParent(snapshot, project.parent))).map(
+				(project) => this.projectNode(project)
+			);
 			return this.groupedCandidates(snapshot).length > 0 ? [...top, this.groupNode()] : top;
 		}
 		switch (element.kind) {
@@ -190,9 +193,12 @@ export class WorkspaceProjectsTreeProvider implements vscode.TreeDataProvider<Wo
 		);
 		const item = new vscode.TreeItem(projectDisplayName(project, siblings), collapsible);
 		item.id = `project:${projectRootKey(project.root)}`;
-		item.description = projectDescription(project, current, { profile: this.profileOf(project.root) });
+		item.description = projectDescription(project, current, {
+			location: nestedProjectLocation(project),
+			profile: this.profileOf(project.root),
+		});
 		item.tooltip = projectTooltip(project);
-		item.iconPath = project.subProject
+		item.iconPath = !isFolderRootProject(project)
 			? new vscode.ThemeIcon(
 					'file-submodule',
 					new vscode.ThemeColor(current ? 'testing.iconPassed' : 'gitDecoration.submoduleResourceForeground')

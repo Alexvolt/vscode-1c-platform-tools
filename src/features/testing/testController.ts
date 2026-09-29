@@ -23,6 +23,7 @@ import { ReportTarget } from './projectTestConfig';
 import { RunQueue } from './runQueue';
 import { routeReportCases, RoutableFile } from './batchRouter';
 import { DEFAULT_TESTING } from '../../shared/pathDefaults';
+import { hasProjectFile } from '../../shared/projectLayout';
 import { projectConfiguration } from '../../shared/projectConfiguration';
 import {
 	currentRoot,
@@ -1494,10 +1495,10 @@ export class TestingController implements vscode.Disposable {
 	 * Удаляет базовый каталог отчётов проекта целиком
 	 *
 	 * Вызывается при старте, чтобы убрать каталоги, оставшиеся от прерванных
-	 * прогонов прошлых сессий.
+	 * прогонов прошлых сессий. Папку без `packagedef` не трогает.
 	 */
 	public async cleanupAllReports(): Promise<void> {
-		if (!this.projectRoot) {
+		if (!this.projectRoot || !hasProjectFile(this.projectRoot)) {
 			return;
 		}
 		const baseDir = this.reportsBaseDir(this.projectRoot);
