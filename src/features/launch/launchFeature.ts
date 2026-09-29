@@ -18,8 +18,15 @@ import { logger } from '../../shared/logger';
 import { ENV_DEFAULTS, AUTUMN_DEFAULTS } from '../serviceFiles/envDefaults';
 import { buildEnvJsonWithSections } from '../serviceFiles/envJsonBuilder';
 import { isAgentOptions, uiOnlyHandler } from '../../shared/agentGate';
-import { currentRoot, onDidChangeCurrentProject, outsideProject, runWithProject } from '../../shared/workspaceProjects';
+import {
+	currentRoot,
+	onDidChangeCurrentProject,
+	onDidChangeProjects,
+	outsideProject,
+	runWithProject,
+} from '../../shared/workspaceProjects';
 import { inCurrentProject } from '../../commands/projectScope';
+import { launchStatusVisible } from './launchStatusScope';
 import {
 	ensureEnvProfileStatusBar,
 	refreshEnvProfileStatusBar,
@@ -516,7 +523,7 @@ export function registerLaunchFeature(
 ): vscode.Disposable[] {
 	const vrunner = VRunnerManager.getInstance(context);
 	// Строка состояния показывает профиль выбранного проекта, а не проекта вызова
-	const refresh = () => outsideProject(() => refreshEnvProfileStatusBar(isProjectRef.current));
+	const refresh = () => outsideProject(() => refreshEnvProfileStatusBar(launchStatusVisible(vrunner)));
 
 	ensureEnvProfileStatusBar();
 	refresh();
@@ -635,6 +642,9 @@ export function registerLaunchFeature(
 			};
 		})),
 		vrunner.onDidChangeVRunnerVersion(() => refresh()),
+		// Вид проекта известен после обнаружения
+		onDidChangeProjects(() => refresh()),
+		vscode.window.onDidChangeActiveTextEditor(() => refresh()),
 		vscode.workspace.onDidChangeWorkspaceFolders(() => refresh()),
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration('1c-platform-tools.env.defaultProfile')) {
