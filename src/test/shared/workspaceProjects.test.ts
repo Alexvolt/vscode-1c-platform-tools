@@ -165,6 +165,20 @@ suite('проекты рабочей области: обнаружение', ()
 		assert.deepStrictEqual(found.candidates, []);
 	});
 
+	test('вид проекта: пакет OneScript, проект и подпроект в формате конфигуратора', async () => {
+		const scripts = at('инструменты', 'tools', 'deploy');
+		const { projects } = await detectWorkspaceProjects([folder(scripts), folder(PROJECT)]);
+
+		assert.deepStrictEqual(
+			projects.map((project) => [project.root, project.kind]),
+			[
+				[scripts, 'onescript'],
+				[PROJECT, 'designer'],
+				[SUB_PROJECT, 'designer'],
+			]
+		);
+	});
+
 	test('подпроект, открытый отдельной папкой, стоит корневым проектом один раз', async () => {
 		const { projects } = await detectWorkspaceProjects([folder(PROJECT), folder(SUB_PROJECT)]);
 
@@ -1049,6 +1063,23 @@ suite('проекты рабочей области: создание, пере�
 
 			assert.strictEqual(local.projectFileChanged(file, false), true);
 			assert.deepStrictEqual(notified, [{ projects: true }]);
+		} finally {
+			copy.dispose();
+		}
+	});
+
+	test('правка packagedef проекта пересчитывает его вид, packagedef вне проектов не в счёт', async () => {
+		const copy = copyFixture('инструменты');
+		try {
+			const scripts = normalizeProjectRoot(path.join(copy.root, 'tools', 'deploy'));
+			const local = track(new WorkspaceProjects({ folders: () => [folder(scripts)] }));
+			assert.strictEqual((await local.listProjects())[0].kind, 'onescript');
+
+			fs.writeFileSync(path.join(scripts, 'packagedef'), 'Описание.Имя("deploy").ЗависитОт("vanessa-runner");', 'utf-8');
+			assert.strictEqual(local.projectFileEdited(path.join(copy.root, 'packagedef')), false);
+			const changed = nextEvent(local.onDidChangeProjects, () => local.projectByRoot(scripts)?.kind);
+			assert.strictEqual(local.projectFileEdited(path.join(scripts, 'packagedef')), true);
+			assert.strictEqual(await changed, 'onec');
 		} finally {
 			copy.dispose();
 		}

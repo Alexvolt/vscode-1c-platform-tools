@@ -166,6 +166,20 @@ suite('проекты: вид «Рабочая область»', () => {
 		}
 	});
 
+	test('проект без конфигурации подписан видом', async () => {
+		const scripts = at('инструменты', 'tools', 'deploy');
+		const local = await detectedProjects([scripts]);
+		const localProvider = new WorkspaceProjectsTreeProvider(local.source, () => undefined);
+		try {
+			const [project] = localProvider.getChildren();
+			assert.deepStrictEqual(row(localProvider, project), ['deploy', 'текущий · OneScript', 'workspaceProjectCurrent', scripts]);
+			assert.strictEqual(localProvider.getTreeItem(project).tooltip, `${scripts}\nВид: OneScript`);
+		} finally {
+			localProvider.dispose();
+			local.instance.dispose();
+		}
+	});
+
 	test('клик по строке проекта выбирает его', () => {
 		const [, twoConfigurations] = provider.getChildren();
 

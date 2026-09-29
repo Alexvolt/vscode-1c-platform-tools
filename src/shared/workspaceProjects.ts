@@ -33,6 +33,7 @@ import {
 	type SourceRoot,
 } from './projectLayout';
 import { logger } from './logger';
+import { projectKindOf, type ProjectKind } from './projectKind';
 import { notifyProjectLayoutChanged, onDidChangeProjectLayout, type ProjectLayoutChange } from './projectLayoutWatch';
 
 const log = logger.scope('projects');
@@ -82,6 +83,8 @@ export interface WorkspaceProject {
 	subProject: boolean;
 	/** Конфигурация из раскладки проекта; нет до полного обнаружения и без исходного кода. */
 	configuration?: SourceRoot;
+	/** Вид проекта, см. {@link projectKindOf}; нет до полного обнаружения. */
+	kind?: ProjectKind;
 }
 
 /** Откуда взялся не проект. */
@@ -251,7 +254,12 @@ export async function detectWorkspaceProjects(folders: readonly WorkspaceFolderR
 		}
 		seen.add(key);
 		const layout = await layoutOf(project.root);
-		projects.push({ ...project, configuration: layout?.configuration });
+		const packagedef = await fs.readFile(path.join(project.root, PROJECT_FILE), 'utf-8').catch(() => '');
+		projects.push({
+			...project,
+			configuration: layout?.configuration,
+			kind: layout ? projectKindOf(layout, packagedef) : undefined,
+		});
 		for (const other of layout?.others ?? []) {
 			const root = normalizeProjectRoot(packagedefTargetDir(other, project.root));
 			candidates.push({
@@ -485,6 +493,7 @@ function snapshotSignature(snapshot: WorkspaceProjectsSnapshot): string {
 			project.configuration?.dir,
 			project.configuration?.format,
 			project.configuration?.name,
+			project.kind,
 		]),
 		snapshot.candidates.map((candidate) => [candidate.root, candidate.kind, candidate.parent, candidate.configuration.dir]),
 	]);
@@ -729,6 +738,19 @@ export class WorkspaceProjects implements vscode.Disposable {
 		forgetSubProjectDecision(dir);
 		invalidateProjectLayoutsContaining(dir);
 		this.requestRefresh();
+		return true;
+	}
+
+	/**
+	 * `packagedef` известного проекта изменён: от его текста зависит вид проекта.
+	 *
+	 * @returns true, если проекты будут искаться заново
+	 */
+	projectFileEdited(file: string): boolean {
+		if (!this.projectByRoot(path.dirname(file))) {
+			return false;
+		}
+		this.scheduleRefresh();
 		return true;
 	}
 
@@ -1124,12 +1146,13 @@ export function initWorkspaceProjects(context: vscode.ExtensionContext): vscode.
 		notifyLayout: notifyProjectLayoutChanged,
 	});
 
-	const watcher = vscode.workspace.createFileSystemWatcher(`**/${PROJECT_FILE}`, false, true, false);
+	const watcher = vscode.workspace.createFileSystemWatcher(`**/${PROJECT_FILE}`);
 	void instance.refresh();
 
 	return vscode.Disposable.from(
 		watcher,
 		watcher.onDidCreate((uri) => instance.projectFileChanged(uri.fsPath, true)),
+		watcher.onDidChange((uri) => instance.projectFileEdited(uri.fsPath)),
 		watcher.onDidDelete((uri) => instance.projectFileChanged(uri.fsPath, false)),
 		vscode.workspace.onDidDeleteFiles((event) => instance.pathsRemoved(fileUris(event.files))),
 		vscode.workspace.onDidRenameFiles((event) => {

@@ -5,6 +5,7 @@
 
 import * as path from 'node:path';
 import { SOURCE_FORMAT_LABELS } from '../../shared/activeConfiguration';
+import { PROJECT_KIND_LABELS } from '../../shared/projectKind';
 import type { SourceRoot } from '../../shared/projectLayout';
 import {
 	isFolderRootProject,
@@ -51,6 +52,14 @@ export function configurationParts(configuration: SourceRoot | undefined): strin
 	return [SOURCE_FORMAT_LABELS[configuration.format], configuration.name].filter((part) => part.length > 0);
 }
 
+/** Формат и имя конфигурации проекта, а без конфигурации его вид. */
+function projectKindParts(project: WorkspaceProject): string[] {
+	if (project.configuration) {
+		return configurationParts(project.configuration);
+	}
+	return project.kind ? [PROJECT_KIND_LABELS[project.kind]] : [];
+}
+
 /** Что добавить в описание строки проекта. */
 export interface ProjectDescriptionDetails {
 	/** Путь подпроекта от корневого проекта или {@link nestedProjectLocation}. */
@@ -60,7 +69,8 @@ export interface ProjectDescriptionDetails {
 }
 
 /**
- * Описание строки проекта: «текущий», путь от корневого проекта, формат, конфигурация, профиль.
+ * Описание строки проекта: «текущий», путь от корневого проекта, формат и
+ * конфигурация или вид проекта, профиль.
  *
  * @param project - Проект
  * @param current - Проект текущий
@@ -70,12 +80,12 @@ export function projectDescription(project: WorkspaceProject, current: boolean, 
 	return [
 		...(current ? ['текущий'] : []),
 		...(details.location ? [details.location] : []),
-		...configurationParts(project.configuration),
+		...projectKindParts(project),
 		...(details.profile ? [details.profile] : []),
 	].join(SEPARATOR);
 }
 
-/** Подсказка проекта: путь, формат, конфигурация. */
+/** Подсказка проекта: путь, формат и конфигурация или вид проекта. */
 export function projectTooltip(project: WorkspaceProject): string {
 	const lines = [project.root];
 	if (project.configuration) {
@@ -83,6 +93,8 @@ export function projectTooltip(project: WorkspaceProject): string {
 		if (project.configuration.name) {
 			lines.push(`Конфигурация: ${project.configuration.name}`);
 		}
+	} else if (project.kind) {
+		lines.push(`Вид: ${PROJECT_KIND_LABELS[project.kind]}`);
 	}
 	return lines.join('\n');
 }

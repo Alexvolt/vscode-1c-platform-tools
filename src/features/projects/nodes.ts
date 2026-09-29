@@ -4,6 +4,7 @@
 
 import type { Command } from 'vscode';
 import { MarkdownString, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri } from 'vscode';
+import type { ProjectKind } from '../../shared/projectKind';
 import { VIEW_SCHEME } from './decoration';
 
 export interface ProjectPreview {
@@ -11,6 +12,7 @@ export interface ProjectPreview {
 	path: string;
 	detail?: string;
 	tags?: string[];
+	kind?: ProjectKind;
 }
 
 export class ProjectNode extends TreeItem {
@@ -33,7 +35,7 @@ export class ProjectNode extends TreeItem {
 		if (preview.tags && preview.tags.length > 0) {
 			md.appendMarkdown(`$(tag) ${preview.tags.join(', ')}`);
 		} else {
-			md.appendMarkdown('$(folder) Проект 1С');
+			md.appendMarkdown(preview.kind === 'onescript' ? '$(folder) Проект OneScript' : '$(folder) Проект 1С');
 		}
 		this.tooltip = md;
 	}

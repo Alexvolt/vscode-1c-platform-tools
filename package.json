@@ -4588,7 +4588,7 @@
             "type": "boolean",
             "default": true,
             "scope": "resource",
-            "description": "Показывать в панели тестирования BDD-сценарии 1bdd (.feature в OneScript-проектах). Активен только в проектах без исходников конфигурации: в проектах 1С фичи относятся к Vanessa Automation."
+            "description": "Показывать в панели тестирования BDD-сценарии 1bdd. Работает в проектах без конфигурации, в проектах с конфигурацией фичи относятся к Vanessa Automation."
           },
           "1c-platform-tools.test.onescriptRunner": {
             "type": "string",
