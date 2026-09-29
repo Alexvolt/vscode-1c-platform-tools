@@ -126,7 +126,7 @@ suite('ibsrvPublication', () => {
 		assert.strictEqual(buildHttpServiceUrl(urls, '/myservice'), 'http://localhost:8314/ib/hs/myservice');
 	});
 
-	test('parseServerConfigParams: читает host/port/base/лицензии из сгенерированного конфига', () => {
+	test('parseServerConfigParams: читает host/port/базу/base/лицензии из сгенерированного конфига', () => {
 		const yaml = buildServerConfigYaml({
 			host: 'localhost',
 			port: 8314,
@@ -143,6 +143,7 @@ suite('ibsrvPublication', () => {
 		assert.deepStrictEqual(parseServerConfigParams(yaml), {
 			host: 'localhost',
 			port: 8314,
+			dbPath: 'C:\\proj\\build\\ib',
 			base: '/ib',
 			distributeLicenses: true,
 			odata: true,
@@ -164,10 +165,16 @@ suite('ibsrvPublication', () => {
 		assert.strictEqual(parsed.distributeLicenses, false);
 	});
 
+	test('parseServerConfigParams: каталог базы с пробелами и концами строк Windows', () => {
+		const yaml = 'server:\r\n  port: 8314\r\ndatabase:\r\n  path: C:\\Мои проекты\\build\\ib \r\ninfobase:\r\n  name: DefAlias\r\n';
+		assert.strictEqual(parseServerConfigParams(yaml).dbPath, 'C:\\Мои проекты\\build\\ib');
+	});
+
 	test('parseServerConfigParams: пустой ввод → пусто', () => {
 		assert.deepStrictEqual(parseServerConfigParams(''), {
 			host: undefined,
 			port: undefined,
+			dbPath: undefined,
 			base: undefined,
 			distributeLicenses: undefined,
 			odata: undefined,

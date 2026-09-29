@@ -67,6 +67,8 @@ export interface ParsedServerParams {
 	host?: string;
 	/** HTTP-порт (server.port). */
 	port?: number;
+	/** Каталог файловой базы (database.path). */
+	dbPath?: string;
 	/** Базовый путь публикации (http[].base). */
 	base?: string;
 	/** Выдача лицензий (infobase.distribute-licenses). */
@@ -88,12 +90,14 @@ export interface ParsedServerParams {
 export function parseServerConfigParams(yaml: string): ParsedServerParams {
 	const host = yaml.match(/^\s*address:\s*(\S+)\s*$/m)?.[1];
 	const portStr = yaml.match(/^\s*port:\s*(\d+)\s*$/m)?.[1];
+	const dbPath = yaml.match(/^database:[ \t]*\r?\n[ \t]+path:[ \t]*(.+?)[ \t]*\r?$/m)?.[1];
 	const base = yaml.match(/^\s*-\s*base:\s*(\S+)\s*$/m)?.[1];
 	const lic = yaml.match(/^\s*distribute-licenses:\s*(yes|no)\b/m)?.[1];
 	const odata = yaml.match(/^\s*odata:\s*\r?\n\s*publish:\s*(yes|no|true|false)\b/m)?.[1];
 	return {
 		host: host || undefined,
 		port: portStr ? Number(portStr) : undefined,
+		dbPath: dbPath || undefined,
 		base: base || undefined,
 		distributeLicenses: lic ? lic === 'yes' : undefined,
 		odata: odata ? odata === 'yes' || odata === 'true' : undefined,
