@@ -117,6 +117,7 @@ export async function bootstrapApp(context: vscode.ExtensionContext): Promise<vo
 			artifactsProvider,
 			metadataTreeProvider,
 			rebuildTesting,
+			hadProjects: isProject,
 		})
 	);
 
