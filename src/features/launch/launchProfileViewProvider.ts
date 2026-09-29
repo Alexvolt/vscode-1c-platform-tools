@@ -50,10 +50,11 @@ export class LaunchProfileViewProvider implements vscode.TreeDataProvider<vscode
 	private projectWatcher: vscode.Disposable | undefined;
 
 	constructor(private readonly vrunner: VRunnerManager) {
-		// Плашка живая: обновляется при смене профиля, проекта и при изменении
+		// Плашка живая: обновляется при смене профиля, временных параметров, проекта и при изменении
 		// файлов настроек в корне проекта (создание, правка, удаление).
 		this.disposables.push(
 			this.vrunner.onDidChangeActiveEnvProfile(() => this.refresh()),
+			this.vrunner.onDidChangeEnvOverrides(() => this.refresh()),
 			this.vrunner.onDidChangeVRunnerVersion(() => this.refresh()),
 			onDidChangeCurrentProject((change) => {
 				this.watchProject(change.current);

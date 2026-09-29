@@ -162,6 +162,23 @@ export function normalizeConfiguredExtensions(raw: unknown): string[] {
 }
 
 /**
+ * Откуда взят список, от которого не осталось ни одного расширения.
+ *
+ * Пустым выбор приходит только из готового списка: из опций вызова или из
+ * настройки области. Окно выбора без отметок равно отмене.
+ *
+ * @param scope - Область выбора
+ * @param opts - Опции вызова с явным списком
+ * @returns Например «из настройки cfe.selected»
+ */
+export function emptySelectionSource(scope: ExtensionScope, opts?: { extensions?: string[] }): string {
+	if (Array.isArray(opts?.extensions) && opts.extensions.length > 0) {
+		return 'из переданного списка';
+	}
+	return `из настройки ${scope === 'tests' ? 'test.cfe.selected' : 'cfe.selected'}`;
+}
+
+/**
  * Имя файла `*.cfe` без расширения: так зовётся каталог, из которого файл собран.
  *
  * @param file - Имя или путь файла

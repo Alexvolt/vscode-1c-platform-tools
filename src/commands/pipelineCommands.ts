@@ -116,7 +116,7 @@ export class PipelineCommands extends BaseCommand {
 		}
 
 		if (this.running.has(pipeline.id)) {
-			const message = `Пайплайн «${pipeline.name}» уже выполняется: шаг вызывает сам себя`;
+			const message = `Пайплайн «${pipeline.name}» уже выполняется`;
 			return this.rejectIfWait(opts, message) ?? this.showInfo(message);
 		}
 
@@ -489,7 +489,7 @@ ${result.stderr ?? ''}`
 		log.info(`${formatRunSummary(result)}
 Всего: ${(result.durationMs / 1000).toFixed(1)} с`);
 		if (result.cancelled) {
-			void vscode.window.showInformationMessage(`Пайплайн «${result.pipelineName}» отменён`);
+			notifyQuiet(`Пайплайн «${result.pipelineName}» отменён`);
 			return;
 		}
 		if (result.success) {

@@ -145,11 +145,14 @@ export async function openMetadataSourcePropertiesPanel(
 			}
 			if (msg.type === 'pickRole') {
 				const taken = new Set(Array.isArray(msg.taken) ? msg.taken.map(String) : []);
-				const candidates = (input.dictionaries?.roleNames ?? [])
+				const roleNames = input.dictionaries?.roleNames ?? [];
+				const candidates = roleNames
 					.map((name) => `Role.${name}`)
 					.filter((ref) => !taken.has(ref));
 				if (candidates.length === 0) {
-					void vscode.window.showInformationMessage('Все роли конфигурации уже выбраны.');
+					void vscode.window.showInformationMessage(
+						roleNames.length === 0 ? 'Ролей в конфигурации не найдено.' : 'Все роли конфигурации уже выбраны.'
+					);
 					return;
 				}
 				const picked = await vscode.window.showQuickPick(

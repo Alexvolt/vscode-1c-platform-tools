@@ -222,7 +222,7 @@ async function selectPublishedServices(manager: PlatformServerManager): Promise<
 			await manager.restart();
 		}
 	} else {
-		notifyQuiet('Выбор публикуемых сервисов сохранён.');
+		notifyQuiet('Выбор публикуемых сервисов сохранён');
 	}
 }
 

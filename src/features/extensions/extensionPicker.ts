@@ -40,7 +40,7 @@ interface ExtensionPickItem<T extends ExtensionNames> extends vscode.QuickPickIt
  * @param extensions - Все доступные расширения
  * @param memento - Состояние проекта для хранения выбора
  * @param opts - Параметры выполнения (режим wait, явный список расширений)
- * @returns Выбранное подмножество, либо undefined при отмене quickpick
+ * @returns Выбранное подмножество, либо undefined при отмене quickpick или пустом выборе в нём
  */
 export async function pickExtensions<T extends ExtensionNames>(
 	extensions: readonly T[],
@@ -88,7 +88,7 @@ export async function pickExtensions<T extends ExtensionNames>(
 		title: scope === 'tests' ? 'Тестовые расширения' : 'Расширения',
 		placeHolder: 'Отметьте расширения, с которыми выполнить команду'
 	});
-	if (!picked) {
+	if (!picked || picked.length === 0) {
 		return undefined;
 	}
 

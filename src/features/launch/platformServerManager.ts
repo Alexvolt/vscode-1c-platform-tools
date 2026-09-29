@@ -469,7 +469,7 @@ export class PlatformServerManager {
 			const ibPath = await this.resolveFileInfobasePath(workspaceRoot, true);
 			if (!ibPath) {
 				vscode.window.showInformationMessage(
-					'Конфиг публикации создаётся при запуске сервера. Для файловой ИБ укажите /F в env.json.'
+					'Конфиг публикации создаётся при запуске сервера. Для файловой ИБ укажите /F в профиле запуска.'
 				);
 				return;
 			}

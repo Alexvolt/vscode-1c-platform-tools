@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { EnvOverrides, DEFAULT_PROFILE_ID, LOCAL_OVERRIDES_FILE, SettingsSchema, baseSettingsFileName } from '../../shared/envProfiles';
 import { logger } from '../../shared/logger';
+import { notifyQuiet } from '../../shared/notify';
 import { ENV_DEFAULTS, AUTUMN_DEFAULTS } from '../serviceFiles/envDefaults';
 import { buildEnvJsonWithSections } from '../serviceFiles/envJsonBuilder';
 import { isAgentOptions, uiOnlyHandler } from '../../shared/agentGate';
@@ -194,9 +195,7 @@ async function createProfile(vrunner: VRunnerManager, refresh: () => void): Prom
 	await vscode.window.showTextDocument(doc);
 	await vrunner.setActiveEnvProfileId(profileId);
 	refresh();
-	vscode.window.showInformationMessage(
-		created ? `Профиль «${profileId}» создан и выбран активным.` : `Профиль «${profileId}» выбран активным.`
-	);
+	notifyQuiet(created ? `Профиль «${profileId}» создан и выбран активным` : `Профиль «${profileId}» выбран активным`);
 }
 
 /** Элемент QuickPick временных параметров */
@@ -302,17 +301,18 @@ async function editOverrides(
 		if (step.action === 'clear') {
 			await vrunner.setActiveEnvOverrides(undefined);
 			refresh();
-			vscode.window.showInformationMessage('Временные параметры сброшены.');
+			notifyQuiet('Временные параметры сброшены');
 			return showBack;
 		}
 		if (step.action === 'apply') {
+			const had = vrunner.hasActiveEnvOverrides();
 			await vrunner.setActiveEnvOverrides(draft);
 			refresh();
-			vscode.window.showInformationMessage(
-				vrunner.hasActiveEnvOverrides()
-					? 'Временные параметры сохранены.'
-					: 'Временные параметры не заданы.'
-			);
+			if (vrunner.hasActiveEnvOverrides()) {
+				notifyQuiet('Временные параметры сохранены');
+			} else if (had) {
+				notifyQuiet('Временные параметры сброшены');
+			}
 			return showBack;
 		}
 
@@ -349,8 +349,8 @@ async function clearOverrides(
 ): Promise<StructuredCommandResult> {
 	await vrunner.setActiveEnvOverrides(undefined);
 	refresh();
-	const message = 'Временные параметры запуска сброшены.';
-	vscode.window.showInformationMessage(message);
+	const message = 'Временные параметры сброшены';
+	notifyQuiet(message);
 	return { success: true, exitCode: 0, stdout: message, stderr: '' };
 }
 
@@ -626,7 +626,11 @@ export function registerLaunchFeature(
 			const message = version
 				? `vanessa-runner: ${version.raw}`
 				: 'Версия не определена. Проверьте установку vanessa-runner.';
-			vscode.window.showInformationMessage(message);
+			if (version) {
+				notifyQuiet(message);
+			} else {
+				void vscode.window.showWarningMessage(message);
+			}
 			return {
 				success: version !== undefined,
 				exitCode: version !== undefined ? 0 : 1,
@@ -690,7 +694,7 @@ function watchProjectFiles(
 		refresh();
 		// Вне проекта 1С дерева нет, а команда обновления ответила бы уведомлением на каждую смену ветки
 		if (isProjectRef.current) {
-			void vscode.commands.executeCommand('1c-platform-tools.tools.refresh').then(undefined, () => undefined);
+			void vscode.commands.executeCommand('1c-platform-tools.tools.refresh', { silent: true }).then(undefined, () => undefined);
 		}
 	};
 	// Удалили файл активного именованного профиля — возвращаемся к базовому

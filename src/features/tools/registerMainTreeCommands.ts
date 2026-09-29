@@ -243,13 +243,16 @@ export function registerMainTreeCommands(
 		workspaceTasksCommands,
 	} = params;
 
-	const refreshCommand = vscode.commands.registerCommand('1c-platform-tools.tools.refresh', () => {
+	const refreshCommand = vscode.commands.registerCommand('1c-platform-tools.tools.refresh', (options?: { silent?: boolean }) => {
 		if (!isProjectRef.current) {
 			showNot1CProjectMessage();
 			return;
 		}
 		treeDataProvider.refresh();
-		log.debug('Дерево обновлено');
+		if (options?.silent) {
+			log.debug('Дерево обновлено');
+			return;
+		}
 		notifyQuiet('Дерево обновлено');
 	});
 

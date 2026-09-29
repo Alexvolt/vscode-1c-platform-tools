@@ -2405,6 +2405,10 @@
           "when": "false"
         },
         {
+          "command": "1c-platform-tools.debug.measure.start",
+          "when": "debugType == '1c-platform-tools' && !onecPlatformTools.debug.measureActive"
+        },
+        {
           "command": "1c-platform-tools.debug.measure.stop",
           "when": "onecPlatformTools.debug.measureActive"
         },
@@ -2521,6 +2525,10 @@
           "when": "false"
         },
         {
+          "command": "1c-platform-tools.metadata.setChildNodeType",
+          "when": "false"
+        },
+        {
           "command": "1c-platform-tools.metadata.deleteChildNode",
           "when": "false"
         },
@@ -2566,6 +2574,10 @@
         },
         {
           "command": "1c-platform-tools.artifacts.viewByFolder",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.artifacts.open",
           "when": "false"
         },
         {

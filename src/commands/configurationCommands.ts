@@ -458,9 +458,9 @@ export class ConfigurationCommands extends BaseCommand {
 		}
 
 		if (configRelativePaths.length === 0) {
-			log.info('В objlist.txt нет путей в каталоге конфигурации (src/cf)');
+			log.info(`В objlist.txt нет путей в каталоге конфигурации ${srcPath}`);
 			vscode.window.showInformationMessage(
-				'В objlist.txt нет путей из каталога конфигурации (src/cf). Для расширений используйте команду «Загрузить из objlist.txt» в разделе «Расширения».'
+				`В objlist.txt нет путей из каталога конфигурации ${srcPath}. Для расширений используйте команду «Загрузить из objlist.txt» в разделе «Расширения».`
 			);
 			return;
 		}

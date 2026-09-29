@@ -364,7 +364,7 @@ export class SupportCommands extends BaseCommand {
 		const edfPathFs = selected[0].fsPath;
 		const relativePath = path.relative(workspaceRoot, edfPathFs);
 		if (relativePath.startsWith('..')) {
-			void vscode.window.showWarningMessage('Выбран файл вне рабочего каталога. Укажите файл из build/dist.');
+			void vscode.window.showWarningMessage(`Выбран файл вне рабочего каталога. Укажите файл из ${distPath}.`);
 			return;
 		}
 		const fileRelative = relativePath.replaceAll(path.sep, '/');

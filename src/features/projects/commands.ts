@@ -113,7 +113,7 @@ export function registerProjectsCommands(
 			const changed = await pickFavoritesToConfigure(projectStorage, locator, stack);
 			if (changed) {
 				providers.refreshStorage();
-				notifyQuiet('Избранное обновлено.');
+				notifyQuiet('Избранное обновлено');
 			}
 		})
 	);
@@ -184,10 +184,13 @@ export function registerProjectsCommands(
 
 			let selectedTags: string[] | undefined;
 
+			input.onDidChangeValue(() => {
+				input.validationMessage = undefined;
+			});
 			input.onDidAccept(async () => {
 				const name = input.value.trim();
 				if (!name) {
-					void vscode.window.showWarningMessage('Укажите имя проекта.');
+					input.validationMessage = 'Введите имя проекта';
 					return;
 				}
 				if (projectStorage.exists(name)) {
@@ -265,7 +268,6 @@ export function registerProjectsCommands(
 			const tags = await pickTags(projectStorage, filterByTags, {
 				useDefaultTags: false,
 				useNoTagsDefined: true,
-				showWarningWhenHasNoTagsToPick: true,
 			});
 			if (tags) {
 				await context.globalState.update('1c-platform-tools.projects.filterByTags', tags);
@@ -290,7 +292,7 @@ export function registerProjectsCommands(
 					providers.updateAutodetectTitle();
 				}
 			);
-			notifyQuiet('Список проектов обновлён.');
+			notifyQuiet('Список проектов обновлён');
 		})
 	);
 
@@ -338,7 +340,7 @@ export function registerProjectsCommands(
 				projectStorage.save();
 				providers.refreshStorage();
 				showStatusBar(projectStorage, locator);
-				notifyQuiet('Проект удалён.');
+				notifyQuiet('Проект удалён');
 			}
 		})
 	);
@@ -365,7 +367,7 @@ export function registerProjectsCommands(
 					projectStorage.save();
 					providers.refreshStorage();
 					showStatusBar(projectStorage, locator);
-					void vscode.window.showInformationMessage('Проект переименован.');
+					notifyQuiet('Проект переименован');
 				});
 		})
 	);
@@ -385,7 +387,7 @@ export function registerProjectsCommands(
 				projectStorage.editTags(project.name, tags);
 				projectStorage.save();
 				providers.refreshStorage();
-				notifyQuiet('Теги обновлены.');
+				notifyQuiet('Теги обновлены');
 			}
 		})
 	);
@@ -418,15 +420,19 @@ export function registerProjectsCommands(
 			const projectPath = node?.command?.arguments?.[0] as string;
 			if (!projectPath) {return;}
 			const name = (node?.label as string) ?? path.basename(projectPath);
-			if (projectStorage.exists(name)) {
+			if (projectStorage.existsWithRootPath(projectPath)) {
 				void vscode.window.showInformationMessage('Проект уже в избранном.');
+				return;
+			}
+			if (projectStorage.exists(name)) {
+				void vscode.window.showInformationMessage(`В избранном уже есть проект «${name}».`);
 				return;
 			}
 			stack.push(name);
 			projectStorage.push(name, expandHomePath(projectPath));
 			projectStorage.save();
 			providers.refreshStorage();
-			notifyQuiet('Проект добавлен в избранное.');
+			notifyQuiet('Проект добавлен в избранное');
 		})
 	);
 

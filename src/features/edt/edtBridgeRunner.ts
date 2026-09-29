@@ -13,6 +13,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../../shared/logger';
+import { notifyQuietFailure } from '../../shared/notify';
 import { resolveProjectLayout, type ProjectLayout } from '../../shared/projectLayout';
 import type { TaskOutputChain } from '../tasks/vrunnerTask';
 import {
@@ -113,8 +114,7 @@ export async function runEdtImports(steps: readonly EdtImportStep[], context: Ed
 			continue;
 		}
 		if (!(await exists(path.join(source, 'Configuration.xml')))) {
-			log.warn(`Выгрузка ${step.source} без Configuration.xml, импорт в проект пропущен`);
-			void vscode.window.showWarningMessage(`Выгрузки в ${step.source} нет, проект ${step.projectDir} не изменён.`);
+			notifyQuietFailure(`Проект ${step.projectDir} не изменён: выгрузки в ${step.source} нет`);
 			continue;
 		}
 		const baseArgs = step.needsBase && base !== undefined ? ['--base-project-name', edtProjectName(base)] : [];

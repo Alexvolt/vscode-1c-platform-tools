@@ -119,7 +119,7 @@ export class PipelineEditorProvider implements vscode.CustomTextEditorProvider {
 				void webviewPanel.webview.postMessage({ type: 'saved' });
 				post();
 				// Дерево команд показывает сохранённое: обновляем сразу, не дожидаясь наблюдателя за файлами
-				await vscode.commands.executeCommand('1c-platform-tools.tools.refresh');
+				await vscode.commands.executeCommand('1c-platform-tools.tools.refresh', { silent: true });
 				return;
 			}
 			if (message.type === 'run') {

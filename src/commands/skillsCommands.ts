@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { logger } from '../shared/logger';
+import { notifyQuiet } from '../shared/notify';
 import { currentRoot, workspaceFolderOf } from '../shared/workspaceProjects';
 
 const log = logger.scope('skills');
@@ -69,17 +70,29 @@ function resolveDestination(destination: string, workspaceRoot: string | undefin
 	return null;
 }
 
+async function pickFolder(): Promise<string | null> {
+	const selected = await vscode.window.showOpenDialog({
+		canSelectFolders: true,
+		canSelectMany: false,
+		title: 'Выберите папку для навыков',
+		openLabel: 'Выбрать папку'
+	});
+	return selected?.[0]?.fsPath ?? null;
+}
+
+/** Без открытой папки проекта остаётся только выбор папки вручную. */
 async function pickDestination(workspaceRoot: string | undefined): Promise<string | null> {
+	if (!workspaceRoot) {
+		return pickFolder();
+	}
 	const destChoice = await vscode.window.showQuickPick(
 		DESTINATION_OPTIONS.map((o) => ({
 			...o,
-			description: workspaceRoot ? path.join(workspaceRoot, o.folder) : undefined
+			description: path.join(workspaceRoot, o.folder)
 		})),
 		{
 			title: 'Куда установить навыки?',
-			placeHolder: workspaceRoot
-				? 'Выберите папку (относительно корня проекта)'
-				: 'Нет открытой папки — выберите «Указать папку»',
+			placeHolder: 'Выберите папку (относительно корня проекта)',
 			ignoreFocusOut: true
 		}
 	);
@@ -87,22 +100,20 @@ async function pickDestination(workspaceRoot: string | undefined): Promise<strin
 		return null;
 	}
 	if (destChoice.id === 'custom') {
-		const selected = await vscode.window.showOpenDialog({
-			canSelectFolders: true,
-			canSelectMany: false,
-			title: 'Выберите папку для навыков',
-			openLabel: 'Выбрать папку'
-		});
-		if (!selected?.length) {
-			return null;
-		}
-		return selected[0].fsPath;
+		return pickFolder();
 	}
+	return path.join(workspaceRoot, destChoice.folder);
+}
+
+/** Папка навыков для сообщения: внутри проекта относительно его корня. */
+function displayDestination(targetDir: string, workspaceRoot: string | undefined): string {
 	if (workspaceRoot) {
-		return path.join(workspaceRoot, destChoice.folder);
+		const relative = path.relative(workspaceRoot, targetDir);
+		if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+			return relative.split(path.sep).join('/');
+		}
 	}
-	vscode.window.showWarningMessage('Откройте папку проекта или выберите «Указать папку»');
-	return null;
+	return targetDir;
 }
 
 /**
@@ -225,7 +236,7 @@ export class SkillsCommands {
 		await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
-				title: 'Навыки разработки 1С (cc-1c-skills)',
+				title: 'Загрузка навыков cc-1c-skills с GitHub, лицензия MIT',
 				cancellable: false
 			},
 			async () => {
@@ -252,10 +263,7 @@ export class SkillsCommands {
 							`В навыках разработки 1С обновлены префиксы путей для агента: ${rewrittenFiles}`
 						);
 					}
-					log.info(`Навыки разработки 1С (cc-1c-skills) установлены в ${targetDir}`);
-					vscode.window.showInformationMessage(
-						'Навыки разработки 1С (cc-1c-skills) установлены (источник: GitHub, MIT). Агент сможет использовать инструкции по XML, формам, ролям, СКД, метаданным и др.'
-					);
+					notifyQuiet(`Навыки разработки 1С установлены в ${displayDestination(targetDir, workspaceRoot)}`);
 				} catch (error) {
 					const errMsg = error instanceof Error ? error.message : String(error);
 					log.error(`Не удалось установить навыки разработки 1С (cc-1c-skills): ${errMsg}`);
@@ -315,10 +323,7 @@ export class SkillsCommands {
 			if (rewrittenFiles > 0) {
 				log.info(`В навыках расширения обновлены префиксы путей для агента: ${rewrittenFiles}`);
 			}
-			log.info(`Установлено навыков расширения (команды и MCP): ${copied} в ${targetBaseDir}`);
-			vscode.window.showInformationMessage(
-				`Установлено навыков расширения (команды и MCP): ${copied}. Агент будет использовать команды расширения и MCP.`
-			);
+			notifyQuiet(`Установлено навыков расширения в ${displayDestination(targetBaseDir, workspaceRoot)}: ${copied}`);
 		} else {
 			vscode.window.showWarningMessage(
 				'Не найдено ни одного шаблона навыка в расширении. Обратитесь к разработчикам.'

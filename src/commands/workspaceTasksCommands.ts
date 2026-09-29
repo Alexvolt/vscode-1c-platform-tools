@@ -229,25 +229,4 @@ export class WorkspaceTasksCommands extends BaseCommand {
 			await vscode.window.showTextDocument(doc);
 		}
 	}
-
-	/**
-	 * Добавляет задачу в tasks.json
-	 *
-	 * **Примечание**: Метод в настоящее время не реализован и является заглушкой.
-	 * В будущих версиях будет добавлена функциональность для автоматического
-	 * добавления задач в tasks.json.
-	 *
-	 * @param task - Задача для добавления
-	 * @returns Промис, который разрешается после добавления задачи
-	 */
-	async addTask(task: Task): Promise<void> {
-		if (!this.workspaceFolder()) {
-			log.warn('Команда addTask вызвана без открытой рабочей области');
-			vscode.window.showErrorMessage('Откройте рабочую область для работы с проектом');
-			return;
-		}
-
-		log.info(`Добавление задачи "${task.label}" (заглушка)`);
-		vscode.window.showInformationMessage(`Добавление задачи "${task.label}" (заглушка)`);
-	}
 }

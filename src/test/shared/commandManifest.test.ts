@@ -60,6 +60,30 @@ function registeredCommands(): Set<string> {
 	return registered;
 }
 
+/** Команды контекстного меню узлов, которые и без узла делают полезное. */
+const NODE_COMMANDS_IN_PALETTE = new Map<string, string>([
+	['1c-platform-tools.metadata.validateDump', 'проверяет выгрузки текущего проекта'],
+	['1c-platform-tools.pipelines.run', 'открывает выбор пайплайна'],
+	['1c-platform-tools.project.initialize', 'предлагает папку для packagedef'],
+]);
+
+/** Скрытые из палитры команды и команды контекстного меню узлов деревьев. */
+function paletteAndNodeCommands(): { hidden: Set<string>; nodeCommands: Set<string> } {
+	const pkg = JSON.parse(fs.readFileSync(path.join(EXTENSION_ROOT, 'package.json'), 'utf8')) as {
+		contributes: { menus: Record<string, Array<{ command?: string; when?: string }>> };
+	};
+	const menus = pkg.contributes.menus;
+	const hidden = new Set(
+		(menus.commandPalette ?? [])
+			.filter((entry) => entry.when === 'false' && entry.command)
+			.map((entry) => entry.command as string)
+	);
+	const nodeCommands = new Set(
+		(menus['view/item/context'] ?? []).map((entry) => entry.command).filter((id): id is string => id !== undefined)
+	);
+	return { hidden, nodeCommands };
+}
+
 suite('манифест команд', () => {
 	test('объявленная команда имеет обработчик', () => {
 		const registered = registeredCommands();
@@ -172,6 +196,23 @@ suite('манифест команд', () => {
 			}
 		}
 		assert.deepStrictEqual(missing, [], `меню ссылаются на несуществующие команды: ${missing.join(', ')}`);
+	});
+
+	test('команда узла дерева скрыта из палитры', () => {
+		const { hidden, nodeCommands } = paletteAndNodeCommands();
+		const visible = [...nodeCommands].filter((id) => !hidden.has(id) && !NODE_COMMANDS_IN_PALETTE.has(id));
+		assert.deepStrictEqual(
+			visible,
+			[],
+			`команды контекстного меню узла видны в палитре: ${visible.join(', ')}. ` +
+				'Без узла им нечего делать: скройте их в menus.commandPalette'
+		);
+	});
+
+	test('список команд узла в палитре не протух', () => {
+		const { hidden, nodeCommands } = paletteAndNodeCommands();
+		const stale = [...NODE_COMMANDS_IN_PALETTE.keys()].filter((id) => !nodeCommands.has(id) || hidden.has(id));
+		assert.deepStrictEqual(stale, [], `команды уже не в меню узла или скрыты из палитры: ${stale.join(', ')}`);
 	});
 });
 

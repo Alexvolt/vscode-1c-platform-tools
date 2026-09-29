@@ -21,7 +21,7 @@ import { workspaceProjectsSource } from '../features/projects/workspaceProjectsS
 import type { StructuredCommandResult } from '../shared/commandExecutionTypes';
 import { PROJECT_STRUCTURE } from '../shared/projectStructure';
 import { getOvmBinaryPath } from '../shared/ovmPaths';
-import { notifyQuiet } from '../shared/notify';
+import { notifyBusy, notifyQuiet, notifyQuietFailure } from '../shared/notify';
 import { buildProcessCommand, joinCommands, PROCESS_HOST_SHELL } from '../utils/commandUtils';
 import { createVRunnerTask } from '../features/tasks/vrunnerTask';
 import { showComponentError } from '../shared/githubToken';
@@ -199,10 +199,7 @@ async function showGitAdminCommands(): Promise<void> {
 
 	try {
 		await vscode.env.clipboard.writeText(commandsText);
-		log.info('Команды для настройки с правами администратора скопированы в буфер обмена');
-		vscode.window.showInformationMessage(
-			'Команды скопированы. Вставьте их в терминал, запущенный от имени администратора.'
-		);
+		notifyQuiet('Команды скопированы в буфер обмена');
 	} catch (error) {
 		const errMsg = (error as Error).message;
 		log.error(`Не удалось скопировать команды в буфер обмена: ${errMsg}`);
@@ -283,7 +280,7 @@ export class DependenciesCommands extends BaseCommand {
 			if (stats.isDirectory()) {
 				await fs.rm(oscriptModulesPath, { recursive: true, force: true });
 				log.info(`Каталог oscript_modules успешно удалён: ${oscriptModulesPath}`);
-				notifyQuiet('Каталог oscript_modules успешно удален');
+				notifyQuiet('Каталог oscript_modules удалён');
 			} else {
 				log.warn(`oscript_modules не является каталогом: ${oscriptModulesPath}`);
 				vscode.window.showWarningMessage('oscript_modules не является каталогом');
@@ -303,7 +300,7 @@ export class DependenciesCommands extends BaseCommand {
 	/**
 	 * Настраивает Git: user.name, user.email, алиасы и общие параметры.
 	 * Запросы (имя, email, проект/глобально) показываются в верхней части окна VS Code.
-	 * Опционально запускает настройки с правами администратора (core.longpaths true, LC_ALL C.UTF-8).
+	 * В Windows предлагает команды для настроек с правами администратора (core.longpaths true, LC_ALL C.UTF-8).
 	 *
 	 * @returns Промис, который разрешается по завершении
 	 */
@@ -317,13 +314,10 @@ export class DependenciesCommands extends BaseCommand {
 			title: 'Настройка Git',
 			prompt: 'Введите имя пользователя для Git',
 			placeHolder: 'Иван Иванов',
-			ignoreFocusOut: true
+			ignoreFocusOut: true,
+			validateInput: (value) => (value.trim() ? undefined : 'Введите имя пользователя')
 		});
 		if (userName === undefined) {
-			return;
-		}
-		if (!userName.trim()) {
-			vscode.window.showWarningMessage('Имя пользователя не задано.');
 			return;
 		}
 
@@ -331,19 +325,20 @@ export class DependenciesCommands extends BaseCommand {
 			title: 'Настройка Git',
 			prompt: 'Введите email для Git',
 			placeHolder: 'user@example.com',
-			ignoreFocusOut: true
+			ignoreFocusOut: true,
+			validateInput: (value) => (value.trim() ? undefined : 'Введите email')
 		});
 		if (userEmail === undefined) {
-			return;
-		}
-		if (!userEmail.trim()) {
-			vscode.window.showWarningMessage('Email не задан.');
 			return;
 		}
 
 		const scopeChoice = await vscode.window.showQuickPick(
 			[
-				{ label: 'Текущий проект', value: 'project' as const },
+				{
+					label: 'Текущий проект',
+					detail: 'VS Code как merge/diff tool всё равно настраивается глобально',
+					value: 'project' as const
+				},
 				{ label: 'Глобально', value: 'global' as const }
 			],
 			{
@@ -419,27 +414,17 @@ export class DependenciesCommands extends BaseCommand {
 			return;
 		}
 
-		log.info(
-			`Настройки Git применены (${isGlobal ? 'глобально' : 'для текущего проекта'}); merge/diff tool (VS Code) настроен глобально`
-		);
-		vscode.window.showInformationMessage(
-			`Настройки Git успешно применены (${isGlobal ? 'глобально' : 'для текущего проекта'}). ` +
-				'VS Code настроен как merge/diff tool (всегда глобально).'
-		);
+		notifyQuiet(isGlobal ? 'Настройки Git применены глобально' : 'Настройки Git применены для текущего проекта');
 
+		if (process.platform !== 'win32') {
+			return;
+		}
 		const doAdmin = await vscode.window.showInformationMessage(
 			'Показать команды для настроек с правами администратора? (core.longpaths true, LC_ALL C.UTF-8 для системы)',
 			'Да',
 			'Нет'
 		);
 		if (doAdmin !== 'Да') {
-			return;
-		}
-
-		if (process.platform !== 'win32') {
-			vscode.window.showInformationMessage(
-				'Настройки с правами администратора поддерживаются только в Windows. На Linux/macOS при необходимости выполните вручную: git config --system core.longpaths true и установите LC_ALL=C.UTF-8.'
-			);
 			return;
 		}
 
@@ -629,19 +614,13 @@ export class DependenciesCommands extends BaseCommand {
 				} catch (error) {
 					const errMsg = (error as Error).message;
 					log.error(`Не удалось создать структуру проекта: ${errMsg}. Путь: ${targetDir}`);
-					logger.show();
-					vscode.window.showWarningMessage(
-						`packagedef создан, но не удалось создать каталоги: ${errMsg}. Открываю папку.`
-					);
+					await vscode.window.showWarningMessage(`packagedef создан, каталоги не созданы: ${errMsg}`, { modal: true });
 				}
 			} else {
-				vscode.window.showInformationMessage('Проект 1С создан. Открываю папку…');
+				notifyQuiet('Проект 1С создан. Открываю папку…');
 			}
 			if (installDependencies && context) {
 				await context.globalState.update(DependenciesCommands.INSTALL_DEPS_AFTER_CREATE_KEY, targetDir);
-				vscode.window.showInformationMessage(
-					'После открытия папки будет предложена установка зависимостей (opm install --dev -l).'
-				);
 			}
 			// Показать панель «Начало работы» после открытия только что созданного проекта
 			if (context) {
@@ -781,8 +760,7 @@ export class DependenciesCommands extends BaseCommand {
 			// Код возврата задачи, а не опрос времени модификации oscript: раскладка
 			// каталогов у ovm зависит от версии, и опрос её не всегда замечал
 			if (await exitCode !== 0) {
-				log.info('Установка OneScript завершилась с ошибкой');
-				vscode.window.showWarningMessage('Установка OneScript завершилась с ошибкой, подробности в панели задачи.');
+				notifyQuietFailure('Установка OneScript завершилась с ошибкой');
 				return;
 			}
 			await this.vrunner.refreshOneScriptResolution();
@@ -826,14 +804,19 @@ export class DependenciesCommands extends BaseCommand {
 
 		log.info(`Установка OneScript запущена: ${commandName.title}, версия: ${ovmVersion}`);
 
-		vscode.window.setStatusBarMessage('Ожидание установки OneScript…', OVM_POLL_TIMEOUT_MS);
-		const installed = await waitForOvmInstallComplete(ovmOscriptMtimeBefore);
-		vscode.window.setStatusBarMessage('', 0);
+		const busy = notifyBusy('Ожидание установки OneScript…');
+		let installed: boolean;
+		try {
+			installed = await waitForOvmInstallComplete(ovmOscriptMtimeBefore);
+		} finally {
+			busy.dispose();
+		}
 
 		if (!installed) {
-			log.info('Таймаут ожидания установки OVM');
-			vscode.window.showInformationMessage(
-				'Установка идёт дольше обычного или завершилась с ошибкой. Загляните в панель задачи.'
+			await this.vrunner.refreshOneScriptResolution();
+			log.warn('Установка OneScript не подтвердилась за время ожидания');
+			void vscode.window.showWarningMessage(
+				`Установка OneScript не подтвердилась. Проверьте вывод в терминале «${commandName.title}».`
 			);
 			return;
 		}
