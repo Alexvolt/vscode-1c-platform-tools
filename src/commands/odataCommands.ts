@@ -15,6 +15,7 @@ import * as vscode from 'vscode';
 import { BaseCommand, INFOBASE_BUSY } from './baseCommand';
 import { isAgentOptions } from '../shared/agentGate';
 import { logger } from '../shared/logger';
+import { notifyQuiet } from '../shared/notify';
 import { currentRoot } from '../shared/workspaceProjects';
 import { resolveODataEndpoint } from '../shared/odataEndpoint';
 import { resolveConfigPath } from '../features/testing/projectTestConfig';
@@ -432,7 +433,12 @@ export class ODataCommands extends BaseCommand {
 			if (!result.success) {
 				return result.stderr;
 			}
-			void vscode.window.showInformationMessage(result.stdout.split('\n').filter(Boolean).join(' '));
+			log.info(result.stdout.split('\n').filter(Boolean).join(' '));
+			notifyQuiet(
+				response.added.length + response.removed.length === 0
+					? 'Состав OData не менялся'
+					: `Состав OData обновлён: включено ${response.added.length}, исключено ${response.removed.length}`
+			);
 			return undefined;
 		});
 	}

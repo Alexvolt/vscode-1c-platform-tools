@@ -5,6 +5,7 @@ import { pickExtensions } from '../../features/extensions/extensionPicker';
 import { EXTENSION_SELECTION_STATE, projectMemento, TEST_EXTENSION_SELECTION_STATE } from '../../shared/projectState';
 import {
 	cfeStem,
+	emptySelectionSource,
 	getStoredExtensionSelection,
 	setStoredExtensionSelection,
 	filterExtensionsBySelection,
@@ -249,5 +250,26 @@ suite('pickExtensions: прогон без окна выбора', () => {
 		assert.deepStrictEqual(await pickExtensions([DEMO, TESTS], memento(undefined), { wait: true, extensions: ['yaxunit-test'] }), [TESTS]);
 		assert.deepStrictEqual(await pickExtensions([DEMO, TESTS], memento(undefined), { wait: true, extensions: ['Тесты', '_ДемоРасширение'] }), [DEMO, TESTS]);
 		assert.deepStrictEqual(await pickExtensions([DEMO, TESTS], memento(undefined), { wait: true, extensions: ['Нет'] }), []);
+	});
+});
+
+suite('pickExtensions: окно выбора', () => {
+	test('без отметок равно отмене и выбор не запоминает', async () => {
+		const window = vscode.window as unknown as { showQuickPick: unknown };
+		const original = window.showQuickPick;
+		const stored = new FakeMemento();
+		window.showQuickPick = async () => [];
+		try {
+			assert.strictEqual(await pickExtensions([plain('Расширение1'), plain('Расширение2')], stored), undefined);
+			assert.deepStrictEqual(stored.keys(), []);
+		} finally {
+			window.showQuickPick = original;
+		}
+	});
+
+	test('пустой итог объясняется источником списка', () => {
+		assert.strictEqual(emptySelectionSource('solution'), 'из настройки cfe.selected');
+		assert.strictEqual(emptySelectionSource('tests'), 'из настройки test.cfe.selected');
+		assert.strictEqual(emptySelectionSource('tests', { extensions: ['Нет'] }), 'из переданного списка');
 	});
 });

@@ -1442,6 +1442,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 				readonly allowedObjectNames: ReadonlySet<string>;
 				readonly allowedObjectKeys?: ReadonlySet<string>;
 				readonly allowedSubsystemNames?: ReadonlySet<string>;
+				readonly caption?: string;
 		  }
 		| undefined;
 	/** Поиск по дереву: исходный запрос и его слова в нижнем регистре. */
@@ -1671,9 +1672,10 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		subsystemName: string,
 		allowedObjectNames: ReadonlySet<string>,
 		allowedObjectKeys?: ReadonlySet<string>,
-		allowedSubsystemNames?: ReadonlySet<string>
+		allowedSubsystemNames?: ReadonlySet<string>,
+		caption?: string
 	): void {
-		this._subsystemFilter = { subsystemName, allowedObjectNames, allowedObjectKeys, allowedSubsystemNames };
+		this._subsystemFilter = { subsystemName, allowedObjectNames, allowedObjectKeys, allowedSubsystemNames, caption };
 		this._onDidChange.fire(undefined);
 	}
 
@@ -1718,6 +1720,12 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 
 	getSubsystemFilterName(): string | undefined {
 		return this._subsystemFilter?.subsystemName;
+	}
+
+	/** Подпись действующего отбора по подсистемам для строки над деревом. */
+	getSubsystemFilterCaption(): string | undefined {
+		const filter = this._subsystemFilter;
+		return filter ? filter.caption ?? `подсистема «${filter.subsystemName}»` : undefined;
 	}
 
 	private rebuildItemCache(workspaceRoot: string, dto: ProjectMetadataTreeDto): void {

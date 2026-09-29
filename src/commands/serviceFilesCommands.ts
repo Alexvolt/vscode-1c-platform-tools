@@ -32,7 +32,7 @@ const log = logger.scope('serviceFiles');
  */
 export class ServiceFilesCommands extends BaseCommand {
 	private refreshTree(): void {
-		void vscode.commands.executeCommand('1c-platform-tools.tools.refresh');
+		void vscode.commands.executeCommand('1c-platform-tools.tools.refresh', { silent: true });
 	}
 
 	private refreshProfileStatusBar(): void {
@@ -57,8 +57,6 @@ export class ServiceFilesCommands extends BaseCommand {
 			if (openExisting) {
 				const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fullPath));
 				await vscode.window.showTextDocument(doc);
-			} else {
-				vscode.window.showInformationMessage(`${spec.relPath} уже существует`);
 			}
 			return false;
 		}
@@ -86,8 +84,6 @@ export class ServiceFilesCommands extends BaseCommand {
 
 		await fs.mkdir(path.dirname(fullPath), { recursive: true });
 		await fs.writeFile(fullPath, template, 'utf8');
-		log.info(`Создан служебный файл ${spec.relPath}`);
-		notifyQuiet(`Создан ${spec.relPath}`);
 		return true;
 	}
 
@@ -143,6 +139,7 @@ export class ServiceFilesCommands extends BaseCommand {
 		}
 		if (await this.createFromSpec(spec, true)) {
 			this.refreshTree();
+			notifyQuiet(`Создан ${spec.relPath}`);
 		}
 	}
 
@@ -250,40 +247,19 @@ export class ServiceFilesCommands extends BaseCommand {
 	 * (без диалогов): env.json для 2.x, autumn-properties.json для 3.x.
 	 *
 	 * @param workspaceRoot - Корень рабочей области
-	 * @returns true, если файл создан
+	 * @returns Имя созданного файла либо undefined, если файл уже есть
 	 */
-	private async createLaunchProfileDefault(workspaceRoot: string): Promise<boolean> {
+	private async createLaunchProfileDefault(workspaceRoot: string): Promise<string | undefined> {
 		await this.vrunner.getVRunnerVersion();
-		if (this.vrunner.getActiveSettingsSchema() !== 'v3') {
-			return this.createEnvDefault(path.join(workspaceRoot, 'env.json'));
-		}
-		const fullPath = path.join(workspaceRoot, 'autumn-properties.json');
+		const fileName = this.vrunner.getActiveSettingsSchema() === 'v3' ? 'autumn-properties.json' : 'env.json';
+		const defaults = fileName === 'env.json' ? ENV_DEFAULTS : AUTUMN_DEFAULTS;
+		const fullPath = path.join(workspaceRoot, fileName);
 		if (fsSync.existsSync(fullPath)) {
-			vscode.window.showInformationMessage('autumn-properties.json уже существует');
-			return false;
+			return undefined;
 		}
-		await fs.writeFile(fullPath, `${JSON.stringify(AUTUMN_DEFAULTS, null, 4)}\n`, 'utf8');
-		log.info('Создан autumn-properties.json');
-		notifyQuiet('Создан autumn-properties.json');
-		return true;
-	}
-
-	/**
-	 * Создаёт env.json из канонического дефолта без интерактивного выбора секций.
-	 * Используется при пакетном создании рекомендованного набора.
-	 *
-	 * @param fullPath - Абсолютный путь к создаваемому env.json
-	 * @returns true, если файл создан
-	 */
-	private async createEnvDefault(fullPath: string): Promise<boolean> {
-		if (fsSync.existsSync(fullPath)) {
-			vscode.window.showInformationMessage('env.json уже существует');
-			return false;
-		}
-		await fs.writeFile(fullPath, `${JSON.stringify(ENV_DEFAULTS, null, 4)}\n`, 'utf8');
-		log.info('Создан env.json');
-		notifyQuiet('Создан env.json');
-		return true;
+		await fs.writeFile(fullPath, `${JSON.stringify(defaults, null, 4)}\n`, 'utf8');
+		log.info(`Создан ${fileName}`);
+		return fileName;
 	}
 
 	/**
@@ -332,26 +308,29 @@ export class ServiceFilesCommands extends BaseCommand {
 		if (!workspaceRoot) {
 			return;
 		}
-		let changed = false;
+		const created: string[] = [];
 		let envCreated = false;
 		for (const spec of SERVICE_FILES.filter((s) => s.recommended)) {
-			let created: boolean;
 			if (spec.id === 'launchProfile') {
-				created = await this.createLaunchProfileDefault(workspaceRoot);
-				envCreated = created || envCreated;
-			} else {
-				created = await this.createFromSpec(spec, false);
+				const fileName = await this.createLaunchProfileDefault(workspaceRoot);
+				if (fileName) {
+					created.push(fileName);
+					envCreated = true;
+				}
+			} else if (await this.createFromSpec(spec, false)) {
+				created.push(spec.relPath);
 			}
-			changed = created || changed;
 		}
 		if (envCreated) {
 			await this.vrunner.setActiveEnvProfileId(DEFAULT_PROFILE_ID);
 			this.refreshProfileStatusBar();
 		}
-		if (changed) {
+		if (created.length > 0) {
 			this.refreshTree();
+			notifyQuiet(`Базовый набор служебных файлов готов, созданы: ${created.join(', ')}`);
+		} else {
+			notifyQuiet('Базовый набор служебных файлов уже есть');
 		}
-		notifyQuiet('Базовый набор служебных файлов готов.');
 	}
 
 	/**

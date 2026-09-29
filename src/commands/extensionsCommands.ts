@@ -22,6 +22,7 @@ import { vanessaRunnerEpf, EPF_NAMES, EPF_COMMANDS } from '../shared/constants';
 import { logger } from '../shared/logger';
 import {
 	cfeStem,
+	emptySelectionSource,
 	filterCfeFilesBySelection,
 	findExtension,
 	normalizeConfiguredExtensions,
@@ -176,13 +177,28 @@ export class ExtensionsCommands extends BaseCommand {
 			return;
 		}
 		if (selected.length === 0) {
-			if (opts?.wait === true) {
-				return this.executionError('Не выбрано ни одного расширения');
-			}
-			vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
-			return;
+			return this.reportEmptySelection(
+				`${scope === 'tests' ? 'Тестовых расширений' : 'Расширений'} ${emptySelectionSource(scope, opts)} в рабочей области нет`,
+				opts
+			);
 		}
 		return selected;
+	}
+
+	/**
+	 * Сообщает, что от заданного списка не осталось ни одного расширения: агенту
+	 * результатом, пользователю окном.
+	 */
+	private reportEmptySelection(
+		message: string,
+		opts: CommandExecutionOptions | undefined
+	): StructuredCommandResult | undefined {
+		log.info(message);
+		if (opts?.wait === true) {
+			return this.executionError(message);
+		}
+		void vscode.window.showInformationMessage(message);
+		return undefined;
 	}
 
 	/**
@@ -513,11 +529,10 @@ export class ExtensionsCommands extends BaseCommand {
 			return selected;
 		}
 		if (selected.length === 0) {
-			if (opts?.wait === true) {
-				return this.executionError('Не выбрано ни одного расширения');
-			}
-			void vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
-			return undefined;
+			return this.reportEmptySelection(
+				`Расширений ${emptySelectionSource('solution', opts)} в рабочей области нет`,
+				opts
+			);
 		}
 
 		const targets = resolveDumpTargets(disk, selected);
@@ -632,8 +647,10 @@ export class ExtensionsCommands extends BaseCommand {
 			return;
 		}
 		if (selected.length === 0) {
-			vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
-			return;
+			return this.reportEmptySelection(
+				`Расширений ${emptySelectionSource('solution', opts)} в рабочей области нет`,
+				opts
+			);
 		}
 
 		const pathsByExtension = await this.getPathsByExtensionFromObjlist(workspaceRoot, selected);
@@ -889,11 +906,10 @@ export class ExtensionsCommands extends BaseCommand {
 			return;
 		}
 		if (selectedCfeFiles.length === 0) {
-			if (opts?.wait === true) {
-				return this.executionError(`В каталоге ${buildPath}/cfe нет файлов .cfe выбранных расширений`);
-			}
-			vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
-			return;
+			return this.reportEmptySelection(
+				`В каталоге ${buildPath}/cfe нет файлов .cfe расширений ${emptySelectionSource('solution', opts)}`,
+				opts
+			);
 		}
 
 		const ibConnectionParam = await this.vrunner.getIbConnectionParam();
@@ -1241,11 +1257,10 @@ export class ExtensionsCommands extends BaseCommand {
 			return;
 		}
 		if (selectedCfeFiles.length === 0) {
-			if (opts?.wait === true) {
-				return this.executionError(`В каталоге ${buildDir} нет файлов .cfe выбранных расширений`);
-			}
-			vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
-			return;
+			return this.reportEmptySelection(
+				`В каталоге ${buildDir} нет файлов .cfe тестовых расширений ${emptySelectionSource('tests', opts)}`,
+				opts
+			);
 		}
 
 		const ibConnectionParam = await this.vrunner.getIbConnectionParam();
@@ -1417,11 +1432,10 @@ export class ExtensionsCommands extends BaseCommand {
 			return;
 		}
 		if (selectedCfeFiles.length === 0) {
-			if (opts?.wait === true) {
-				return this.executionError(`В каталоге ${buildPath}/cfe нет файлов .cfe выбранных расширений`);
-			}
-			vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
-			return;
+			return this.reportEmptySelection(
+				`В каталоге ${buildPath}/cfe нет файлов .cfe расширений ${emptySelectionSource('solution', opts)}`,
+				opts
+			);
 		}
 
 		const ibConnectionParam = await this.vrunner.getIbConnectionParam();

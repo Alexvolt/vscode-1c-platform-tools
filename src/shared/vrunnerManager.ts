@@ -216,6 +216,11 @@ export class VRunnerManager {
 	/** Срабатывает при выборе другого env-профиля запуска */
 	public readonly onDidChangeActiveEnvProfile = this._onDidChangeActiveEnvProfile.event;
 
+	/** Событие смены временных параметров активного профиля */
+	private readonly _onDidChangeEnvOverrides = new vscode.EventEmitter<void>();
+	/** Срабатывает, когда временные параметры заданы или сброшены */
+	public readonly onDidChangeEnvOverrides = this._onDidChangeEnvOverrides.event;
+
 	/** Событие смены определённой версии vrunner (после переустановки/обновления) */
 	private readonly _onDidChangeVRunnerVersion = new vscode.EventEmitter<VRunnerVersion | undefined>();
 	/** Срабатывает, когда повторный детект версии vrunner дал другой результат */
@@ -2327,6 +2332,7 @@ export class VRunnerManager {
 	public async setActiveEnvOverrides(overrides: EnvOverrides | undefined): Promise<void> {
 		const value = overrides && hasOverrides(overrides) ? overrides : undefined;
 		await projectMemento().update(ACTIVE_ENV_OVERRIDES_STATE, value);
+		this._onDidChangeEnvOverrides.fire();
 	}
 
 	/**
@@ -2365,7 +2371,7 @@ export class VRunnerManager {
 			const root = this.getEffectiveRoot() ?? '';
 			if (!this.warnedGitBranchRoots.has(root)) {
 				this.warnedGitBranchRoots.add(root);
-				const message = `В профиле запуска используется ${GIT_BRANCH_VARIABLE}, но проект не в репозитории git — подстановка пропущена.`;
+				const message = `В профиле запуска используется ${GIT_BRANCH_VARIABLE}, но проект не в репозитории git: подстановка пропущена.`;
 				log.warn(message);
 				void vscode.window.showWarningMessage(message);
 			}

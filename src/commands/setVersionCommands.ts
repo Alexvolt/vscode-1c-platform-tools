@@ -10,6 +10,8 @@ import {
 	getSetVersionProcessorCommandName
 } from '../features/tools/commandNames';
 import { pickExtensions } from '../features/extensions/extensionPicker';
+import { emptySelectionSource } from '../features/extensions/extensionSelection';
+import { notifyQuiet } from '../shared/notify';
 import { projectMemento } from '../shared/projectState';
 import { extensionEntries } from '../features/extensions/extensionRoots';
 import { logger } from '../shared/logger';
@@ -150,7 +152,7 @@ export class SetVersionCommands extends BaseCommand {
 		const scope = await configurationScope(workspaceRoot);
 		if (scope.configuration?.format === 'edt') {
 			if (await this.stampEdtProject(configurationDescriptorFile(scope.configuration), version, workspaceRoot)) {
-				vscode.window.showInformationMessage(`Версия конфигурации: ${version}`);
+				notifyQuiet(`Версия конфигурации изменена на ${version}`);
 			}
 			return;
 		}
@@ -201,7 +203,9 @@ export class SetVersionCommands extends BaseCommand {
 			return;
 		}
 		if (selected.length === 0) {
-			vscode.window.showInformationMessage('Не выбрано ни одного расширения.');
+			const message = `Расширений ${emptySelectionSource('solution')} в рабочей области нет`;
+			log.info(message);
+			vscode.window.showInformationMessage(message);
 			return;
 		}
 
@@ -227,7 +231,7 @@ export class SetVersionCommands extends BaseCommand {
 			argsList.push(['set-version', '--src', extension.dir, '--new-version', version]);
 		}
 		if (argsList.length === 0) {
-			vscode.window.showInformationMessage(`Версия расширений: ${version}`);
+			notifyQuiet(`Версия расширений изменена на ${version}`);
 			return;
 		}
 		const commandName = getSetVersionExtensionCommandName();

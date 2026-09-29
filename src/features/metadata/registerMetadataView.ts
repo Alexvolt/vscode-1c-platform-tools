@@ -13,16 +13,34 @@ import { bindProjectDescription } from '../projects/projectViewDescription';
 function applyFilterSelection(metadataTreeProvider: MetadataTreeDataProvider, selection: FilterSelection): void {
 	if (selection.checkedPaths.size === 0) {
 		metadataTreeProvider.clearSubsystemFilter();
-		void vscode.commands.executeCommand('setContext', '1c-platform-tools.metadata.subsystemFilterActive', false);
 		return;
 	}
 	const result = computeSubsystemFilter(selection.roots, selection.checkedPaths, selection);
-	const label =
-		selection.checkedPaths.size === 1
-			? [...result.subsystemNames][0] ?? 'подсистема'
-			: `подсистем: ${selection.checkedPaths.size}`;
-	metadataTreeProvider.setSubsystemFilter(label, result.names, result.keys, result.subsystemNames);
-	void vscode.commands.executeCommand('setContext', '1c-platform-tools.metadata.subsystemFilterActive', true);
+	const single = selection.checkedPaths.size === 1;
+	const label = single ? [...result.subsystemNames][0] ?? 'подсистема' : `подсистем: ${selection.checkedPaths.size}`;
+	const caption = single ? undefined : `подсистемы (${selection.checkedPaths.size})`;
+	metadataTreeProvider.setSubsystemFilter(label, result.names, result.keys, result.subsystemNames, caption);
+}
+
+/** Действующий отбор по подсистемам виден над деревом и включает кнопку сброса. */
+function bindSubsystemFilterMessage(
+	metadataTreeProvider: MetadataTreeDataProvider,
+	metadataTreeView: vscode.TreeView<vscode.TreeItem>
+): vscode.Disposable {
+	let shown: string | undefined;
+	return metadataTreeProvider.onDidChangeTreeData(() => {
+		const caption = metadataTreeProvider.getSubsystemFilterCaption();
+		if (caption === shown) {
+			return;
+		}
+		shown = caption;
+		metadataTreeView.message = caption ? `Отбор: ${caption}` : undefined;
+		void vscode.commands.executeCommand(
+			'setContext',
+			'1c-platform-tools.metadata.subsystemFilterActive',
+			caption !== undefined
+		);
+	});
 }
 
 export interface MetadataViewRegistration {
@@ -43,7 +61,11 @@ export function registerMetadataView(
 		treeDataProvider: metadataTreeProvider,
 		showCollapseAll: true,
 	});
-	context.subscriptions.push(metadataTreeView, bindProjectDescription(metadataTreeView));
+	context.subscriptions.push(
+		metadataTreeView,
+		bindProjectDescription(metadataTreeView),
+		bindSubsystemFilterMessage(metadataTreeProvider, metadataTreeView)
+	);
 	// Раскрытие верхнего уровня переживает обновление дерева: оно перестраивается целиком.
 	context.subscriptions.push(
 		metadataTreeView.onDidExpandElement((e) => {

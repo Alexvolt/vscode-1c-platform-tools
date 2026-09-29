@@ -9,7 +9,6 @@ import type { ProjectStorage } from './storage';
 export interface PickTagOptions {
 	useDefaultTags: boolean;
 	useNoTagsDefined: boolean;
-	showWarningWhenHasNoTagsToPick?: boolean;
 	allowAddingNewTags?: boolean;
 }
 
@@ -24,7 +23,6 @@ export async function pickTags(
 
 	const quickPick = vscode.window.createQuickPick();
 	quickPick.canSelectMany = true;
-	quickPick.placeholder = 'Выберите теги';
 
 	const addTagsButton: vscode.QuickInputButton = {
 		iconPath: new vscode.ThemeIcon('add'),
@@ -45,9 +43,7 @@ export async function pickTags(
 			}
 		}
 
-		if (tags.length === 0 && options?.showWarningWhenHasNoTagsToPick) {
-			void vscode.window.showWarningMessage('Нет доступных тегов.');
-		}
+		quickPick.placeholder = tags.length === 0 ? 'Тегов нет' : 'Выберите теги';
 
 		tags.sort();
 		if (options?.useNoTagsDefined) {

@@ -906,7 +906,7 @@ export function registerMetadataFeature(
 					return;
 				}
 				await metadataTreeProvider.refresh();
-				void vscode.window.showInformationMessage(
+				notifyQuiet(
 					isReport
 						? `Внешний отчёт «${candidate}» добавлен.`
 						: `Внешняя обработка «${candidate}» добавлена.`
@@ -1153,10 +1153,6 @@ export function registerMetadataFeature(
 		}
 		const current = typeListOf(target.type);
 		const options = await typePickItems(runtime, node, schema, cwd, current);
-		if (options.length === 0) {
-			void vscode.window.showWarningMessage('Список типов пуст: библиотека не отдала ссылочные типы конфигурации.');
-			return;
-		}
 		const picked = await vscode.window.showQuickPick(options, {
 			title: `Тип: ${node.name}`,
 			placeHolder: 'Отметьте типы; несколько отмеченных дают составной тип',
@@ -1170,11 +1166,7 @@ export function registerMetadataFeature(
 			void vscode.window.showWarningMessage('Тип обязателен: платформа не примет узел без типа.');
 			return;
 		}
-		const next = picked.filter((option) => option.value !== '').map((option) => option.value);
-		if (next.length === 0) {
-			void vscode.window.showWarningMessage('Тип обязателен: платформа не примет узел без типа.');
-			return;
-		}
+		const next = picked.map((option) => option.value);
 		if (next.length === current.length && next.every((type, index) => type === current[index])) {
 			return;
 		}
@@ -1302,8 +1294,8 @@ export function registerMetadataFeature(
 			void vscode.window.showErrorMessage(errText);
 			return;
 		}
+		notifyQuiet(successMessage);
 		await metadataTreeProvider.refresh();
-		void vscode.window.showInformationMessage(successMessage);
 	}
 
 	/** Флаг `-v` для init-empty-cf: из существующего Configuration.xml или выбор, если файла нет. */
@@ -1479,7 +1471,7 @@ export function registerMetadataFeature(
 							return;
 						}
 						await metadataTreeProvider.refresh();
-						notifyQuiet(`Объект метаданных «${name}» добавлен.`);
+						notifyQuiet(`Объект метаданных «${name}» добавлен`);
 					} catch (e) {
 						const msg = e instanceof Error ? e.message : String(e);
 						void vscode.window.showErrorMessage(msg.slice(0, MD_SPARROW_CLI_ERR_PREVIEW));
@@ -1541,9 +1533,7 @@ export function registerMetadataFeature(
 							return;
 						}
 						await metadataTreeProvider.refresh();
-						void vscode.window.showInformationMessage(
-							`Внешний файл переименован: ${node.name} -> ${nextName.trim()}.`
-						);
+						notifyQuiet(`Внешний файл переименован: ${node.name} -> ${nextName.trim()}`);
 						return;
 					}
 					const tag = metadataObjectTypeToXmlTag[node.objectType];
@@ -1597,7 +1587,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					await metadataTreeProvider.refresh();
-					void vscode.window.showInformationMessage(`Объект переименован: ${node.name} -> ${nextName.trim()}.`);
+					notifyQuiet(`Объект переименован: ${node.name} -> ${nextName.trim()}`);
 				});
 			}
 		),
@@ -1639,7 +1629,7 @@ export function registerMetadataFeature(
 							return;
 						}
 						await metadataTreeProvider.refresh();
-						notifyQuiet(`Внешний файл «${node.name}» удалён.`);
+						notifyQuiet(`Внешний файл «${node.name}» удалён`);
 						return;
 					}
 					const tag = metadataObjectTypeToXmlTag[node.objectType];
@@ -1682,7 +1672,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					await metadataTreeProvider.refresh();
-					notifyQuiet(`Объект «${node.name}» удалён.`);
+					notifyQuiet(`Объект «${node.name}» удалён`);
 				});
 			}
 		),
@@ -1736,7 +1726,7 @@ export function registerMetadataFeature(
 							return;
 						}
 						await metadataTreeProvider.refresh();
-						notifyQuiet(`Создана копия «${nextName.trim()}».`);
+						notifyQuiet(`Создана копия «${nextName.trim()}»`);
 						return;
 					}
 					const tag = metadataObjectTypeToXmlTag[node.objectType];
@@ -1786,7 +1776,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					await metadataTreeProvider.refresh();
-					notifyQuiet(`Создана копия «${nextName.trim()}».`);
+					notifyQuiet(`Создана копия «${nextName.trim()}»`);
 				});
 			}
 		),
@@ -1884,7 +1874,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					const params = buildChildNodeMutationParams(node, 'rename', newName.trim());
-					await runChildNodeMutation(node, params, 'Переименование выполнено.');
+					await runChildNodeMutation(node, params, `Переименовано: ${node.name} -> ${newName.trim()}`);
 				});
 			}
 		),
@@ -1906,7 +1896,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					const params = buildChildNodeMutationParams(node, 'delete', node.name);
-					await runChildNodeMutation(node, params, 'Удаление выполнено.');
+					await runChildNodeMutation(node, params, `Удалено: «${node.name}»`);
 				});
 			}
 		),
@@ -1939,7 +1929,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					const params = buildChildNodeMutationParams(node, 'duplicate', newName.trim());
-					await runChildNodeMutation(node, params, 'Дублирование выполнено.');
+					await runChildNodeMutation(node, params, `Создана копия «${newName.trim()}»`);
 				});
 			}
 		),
@@ -1962,22 +1952,10 @@ export function registerMetadataFeature(
 					includeParents: false,
 				});
 				metadataTreeProvider.setSubsystemFilter(node.name, result.names, result.keys, result.subsystemNames);
-				void vscode.commands.executeCommand(
-					'setContext',
-					'1c-platform-tools.metadata.subsystemFilterActive',
-					true
-				);
-				void vscode.window.showInformationMessage(`Фильтр подсистемы: ${node.name}`);
 			}
 		),
 		registerMetadataCommand('1c-platform-tools.metadata.clearSubsystemFilter', async () => {
 			metadataTreeProvider.clearSubsystemFilter();
-			void vscode.commands.executeCommand(
-				'setContext',
-				'1c-platform-tools.metadata.subsystemFilterActive',
-				false
-			);
-			void vscode.window.showInformationMessage('Фильтр подсистемы сброшен.');
 		}),
 		registerMetadataCommand(
 			'1c-platform-tools.metadata.copyObjectName',
@@ -2175,7 +2153,7 @@ export function registerMetadataFeature(
 									if (!saved) {
 										return false;
 									}
-									notifyQuiet('Свойства сохранены.');
+									notifyQuiet('Свойства сохранены');
 									await metadataTreeProvider.refresh();
 									return true;
 								},
@@ -2751,7 +2729,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					await metadataTreeProvider.refresh();
-					notifyQuiet(`Расширение ${name.trim()} создано.`);
+					notifyQuiet(`Расширение ${name.trim()} создано`);
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					void vscode.window.showErrorMessage(msg.slice(0, MD_SPARROW_CLI_ERR_PREVIEW));
@@ -2855,7 +2833,7 @@ export function registerMetadataFeature(
 						);
 						return;
 					}
-					notifyQuiet(`Проверка выгрузки: находок ${total}, см. панель «Проблемы».`);
+					notifyQuiet(`Проверка выгрузки: находок ${total}, см. панель «Проблемы»`);
 					await vscode.commands.executeCommand('workbench.actions.view.problems');
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
@@ -2932,7 +2910,7 @@ export function registerMetadataFeature(
 						return;
 					}
 					await metadataTreeProvider.refresh();
-					notifyQuiet('Пустая конфигурация создана.');
+					notifyQuiet('Пустая конфигурация создана');
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					void vscode.window.showErrorMessage(msg.slice(0, MD_SPARROW_CLI_ERR_PREVIEW));

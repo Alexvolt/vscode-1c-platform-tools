@@ -5,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { logger } from '../../shared/logger';
+import { notifyQuiet } from '../../shared/notify';
 import { DEFAULT_TESTING } from '../../shared/pathDefaults';
 import { resolveOnescriptTestsPath } from './onescriptTestsPath';
 import type { StructuredCommandResult } from '../../shared/commandExecutionTypes';
@@ -211,7 +212,11 @@ export function registerConfigureTestingCommand(vrunner: VRunnerManager): vscode
 		if (wait) {
 			return configureResult(true, summary);
 		}
-		void vscode.window.showInformationMessage(summary);
+		notifyQuiet(
+			createdDirs.length > 0
+				? `Настройки тестирования обновлены, созданы каталоги: ${createdDirs.join(', ')}`
+				: 'Настройки тестирования обновлены'
+		);
 	});
 }
 
