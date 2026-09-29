@@ -555,6 +555,13 @@ suite('текущий проект: порядок выбора', () => {
 		assert.strictEqual(resolveCurrentRoot({ ...base, projects: [projects[1], projects[2], projects[0]] }), r('/w/b'));
 	});
 
+	test('проект в корне папки важнее проекта, найденного в папке без packagedef', () => {
+		const nested: WorkspaceProject = { root: r('/w/c/fixtures/x'), name: 'x', folder: r('/w/c'), subProject: false };
+
+		assert.strictEqual(resolveCurrentRoot({ ...base, projects: [nested, ...projects] }), r('/w/a'));
+		assert.strictEqual(resolveCurrentRoot({ ...base, projects: [nested] }), r('/w/c/fixtures/x'));
+	});
+
 	test('без проектов единственная папка, иначе корня нет', () => {
 		const none = { projects: [], isProject: () => false };
 

@@ -335,9 +335,15 @@ export interface CurrentRootInputs {
 	isProject: (root: string) => boolean;
 }
 
+/** Проект в корне папки рабочей области, а не найденный обходом внутри неё. */
+export function isFolderRootProject(project: WorkspaceProject): boolean {
+	return sameProjectRoot(project.root, project.folder);
+}
+
 /**
- * Текущий корень: корень вызова, сохранённый выбор, настройка, первый проект не
- * внутри другого проекта, единственная папка рабочей области.
+ * Текущий корень: корень вызова, сохранённый выбор, настройка, первый проект в
+ * корне папки рабочей области, первый проект не внутри другого проекта,
+ * единственная папка рабочей области.
  */
 export function resolveCurrentRoot(inputs: CurrentRootInputs): string | undefined {
 	if (inputs.override !== undefined) {
@@ -350,7 +356,7 @@ export function resolveCurrentRoot(inputs: CurrentRootInputs): string | undefine
 	if (configured !== undefined) {
 		return configured;
 	}
-	const first = inputs.projects.find((project) => !project.subProject);
+	const first = inputs.projects.find(isFolderRootProject) ?? inputs.projects.find((project) => !project.subProject);
 	if (first) {
 		return first.root;
 	}
@@ -990,8 +996,9 @@ function projects(): WorkspaceProjects {
 
 /**
  * Корень текущего проекта: корень вызова из {@link runWithProject}, сохранённый
- * выбор, настройка `project.default`, первый проект не внутри другого проекта,
- * единственная папка рабочей области; иначе undefined.
+ * выбор, настройка `project.default`, первый проект в корне папки рабочей области,
+ * первый проект не внутри другого проекта, единственная папка рабочей области;
+ * иначе undefined.
  *
  * Корень не обязательно проект из списка: это бывает единственная папка без
  * `packagedef` или любой каталог, переданный в `runWithProject`.
