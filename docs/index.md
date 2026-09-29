@@ -4,7 +4,7 @@ layout: home
 hero:
   name: '1C: Platform Tools'
   text: Инструменты разработки 1С в Visual Studio Code
-  tagline: Панели проектов и метаданных, отладка, тестирование, автоматизация и MCP — всё в одном расширении.
+  tagline: Проекты конфигуратора, 1С:EDT и OneScript, метаданные, отладка, тестирование, автоматизация и MCP в одном расширении.
   image:
     src: /cat-hi.png
     alt: ''
@@ -19,7 +19,7 @@ hero:
       text: VS Code Marketplace
       link: https://marketplace.visualstudio.com/items?itemName=yellow-hammer.1c-platform-tools
     - theme: alt
-      text: Open VSX (Cursor, Windsurf)
+      text: Open VSX (Cursor, Windsurf, VSCodium)
       link: https://open-vsx.org/extension/yellow-hammer/1c-platform-tools
     - theme: alt
       text: GitHub
