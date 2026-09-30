@@ -13,7 +13,7 @@ import { notifyQuiet } from '../../shared/notify';
 import type { ClusterService } from './clusterService';
 import type { AdminInfo, ClusterConnection } from './model';
 import type { ConnectionStore } from './connectionStore';
-import type { ClusterCredentialStore } from './credentials';
+import { CREDENTIAL_ROLE_COLORS, type ClusterCredentialStore } from './credentials';
 import type { ClustersAutoRefresh } from './autoRefresh';
 import type { ClusterActivityPanel } from './activityPanel';
 import { activityRequest } from './activityRequest';
@@ -45,6 +45,7 @@ import {
 	validateInfobaseForm,
 } from './infobaseProperties';
 import type { ClustersProvider } from './clustersProvider';
+import { chooseInfobaseCredentials, grantInfobaseCredentials } from './infobaseCredentialsPick';
 import type { RacFailure, RacRecord } from './racOutput';
 import { openExtensionSettings } from '../tools/settingsSections';
 import { formatRacDate, type InfobaseDropMode } from './racArgs';
@@ -220,6 +221,12 @@ export function registerClustersCommands(deps: ClustersCommandsDeps): vscode.Dis
 		});
 	};
 
+	/** Привязка изменилась: дерево и открытая форма подключений перечитываются. */
+	const afterInfobaseBinding = async (): Promise<void> => {
+		provider.refresh();
+		await editor.refresh();
+	};
+
 	/** Карточка информационной базы. */
 	const openInfobaseCard = async (node: InfobaseNode): Promise<void> => {
 		const { connection, clusterId, infobase } = node;
@@ -230,10 +237,42 @@ export function registerClustersCommands(deps: ClustersCommandsDeps): vscode.Dis
 			sections: INFOBASE_SECTIONS,
 			validate: validateInfobaseForm,
 			load: async () => {
-				const result = await service.infobaseDetails(connection, clusterId, infobase.id, infobase.name);
-				return result.ok
-					? { ok: true as const, values: toInfobaseForm(result.value) }
-					: { ok: false as const, message: result.failure.message };
+				const result = await service.infobaseDetails(connection, clusterId, infobase.id, infobase.name, {
+					quiet: true,
+				});
+				if (result.ok) {
+					return { ok: true as const, values: toInfobaseForm(result.value) };
+				}
+				if (result.failure.role !== 'infobase') {
+					return { ok: false as const, message: result.failure.message };
+				}
+				const bound = credentials.boundSet(connection.id, infobase.id);
+				return {
+					ok: false as const,
+					accessRequired: true,
+					message: bound
+						? `База не приняла набор «${bound.name}»: назначьте другой`
+						: 'Свойства базы читает её администратор: назначьте набор учётных данных',
+				};
+			},
+			access: {
+				state: () => ({
+					sets: credentials.list('infobase').map(({ id, name, user }) => ({ id, name, user })),
+					boundId: credentials.boundSet(connection.id, infobase.id)?.id,
+					color: CREDENTIAL_ROLE_COLORS.infobase,
+				}),
+				grant: async (choice) => {
+					const granted = await grantInfobaseCredentials({ credentials, service }, node, choice);
+					if (!granted.ok) {
+						return { ok: false as const, message: granted.message };
+					}
+					await afterInfobaseBinding();
+					return { ok: true as const };
+				},
+				revoke: async () => {
+					await credentials.unbindInfobase(connection.id, infobase.id);
+					await afterInfobaseBinding();
+				},
 			},
 			save: async (before, after) => {
 				const change = buildInfobaseChange(before, after);
@@ -336,38 +375,12 @@ export function registerClustersCommands(deps: ClustersCommandsDeps): vscode.Dis
 			if (!requireNode(node) || !(node instanceof InfobaseNode)) {
 				return;
 			}
-			const sets = credentials.list('infobase');
-			if (sets.length === 0) {
-				const choice = await vscode.window.showInformationMessage(
-					'Сначала создайте набор в группе «Администраторы ИБ»',
-					'Открыть'
-				);
-				if (choice === 'Открыть') {
-					await editor.open({ kind: 'set', id: 'new', setKind: 'infobase' });
-				}
+			const set = await chooseInfobaseCredentials({ credentials, service }, node);
+			if (!set) {
 				return;
 			}
-			const picked = await vscode.window.showQuickPick(
-				sets.map((set) => ({
-					label: set.name,
-					description: set.user,
-					setId: set.id,
-				})),
-				{ title: `Учётные данные для «${node.infobase.name}»` }
-			);
-			if (!picked) {
-				return;
-			}
-			await credentials.bindInfobase({
-				connectionId: node.connection.id,
-				clusterId: node.clusterId,
-				infobaseId: node.infobase.id,
-				setId: picked.setId,
-				connectionName: node.connection.name,
-				infobaseName: node.infobase.name,
-			});
-			provider.refresh();
-			notifyQuiet(`Для базы «${node.infobase.name}» назначен набор «${picked.label}»`);
+			await afterInfobaseBinding();
+			notifyQuiet(`Для базы «${node.infobase.name}» назначен набор «${set.name}»`);
 		}
 	);
 

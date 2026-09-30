@@ -141,19 +141,23 @@ export class ClusterService {
 	 * @param role - Чьи учётные данные передавал вызов
 	 * @param hadSet - Уходил ли набор этой роли в вызов
 	 * @param infobaseName - Имя базы для уведомления об администраторе базы
+	 * @param notify - Показывать ли уведомление
 	 * @returns Неудача с ролью и сообщением про неё
 	 */
 	private rejected(
 		failure: RacFailure,
 		role: RacAuthRole,
 		hadSet: boolean,
-		infobaseName?: string
+		infobaseName?: string,
+		notify = true
 	): RacFailure {
 		if (failure.kind !== 'auth') {
 			return failure;
 		}
 		const kind: MissingCredentialsKind = `${role}${hadSet ? 'Rejected' : 'Missing'}`;
-		this.notifyMissing(role === 'infobase' ? { kind, infobaseName } : { kind });
+		if (notify) {
+			this.notifyMissing(role === 'infobase' ? { kind, infobaseName } : { kind });
+		}
 		return attributeAuthFailure(failure, role);
 	}
 
@@ -244,6 +248,7 @@ export class ClusterService {
 	 * @param infobaseId - Идентификатор информационной базы
 	 * @param infobaseName - Имя базы для уведомления
 	 * @param call - Вызов rac, принимающий учётные данные базы
+	 * @param quiet - Не уведомлять об отказе базы: набор предложит вызывающий
 	 * @returns Итог вызова
 	 */
 	private async withInfobaseAuth(
@@ -251,7 +256,8 @@ export class ClusterService {
 		scope: ClusterScope,
 		infobaseId: string,
 		infobaseName: string,
-		call: (infobase?: RacCredentials) => Promise<RacResult>
+		call: (infobase?: RacCredentials) => Promise<RacResult>,
+		quiet = false
 	): Promise<RacResult> {
 		const known = await this.credentials.resolveInfobase(connection.id, infobaseId);
 		const first = await call(known);
@@ -264,7 +270,7 @@ export class ClusterService {
 		}
 		return {
 			ok: false,
-			failure: this.rejected(first.failure, 'infobase', known !== undefined, infobaseName),
+			failure: this.rejected(first.failure, 'infobase', known !== undefined, infobaseName, !quiet),
 		};
 	}
 
@@ -772,18 +778,27 @@ export class ClusterService {
 	 *
 	 * Полная информация закрыта паролем администратора базы, поэтому вызов идёт
 	 * через {@link withInfobaseAuth}.
+	 *
+	 * @param options - `quiet` — не уведомлять об отказе базы
 	 */
 	async infobaseDetails(
 		connection: ClusterConnection,
 		clusterId: string,
 		infobaseId: string,
-		infobaseName: string
+		infobaseName: string,
+		options: { quiet?: boolean } = {}
 	): Promise<ServiceResult<RacRecord>> {
 		const scope = await this.clusterScope(connection, clusterId);
-		const result = await this.withInfobaseAuth(connection, scope, infobaseId, infobaseName, (infobase) =>
-			this.client.run(buildInfobaseInfoArgs({ ...scope, infobaseId, infobase }), {
-				platformVersion: connection.platformVersion,
-			})
+		const result = await this.withInfobaseAuth(
+			connection,
+			scope,
+			infobaseId,
+			infobaseName,
+			(infobase) =>
+				this.client.run(buildInfobaseInfoArgs({ ...scope, infobaseId, infobase }), {
+					platformVersion: connection.platformVersion,
+				}),
+			options.quiet === true
 		);
 		if (!result.ok) {
 			return { ok: false, failure: result.failure };
