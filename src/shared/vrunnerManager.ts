@@ -17,6 +17,7 @@ import {
 	buildDockerCommandSequence,
 	dockerRunArgs,
 	normalizeIbPathForDocker,
+	withoutPublishedPorts,
 	type DockerRunOptions,
 } from '../utils/commandUtils';
 import {
@@ -83,6 +84,9 @@ const log = logger.scope('vrunner');
 
 /** Запуск на этой машине в обход Docker: см. VRunnerManager.runOnThisMachine. */
 const onThisMachine = new AsyncLocalStorage<boolean>();
+
+/** Запуск клиента 1С с окном: см. VRunnerManager.runWithWindow. */
+const withWindow = new AsyncLocalStorage<boolean>();
 
 /** Временный каталог проекта EDT в контейнере. */
 const EDT_STAGING_IN_CONTAINER = '/edt-staging';
@@ -696,7 +700,8 @@ export class VRunnerManager {
 		if (running !== undefined) {
 			return running;
 		}
-		const detection = this.detectVRunnerVersion(cacheKey);
+		// Определение версии идёт без портов клиента с окном
+		const detection = withWindow.exit(() => this.detectVRunnerVersion(cacheKey));
 		this.vrunnerVersionInFlight.set(cacheKey, detection);
 		try {
 			return await detection;
@@ -1278,6 +1283,17 @@ export class VRunnerManager {
 	}
 
 	/**
+	 * Запускает клиент 1С с окном: в контейнере порты из `docker.runArgs`
+	 * публикуются только такому запуску.
+	 *
+	 * @param action - Запуск клиента
+	 * @returns Результат запуска
+	 */
+	public runWithWindow<T>(action: () => T): T {
+		return withWindow.run(true, action);
+	}
+
+	/**
 	 * Docker-образ проекта из настройки `docker.image`.
 	 *
 	 * @returns Docker-образ для выполнения команд
@@ -1385,11 +1401,15 @@ export class VRunnerManager {
 			processed.some((args) =>
 				argumentValues(args).some((value) => value === mount.container || value.startsWith(`${mount.container}/`))
 			);
+		const runArgs = this.dockerRunArgsSetting(root);
 		return {
 			image,
 			argsArray: processed,
 			root: dockerMountSource(root, folder, process.env.LOCAL_WORKSPACE_FOLDER),
-			options: { mounts: extra.filter(used), runArgs: this.dockerRunArgsSetting(root) },
+			options: {
+				mounts: extra.filter(used),
+				runArgs: withWindow.getStore() === true ? runArgs : withoutPublishedPorts(runArgs),
+			},
 		};
 	}
 

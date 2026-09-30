@@ -153,7 +153,7 @@ suite('vrunnerTask: остановка задачи', () => {
 				const run = ++runs;
 				return {
 					command: buildProcessCommand('node', ['-e', 'setTimeout(() => {}, 60000)']),
-					onCancel: () => cancelled.push(run),
+					onCancel: () => { cancelled.push(run); },
 				};
 			},
 		};
@@ -179,7 +179,7 @@ suite('vrunnerTask: остановка задачи', () => {
 			cwd: process.cwd(),
 			command: () => ({
 				command: { file: process.execPath, args: ['-e', 'setTimeout(() => {}, 60000)'] },
-				onCancel: () => calls.push('cancel'),
+				onCancel: () => { calls.push('cancel'); },
 				onCancelled: () => calls.push('cancelled'),
 			}),
 		});
