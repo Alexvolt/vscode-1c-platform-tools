@@ -314,6 +314,25 @@ export interface DockerRunOptions {
 }
 
 /**
+ * Параметры `docker run` без публикации портов: `-p`, `--publish`, `-P`, `--publish-all`.
+ *
+ * @param runArgs - Параметры из настройки docker.runArgs
+ * @returns Те же параметры без портов
+ */
+export function withoutPublishedPorts(runArgs: readonly string[]): string[] {
+	const result: string[] = [];
+	for (let index = 0; index < runArgs.length; index++) {
+		const arg = runArgs[index];
+		if (arg === '-p' || arg === '--publish') {
+			index++;
+		} else if (!/^(-p.|-P$|--publish=|--publish-all(=|$))/.test(arg)) {
+			result.push(arg);
+		}
+	}
+	return result;
+}
+
+/**
  * Начало аргументов `docker run`: тома, рабочий каталог и параметры пользователя.
  *
  * @param workspaceRoot - Каталог проекта на хосте
@@ -391,7 +410,7 @@ export function buildDockerCommand(
 
 /**
  * Формирует команду Docker для последовательного выполнения нескольких команд vrunner в контейнере.
- * Запускает sh -c "vrunner args1 && vrunner args2 && ..." в одном контейнере.
+ * Запускает sh -c "vrunner args1 && vrunner args2 && ..." в одном контейнере под tini.
  *
  * @param dockerImage - Docker-образ с ENTRYPOINT vrunner
  * @param vrunnerArgsArray - Массив наборов аргументов (каждый набор — одна команда vrunner)
@@ -409,11 +428,17 @@ export function buildDockerCommandSequence(
 	const shell = shellType || detectShellType();
 	// Внутреннюю строку разбирает sh контейнера, поэтому она собирается по правилам sh.
 	// Наружу она уходит одним аргументом docker и экранируется для оболочки хоста.
-	const innerCommand = vrunnerArgsArray
+	// Ловушку sh выполняет после выхода текущей команды: остановка дожидается vrunner
+	// и не даёт начаться следующей команде.
+	const innerCommand = `trap 'exit 143' TERM; trap 'exit 130' INT; ${vrunnerArgsArray
 		.map((args) => `vrunner ${escapeCommandArgs(args, 'sh')}`)
-		.join(' && ');
+		.join(' && ')}`;
 	const dockerArgs = [
 		...dockerRunPrefix(workspaceRoot, options, (value) => normalizePathForShell(value, shell)),
+		// sh не передаёт сигнал остановки vrunner: его всей группе процессов раздаёт tini
+		'--init',
+		'-e',
+		'TINI_KILL_PROCESS_GROUP=1',
 		'--entrypoint',
 		'/bin/sh',
 		dockerImage,

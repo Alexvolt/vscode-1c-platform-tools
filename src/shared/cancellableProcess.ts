@@ -45,8 +45,8 @@ export interface CommandRun {
 	command: ProcessCommand;
 	/** Переменные этого запуска поверх окружения задачи */
 	env?: NodeJS.ProcessEnv;
-	/** Уборка при отмене */
-	onCancel?: () => void;
+	/** Уборка при отмене: дерево процессов завершается после неё */
+	onCancel?: () => void | Promise<void>;
 	/** Уборка после выхода отменённого процесса */
 	onCancelled?: () => void;
 	/** Уборка после выхода процесса при любом исходе */
@@ -65,8 +65,8 @@ export interface CancellableProcessOptions {
 	token?: vscode.CancellationToken;
 	/** Колбэк живого вывода: вызывается на каждый чанк stdout и stderr */
 	onOutput?: (chunk: string) => void;
-	/** Уборка при отмене: вызывается до завершения дерева процессов */
-	onCancel?: () => void;
+	/** Уборка при отмене: дерево процессов завершается после неё, если процесс ещё не вышел сам */
+	onCancel?: () => void | Promise<void>;
 	/** Уборка после выхода отменённого процесса: то, что он успел запустить снаружи, ещё живо */
 	onCancelled?: () => void;
 	/** Уборка по окончании запуска при любом исходе, в том числе когда процесс не стартовал; после onCancelled */
@@ -186,11 +186,16 @@ export function runCancellableCommand(
 
 		const cancellationSubscription = options?.token?.onCancellationRequested(() => {
 			cancelled = true;
-			options?.onCancel?.();
-			if (child.pid !== undefined) {
-				log.info(`Отмена: завершаю дерево процессов pid ${child.pid}`);
-				killProcessTree(child.pid);
-			}
+			void Promise.resolve()
+				.then(() => options?.onCancel?.())
+				.catch((error: unknown) => log.warn(`Уборка при отмене не удалась: ${(error as Error).message}`))
+				.then(() => {
+					// Процесс мог выйти сам, пока шла уборка
+					if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+						log.info(`Отмена: завершаю дерево процессов pid ${child.pid}`);
+						killProcessTree(child.pid);
+					}
+				});
 		});
 
 		// Кодировку выбирает декодер: на Windows консольные программы пишут не в UTF-8

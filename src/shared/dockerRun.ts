@@ -13,6 +13,25 @@ import { logger } from './logger';
 
 const log = logger.scope('vrunner');
 
+/** Сколько секунд контейнер закрывается после SIGTERM, прежде чем демон пошлёт SIGKILL. */
+export const DOCKER_STOP_TIMEOUT_SECONDS = 30;
+
+/**
+ * Вызов программы `docker`. Промис не отклоняется: остановка и уборка
+ * контейнера, которого уже нет, ошибкой не считаются.
+ */
+export type DockerCli = (args: readonly string[], timeoutMs: number) => Promise<void>;
+
+const dockerCli: DockerCli = (args, timeoutMs) =>
+	new Promise((resolve) => {
+		execFile('docker', args, { timeout: timeoutMs, windowsHide: true }, (error) => {
+			if (error) {
+				log.debug(`docker ${args.join(' ')}: ${error.message}`);
+			}
+			resolve();
+		});
+	});
+
 /**
  * Имя контейнера для одного запуска.
  *
@@ -30,30 +49,34 @@ export function dockerContainerName(): string {
  * который ещё останавливается после прошлой отмены.
  *
  * @param build - Строит команду `docker run` с заданным именем контейнера
+ * @param docker - Вызов программы `docker`
  * @returns Команда и уборка при отмене
  */
-export function dockerCommandRun(build: (containerName: string) => string): CommandRun {
+export function dockerCommandRun(build: (containerName: string) => string, docker: DockerCli = dockerCli): CommandRun {
 	const containerName = dockerContainerName();
+	let stopped: Promise<void> = Promise.resolve();
 	return {
 		command: build(containerName),
-		onCancel: () => stopDockerContainer(containerName),
-		onCancelled: () => removeDockerContainer(containerName),
+		onCancel: () => {
+			stopped = stopDockerContainer(containerName, docker);
+			return stopped;
+		},
+		onCancelled: () => {
+			void stopped.then(() => removeDockerContainer(containerName, docker));
+		},
 	};
 }
 
 /**
- * Останавливает контейнер запуска.
+ * Останавливает контейнер запуска: процессы получают SIGTERM и время закрыться.
  *
  * @param containerName - Имя контейнера из {@link dockerContainerName}
+ * @param docker - Вызов программы `docker`
+ * @returns Промис, который разрешается, когда контейнер остановлен
  */
-export function stopDockerContainer(containerName: string): void {
+export function stopDockerContainer(containerName: string, docker: DockerCli = dockerCli): Promise<void> {
 	log.info(`Отмена: останавливаю контейнер ${containerName}`);
-	execFile('docker', ['stop', containerName], { timeout: 30000, windowsHide: true }, (error) => {
-		if (error) {
-			// Контейнер мог остановиться сам вместе с клиентом: это не ошибка
-			log.debug(`docker stop ${containerName}: ${error.message}`);
-		}
-	});
+	return docker(['stop', '-t', String(DOCKER_STOP_TIMEOUT_SECONDS), containerName], (DOCKER_STOP_TIMEOUT_SECONDS + 30) * 1000);
 }
 
 /**
@@ -62,12 +85,9 @@ export function stopDockerContainer(containerName: string): void {
  * до завершения клиента продолжает работать.
  *
  * @param containerName - Имя контейнера из {@link dockerContainerName}
+ * @param docker - Вызов программы `docker`
+ * @returns Промис, который разрешается после вызова
  */
-export function removeDockerContainer(containerName: string): void {
-	execFile('docker', ['rm', '-f', containerName], { timeout: 30000, windowsHide: true }, (error) => {
-		if (error) {
-			// Контейнер уже удалён вместе с клиентом: это не ошибка
-			log.debug(`docker rm ${containerName}: ${error.message}`);
-		}
-	});
+export function removeDockerContainer(containerName: string, docker: DockerCli = dockerCli): Promise<void> {
+	return docker(['rm', '-f', containerName], 30000);
 }

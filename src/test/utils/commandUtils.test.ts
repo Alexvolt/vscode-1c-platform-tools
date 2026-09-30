@@ -14,10 +14,11 @@ import {
 	joinCommands,
 	normalizeIbPathForDocker,
 	quoteExecutable,
+	withoutPublishedPorts,
 	type ShellType
 } from '../../utils/commandUtils';
 import { pathConversionPrefix } from '../../utils/shellEscape';
-import { dockerCommandRun, dockerContainerName } from '../../shared/dockerRun';
+import { DOCKER_STOP_TIMEOUT_SECONDS, dockerCommandRun, dockerContainerName } from '../../shared/dockerRun';
 
 suite('commandUtils', () => {
 	// Установка кодировки (chcp/[Console]::OutputEncoding) добавляется только на Windows
@@ -253,6 +254,27 @@ suite('commandUtils', () => {
 		assert.strictEqual(typeof first.onCancel, 'function');
 	});
 
+	test('отмена в контейнере: удаление ждёт остановки с таймаутом', async () => {
+		const calls: string[] = [];
+		let finishStop!: () => void;
+		const docker = (args: readonly string[]): Promise<void> => {
+			calls.push(args.join(' '));
+			return args[0] === 'stop' ? new Promise((resolve) => (finishStop = resolve)) : Promise.resolve();
+		};
+		let name = '';
+		const run = dockerCommandRun((containerName) => (name = containerName), docker);
+
+		const stopping = run.onCancel?.();
+		run.onCancelled?.();
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		assert.deepStrictEqual(calls, [`stop -t ${DOCKER_STOP_TIMEOUT_SECONDS} ${name}`], 'контейнер удалён до остановки');
+
+		finishStop();
+		await stopping;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assert.deepStrictEqual(calls, [`stop -t ${DOCKER_STOP_TIMEOUT_SECONDS} ${name}`, `rm -f ${name}`]);
+	});
+
 	test('buildDockerCommandSequence отдаёт строку sh одним аргументом хоста', () => {
 		const result = buildDockerCommandSequence(
 			'vrunner:8.3.27',
@@ -262,8 +284,8 @@ suite('commandUtils', () => {
 		);
 		assert.strictEqual(
 			result,
-			'docker run --rm -v /home/ws:/workspace -w /workspace --entrypoint /bin/sh vrunner:8.3.27 -c ' +
-			String.raw`"vrunner vanessa --settings 'env one.json' && vrunner compile"`
+			'docker run --rm -v /home/ws:/workspace -w /workspace --init -e TINI_KILL_PROCESS_GROUP=1 --entrypoint /bin/sh vrunner:8.3.27 -c ' +
+			String.raw`"trap 'exit 143' TERM; trap 'exit 130' INT; vrunner vanessa --settings 'env one.json' && vrunner compile"`
 		);
 	});
 
@@ -346,7 +368,25 @@ suite('commandUtils', () => {
 
 	test('buildDockerCommandSequence: параметры docker.runArgs стоят до точки входа', () => {
 		const result = buildDockerCommandSequence('vrunner:8.3.27', [['compile']], '/home/ws', 'sh', { runArgs: ['--network', 'host'] });
-		assert.ok(result.includes('-w /workspace --network host --entrypoint /bin/sh vrunner:8.3.27'), result);
+		assert.ok(result.includes('-w /workspace --network host --init -e TINI_KILL_PROCESS_GROUP=1 --entrypoint /bin/sh vrunner:8.3.27'), result);
+	});
+
+	test('withoutPublishedPorts убирает публикацию портов в любой записи', () => {
+		assert.deepStrictEqual(
+			withoutPublishedPorts([
+				'-p', '127.0.0.1:6080:6080',
+				'--network', 'host',
+				'--publish', '5900:5900',
+				'-p8080:80',
+				'--publish=9090:90',
+				'-P',
+				'--publish-all',
+				'--publish-all=true',
+				'-e', 'DISPLAY=:0',
+				'--pid=host',
+			]),
+			['--network', 'host', '-e', 'DISPLAY=:0', '--pid=host']
+		);
 	});
 
 	test('normalizeIbPathForDocker: база внутри проекта становится относительной', () => {

@@ -127,7 +127,7 @@ export class RunCommands extends BaseCommand {
 	 */
 	private async runClient(start: () => Promise<StructuredCommandResult | void>): Promise<StructuredCommandResult | void> {
 		if ((await this.vrunner.shouldUseDocker()) && !(await this.vrunner.runOnThisMachine(() => this.platformInstalled()))) {
-			return start();
+			return this.vrunner.runWithWindow(start);
 		}
 		return this.vrunner.runOnThisMachine(start);
 	}

@@ -26,6 +26,34 @@ suite('Docker: режим проекта', () => {
 		});
 	});
 
+	test('порты из docker.runArgs публикуются только клиенту с окном', async () => {
+		await config().update('docker.enabled', true, vscode.ConfigurationTarget.Workspace);
+		await config().update('docker.image', 'vrunner:8.3.27-vnc', vscode.ConfigurationTarget.Workspace);
+		await config().update('docker.runArgs', ['-p', '127.0.0.1:6080:6080', '--network', 'host'], vscode.ConfigurationTarget.Workspace);
+		const vrunner = VRunnerManager.getInstance();
+		const internals = vrunner as unknown as {
+			dockerPlan(argsArray: string[][]): { options: { runArgs?: string[] } } | { error: string };
+		};
+		const runArgs = (): string[] | undefined => {
+			const plan = internals.dockerPlan([['--version']]);
+			assert.ok(!('error' in plan), 'error' in plan ? plan.error : '');
+			return plan.options.runArgs;
+		};
+
+		try {
+			await runWithProject(PROJECT, async () => {
+				assert.deepStrictEqual(runArgs(), ['--network', 'host']);
+				assert.deepStrictEqual(
+					await vrunner.runWithWindow(async () => runArgs()),
+					['-p', '127.0.0.1:6080:6080', '--network', 'host']
+				);
+			});
+		} finally {
+			await config().update('docker.image', undefined, vscode.ConfigurationTarget.Workspace);
+			await config().update('docker.runArgs', undefined, vscode.ConfigurationTarget.Workspace);
+		}
+	});
+
 	test('путь файла проекта для раннера в Docker ведёт в /workspace', async () => {
 		const vrunner = VRunnerManager.getInstance();
 		const report = path.join(PROJECT, 'build', 'test-reports', 'xunit.xml');

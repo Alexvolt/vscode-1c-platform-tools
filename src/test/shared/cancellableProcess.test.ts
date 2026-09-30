@@ -16,7 +16,7 @@ suite('отменяемый процесс', () => {
 
 		const result = await runCancellableCommand(SLEEP, {
 			token: cts.token,
-			onCancel: () => calls.push('cancel'),
+			onCancel: () => { calls.push('cancel'); },
 			onCancelled: () => calls.push('cancelled'),
 		});
 
@@ -31,7 +31,7 @@ suite('отменяемый процесс', () => {
 		const calls: string[] = [];
 		const running = runCancellableCommand(SLEEP, {
 			token: cts.token,
-			onCancel: () => calls.push('cancel'),
+			onCancel: () => { calls.push('cancel'); },
 			onCancelled: () => calls.push('cancelled'),
 		});
 		setTimeout(() => cts.cancel(), 300);
@@ -43,13 +43,50 @@ suite('отменяемый процесс', () => {
 		assert.deepStrictEqual(calls, ['cancel', 'cancelled']);
 	});
 
+	test('процесс завершается после уборки при отмене', async function () {
+		this.timeout(15000);
+		const cts = new vscode.CancellationTokenSource();
+		let cleaned = false;
+		const running = runCancellableCommand(SLEEP, {
+			token: cts.token,
+			onCancel: () =>
+				new Promise<void>((resolve) =>
+					setTimeout(() => {
+						cleaned = true;
+						resolve();
+					}, 700)
+				),
+		});
+		setTimeout(() => cts.cancel(), 300);
+
+		const result = await running;
+
+		assert.strictEqual(result.cancelled, true);
+		assert.ok(cleaned, 'процесс завершён до конца уборки');
+	});
+
+	test('процесс, вышедший сам во время уборки, сохраняет свой код', async function () {
+		this.timeout(15000);
+		const cts = new vscode.CancellationTokenSource();
+		const running = runCancellableCommand('node -e "setTimeout(() => process.exit(5), 700)"', {
+			token: cts.token,
+			onCancel: () => new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+		});
+		setTimeout(() => cts.cancel(), 200);
+
+		const result = await running;
+
+		assert.strictEqual(result.cancelled, true);
+		assert.strictEqual(result.exitCode, 5);
+	});
+
 	test('без отмены уборка не вызывается', async function () {
 		this.timeout(15000);
 		const calls: string[] = [];
 
 		const result = await runCancellableCommand('node -e "process.exit(3)"', {
 			token: new vscode.CancellationTokenSource().token,
-			onCancel: () => calls.push('cancel'),
+			onCancel: () => { calls.push('cancel'); },
 			onCancelled: () => calls.push('cancelled'),
 		});
 
@@ -92,7 +129,7 @@ suite('отменяемый процесс: программа с аргумен
 			{ file: process.execPath, args: ['-e', 'setTimeout(() => {}, 20000)'] },
 			{
 				token: cts.token,
-				onCancel: () => calls.push('cancel'),
+				onCancel: () => { calls.push('cancel'); },
 				onCancelled: () => calls.push('cancelled'),
 			}
 		);
