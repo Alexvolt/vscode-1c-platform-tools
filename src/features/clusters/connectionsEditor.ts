@@ -28,6 +28,7 @@ import type { ClustersProvider } from './clustersProvider';
 import type { ConnectionStore } from './connectionStore';
 import type { ClusterConnection } from './model';
 import {
+	CREDENTIAL_ROLE_COLORS,
 	validateCredentialSetInput,
 	type ClusterBinding,
 	type ClusterCredentialStore,
@@ -246,6 +247,13 @@ export class ClusterConnectionsEditor {
 		await this.postModel(target);
 	}
 
+	/** Перечитывает наборы и привязки в открытую форму, не меняя выбор в ней. */
+	async refresh(): Promise<void> {
+		if (this.panel) {
+			await this.postModel(undefined, { keepSelection: true });
+		}
+	}
+
 	dispose(): void {
 		this.panel?.dispose();
 		this.panel = undefined;
@@ -256,9 +264,13 @@ export class ClusterConnectionsEditor {
 	 *
 	 * @param target - Запись, которая должна быть выбрана
 	 * @param options - `replace` — заменить черновик даже с несохранёнными
-	 * правками: после записи хранилище главнее формы
+	 * правками: после записи хранилище главнее формы; `keepSelection` — оставить
+	 * выбор формы
 	 */
-	private async postModel(target?: EditorTarget, options?: { replace?: boolean }): Promise<void> {
+	private async postModel(
+		target?: EditorTarget,
+		options?: { replace?: boolean; keepSelection?: boolean }
+	): Promise<void> {
 		const connections = this.store.list().map((connection) => ({
 			...toConnectionDraft(connection),
 			clusterSetId: this.credentials.boundConnectionSet(connection.id, 'cluster')?.id ?? '',
@@ -296,6 +308,7 @@ export class ClusterConnectionsEditor {
 		void this.panel?.webview.postMessage({
 			type: 'model',
 			replace: options?.replace === true,
+			keepSelection: options?.keepSelection === true,
 			model: { connections, sets, selected },
 			bindings: this.credentials.listBindings(),
 			clusterBindings: this.credentials.listClusterBindings(),
@@ -884,11 +897,11 @@ function setSubtitle(item) {
 	return item.user || 'пользователь не задан';
 }
 
+const SET_COLORS = ${JSON.stringify(CREDENTIAL_ROLE_COLORS)};
+
 /** Цвет точки набора: базы, кластер и центральный сервер различимы издалека */
 function setColor(item) {
-	if (item.kind === 'infobase') { return 'var(--vscode-charts-blue, #3794ff)'; }
-	if (item.kind === 'agent') { return 'var(--vscode-charts-purple, #b180d7)'; }
-	return 'var(--vscode-charts-orange, #d18616)';
+	return SET_COLORS[item.kind] || SET_COLORS.cluster;
 }
 
 /** Выбор набора для подключения: конкретный набор или «не использовать» */
@@ -1269,12 +1282,28 @@ window.addEventListener('message', (event) => {
 		// заменяется только чистой. После сохранения хранилище главнее формы —
 		// тогда приходит replace, и черновик заменяется безусловно.
 		const dirty = !data.replace && (isDirty() || pendingEdit);
+		const previous = draft.selected;
 		if (!dirty) {
 			draft = JSON.parse(JSON.stringify(data.model));
+		} else {
+			// Набор, заведённый вне формы, попадает и в черновик: иначе сохранение
+			// формы удалило бы его как убранный.
+			const known = new Set(baseline.sets.map((item) => item.id));
+			for (const set of data.model.sets) {
+				if (!known.has(set.id)) {
+					draft.sets.push(JSON.parse(JSON.stringify(set)));
+					baseline.sets.push(JSON.parse(JSON.stringify(set)));
+				}
+			}
 		}
+		const keep = data.keepSelection
+			&& (previous.kind === 'set' ? draft.sets : draft.connections).some((item) => item.id === previous.id);
 		// «new» в выборе — просьба сразу открыть поля новой записи: так кнопка
 		// уведомления приводит в форму, где уже можно набирать, а не искать «плюс».
-		const created = applySelection(data.model.selected);
+		const created = keep ? false : applySelection(data.model.selected);
+		if (keep) {
+			draft.selected = { kind: previous.kind, id: previous.id };
+		}
 		if (dirty) {
 			baseline.selected = { kind: draft.selected.kind, id: draft.selected.id };
 			checkResult = null;

@@ -24,6 +24,13 @@ import {
 /** Роль набора: она же его вид. */
 export type CredentialRole = 'cluster' | 'agent' | 'infobase';
 
+/** Цвет точки набора в списках: роли различимы издалека. */
+export const CREDENTIAL_ROLE_COLORS: Record<CredentialRole, string> = {
+	cluster: 'var(--vscode-charts-orange, #d18616)',
+	agent: 'var(--vscode-charts-purple, #b180d7)',
+	infobase: 'var(--vscode-charts-blue, #3794ff)',
+};
+
 /** Набор учётных данных: без пароля. */
 export interface CredentialSet {
 	id: string;

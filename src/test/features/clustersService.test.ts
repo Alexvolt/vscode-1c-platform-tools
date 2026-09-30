@@ -5,6 +5,7 @@ import type { MissingCredentialsEvent } from '../../features/clusters/credential
 import type { ClusterConnection } from '../../features/clusters/model';
 import type { RacClient, RacResult } from '../../features/clusters/racClient';
 import { describeRacFailure } from '../../features/clusters/racOutput';
+import { grantInfobaseCredentials } from '../../features/clusters/infobaseCredentialsPick';
 
 /** Память вместо глобального состояния VS Code. */
 class FakeMemento {
@@ -140,6 +141,37 @@ suite('сервис кластера: учётные данные базы', () 
 		assert.ok(!client.calls[0].some((arg) => arg.startsWith('--infobase')));
 	});
 
+	test('тихое чтение свойств базы без привязки не уведомляет: набор предложит карточка', async () => {
+		const { service, events } = harness(() =>
+			refused('Недостаточно прав пользователя на информационную базу')
+		);
+
+		const result = await service.infobaseDetails(CONNECTION, CLUSTER, INFOBASE, 'Учёт', { quiet: true });
+
+		assert.ok(!result.ok && result.failure.role === 'infobase');
+		assert.deepStrictEqual(events, []);
+	});
+
+	test('тихое чтение свойств не уведомляет и о непринятом наборе', async () => {
+		const { service, credentials, events } = harness(() =>
+			refused('Недостаточно прав пользователя на информационную базу')
+		);
+		const set = await credentials.add({ name: 'База', user: 'Админ', kind: 'infobase' }, 'pwd');
+		await credentials.bindInfobase({
+			connectionId: CONNECTION.id,
+			clusterId: CLUSTER,
+			infobaseId: INFOBASE,
+			setId: set.id,
+			connectionName: CONNECTION.name,
+			infobaseName: 'Учёт',
+		});
+
+		const result = await service.infobaseDetails(CONNECTION, CLUSTER, INFOBASE, 'Учёт', { quiet: true });
+
+		assert.ok(!result.ok && result.failure.role === 'infobase');
+		assert.deepStrictEqual(events, []);
+	});
+
 	test('отказ администратора кластера при чтении базы не приписывается базе', async () => {
 		const { service, events } = harness(() => refused('Администратор кластера не аутентифицирован'));
 
@@ -196,5 +228,80 @@ suite('сервис кластера: роли отказов', () => {
 		await service.updateCluster(CONNECTION, CLUSTER, { name: 'Основной' });
 
 		assert.deepStrictEqual(events, [{ kind: 'agentMissing' }]);
+	});
+});
+
+suite('назначение набора базе', () => {
+	const TARGET = { connection: CONNECTION, clusterId: CLUSTER, infobase: { id: INFOBASE, name: 'Учёт' } };
+
+	test('принятый новый набор сохраняется с названием по пользователю и привязывается', async () => {
+		const { service, client, credentials } = harness(() => accepted());
+
+		const granted = await grantInfobaseCredentials({ credentials, service }, TARGET, {
+			user: ' Админ ',
+			password: 'pwd',
+			name: '',
+		});
+
+		assert.ok(granted.ok);
+		assert.ok(client.calls[0].includes('--infobase-user=Админ'));
+		assert.deepStrictEqual(
+			credentials.list('infobase').map(({ name, user }) => [name, user]),
+			[['Админ', 'Админ']]
+		);
+		assert.strictEqual(credentials.boundSetName(CONNECTION.id, INFOBASE), 'Админ');
+		assert.strictEqual(await credentials.password(credentials.list('infobase')[0].id), 'pwd');
+	});
+
+	test('новый набор, который база не приняла, не сохраняется', async () => {
+		const { service, credentials } = harness(() =>
+			refused('Недостаточно прав пользователя на информационную базу Учёт')
+		);
+
+		const granted = await grantInfobaseCredentials({ credentials, service }, TARGET, {
+			user: 'Админ',
+			password: 'wrong',
+			name: 'Учёт',
+		});
+
+		assert.deepStrictEqual(granted, {
+			ok: false,
+			message: 'База не приняла пользователя «Админ»',
+			rejected: true,
+		});
+		assert.deepStrictEqual(credentials.list(), []);
+		assert.strictEqual(credentials.boundSet(CONNECTION.id, INFOBASE), undefined);
+	});
+
+	test('сохранённый набор проверяется своим паролем и заменяет прежнюю привязку', async () => {
+		const { service, client, credentials } = harness(() => accepted());
+		const old = await credentials.add({ name: 'Старый', user: 'Старый', kind: 'infobase' }, 'x');
+		const set = await credentials.add({ name: 'Бухгалтер', user: 'Бух', kind: 'infobase' }, 'secret');
+		await credentials.bindInfobase({
+			connectionId: CONNECTION.id,
+			clusterId: CLUSTER,
+			infobaseId: INFOBASE,
+			setId: old.id,
+			connectionName: CONNECTION.name,
+			infobaseName: 'Учёт',
+		});
+
+		const granted = await grantInfobaseCredentials({ credentials, service }, TARGET, { setId: set.id });
+
+		assert.ok(granted.ok);
+		assert.ok(client.calls[0].includes('--infobase-pwd=secret'));
+		assert.strictEqual(credentials.boundSetName(CONNECTION.id, INFOBASE), 'Бухгалтер');
+	});
+
+	test('отказ администратора кластера не выдаётся за отказ базы', async () => {
+		const { service, credentials } = harness(() => refused('Администратор кластера не аутентифицирован'));
+
+		const granted = await grantInfobaseCredentials({ credentials, service }, TARGET, {
+			user: 'Админ',
+			password: '',
+			name: '',
+		});
+
+		assert.ok(!granted.ok && !granted.rejected);
 	});
 });
