@@ -45,14 +45,23 @@ suite('запуск команд EDT', () => {
 		]);
 	});
 
-	test('каждый аргумент JVM передаётся своим -vmargs', () => {
+	test('аргументы JVM идут одним -vmargs перед -command', () => {
 		const args = buildEdtArgs(
 			{ command: 'build', args: [], title: 'Сборка', workspaceDir: 'ws', cwd: '.' },
 			settings({ vmargs: ['-Xmx8g', '-Dfile.encoding=UTF-8'] })
 		);
 
-		assert.deepStrictEqual(args.slice(4, 8), ['-vmargs', '-Xmx8g', '-vmargs', '-Dfile.encoding=UTF-8']);
-		assert.strictEqual(args[8], '-command');
+		assert.deepStrictEqual(args, [
+			'-data',
+			'ws',
+			'-timeout',
+			'3600',
+			'-vmargs',
+			'-Xmx8g',
+			'-Dfile.encoding=UTF-8',
+			'-command',
+			'build',
+		]);
 	});
 
 	test('таймаут берётся из настроек', () => {

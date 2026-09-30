@@ -308,12 +308,13 @@ export interface EdtCommand {
  * Собирает аргументы запуска `1cedtcli`.
  *
  * Порядок важен: рабочая область и общие параметры идут до `-command`, всё
- * после него достаётся самой команде.
+ * после него достаётся самой команде. Лаунчер отдаёт JVM всё от первого
+ * `-vmargs` до `-command`: второй `-vmargs` дошёл бы до Java буквально.
  */
 export function buildEdtArgs(request: EdtCommand, settings: EdtSettings): string[] {
 	const args = ['-data', request.workspaceDir, '-timeout', String(settings.timeoutSeconds)];
-	for (const vmarg of settings.vmargs) {
-		args.push('-vmargs', vmarg);
+	if (settings.vmargs.length > 0) {
+		args.push('-vmargs', ...settings.vmargs);
 	}
 	args.push('-command', request.command, ...request.args);
 	return args;
