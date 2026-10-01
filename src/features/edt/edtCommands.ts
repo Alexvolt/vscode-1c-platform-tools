@@ -31,7 +31,7 @@ import { buildProcessCommand } from '../../utils/commandUtils';
 import { createVRunnerTask, TaskOutputChain } from '../tasks/vrunnerTask';
 import { ensureMdSparrowRuntime } from '../metadata/mdSparrowBootstrap';
 import { runMdSparrowParamsMutation } from '../metadata/mdSparrowParams';
-import { pickDumpFormat } from '../metadata/mdSparrowSchemaVersion';
+import { pickDumpFormat } from '../metadata/dumpFormatPick';
 import { notifyQuiet } from '../../shared/notify';
 import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 
@@ -183,7 +183,7 @@ export async function createEdtProject(context: vscode.ExtensionContext): Promis
 		void vscode.window.showErrorMessage(`Каталог уже есть: ${projectName}`);
 		return undefined;
 	}
-	const schemaVersion = await pickDumpFormat('Версия формата проекта 1С:EDT');
+	const schemaVersion = await pickDumpFormat(context, 'Версия формата проекта 1С:EDT');
 	if (!schemaVersion) {
 		return undefined;
 	}

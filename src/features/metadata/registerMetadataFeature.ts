@@ -66,7 +66,8 @@ import {
 	type SourcePropertyDictionaries,
 	type SourceSupportState,
 } from './metadataSourcePropertiesPanel';
-import { mdSparrowSchemaFlagFromConfigurationXml, pickDumpFormat } from './mdSparrowSchemaVersion';
+import { mdSparrowSchemaFlagFromConfigurationXml } from './mdSparrowSchemaVersion';
+import { pickDumpFormat } from './dumpFormatPick';
 import {
 	runMdSparrowParamsMutation,
 	runMdSparrowParamsRead,
@@ -1308,7 +1309,7 @@ export function registerMetadataFeature(
 			await fs.promises.access(configurationXmlPath);
 			return await mdSparrowSchemaFlagFromConfigurationXml(configurationXmlPath);
 		} catch {
-			return pickDumpFormat('Версия формата выгрузки');
+			return pickDumpFormat(context, 'Версия формата выгрузки');
 		}
 	}
 

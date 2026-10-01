@@ -84,6 +84,7 @@ export type MdSparrowOp =
 	// чтение (read-json)
 	| 'cf-md-object-get'
 	| 'cf-enum-labels'
+	| 'cf-format-versions'
 	| 'cf-md-object-enums'
 	| 'cf-list-ref-types'
 	| 'cf-md-object-structure-get'
@@ -296,6 +297,7 @@ const CACHED_READS: ReadonlySet<string> = new Set([
 	'cf-configuration-properties-get',
 	'cf-md-object-enums',
 	'cf-enum-labels',
+	'cf-format-versions',
 	'cf-list-child-objects',
 	'cf-md-subsystem-tree',
 ]);

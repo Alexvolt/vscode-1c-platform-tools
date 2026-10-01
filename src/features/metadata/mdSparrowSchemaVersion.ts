@@ -3,48 +3,13 @@
  * @module mdSparrowSchemaVersion
  */
 
-import * as vscode from 'vscode';
-import { formatOfFile } from '../../shared/objectPaths';
-
 /** Первые байты файла достаточно для тега MetaDataObject с version. */
+import { formatOfFile } from '../../shared/objectPaths';
 
 const CONFIG_XML_HEAD_BYTES = 65536;
 
 /** Флаг схемы для проекта EDT: пустой, md-sparrow версию выгрузки у него не спрашивает. */
 export const EDT_SCHEMA_FLAG = '';
-
-/**
- * Форматы выгрузки, которые пишет md-sparrow, от нового к старому, и линейка платформы,
- * которая пишет каждый из них: как в `SchemaVersion` md-sparrow.
- */
-export const DUMP_FORMATS: readonly { readonly version: string; readonly platform: string }[] = [
-	{ version: '2.21', platform: '8.5.1' },
-	{ version: '2.20', platform: '8.3.27' },
-	{ version: '2.19', platform: '8.3.26' },
-	{ version: '2.18', platform: '8.3.25' },
-	{ version: '2.17', platform: '8.3.24' },
-	{ version: '2.16', platform: '8.3.23' },
-	{ version: '2.15', platform: '8.3.22' },
-	{ version: '2.14', platform: '8.3.21' },
-	{ version: '2.13', platform: '8.3.20' },
-	{ version: '2.12', platform: '8.3.19' },
-	{ version: '2.11', platform: '8.3.18' },
-	{ version: '2.10', platform: '8.3.17' },
-];
-
-/**
- * Спрашивает версию формата новой конфигурации.
- *
- * @param title - Заголовок выбора
- * @returns Флаг md-sparrow, например `V2_21`; undefined, если выбор отменён
- */
-export async function pickDumpFormat(title: string): Promise<string | undefined> {
-	const pick = await vscode.window.showQuickPick(
-		DUMP_FORMATS.map((format) => ({ label: format.version, description: `платформа ${format.platform}` })),
-		{ title }
-	);
-	return pick && designerXmlVersionToMdSparrowFlag(pick.label);
-}
 
 /** Без префикса или с префиксом (например после сторонней сериализации). */
 const META_DATA_OBJECT_VERSION_RE = /<(?:[\w.-]+:)?MetaDataObject\b[^>]*\bversion\s*=\s*"([^"]+)"/;
