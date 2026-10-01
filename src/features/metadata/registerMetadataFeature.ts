@@ -10,6 +10,7 @@ import {
 	runWithProject,
 } from '../../shared/workspaceProjects';
 import { onDidChangeProjectLayout } from '../../shared/projectLayoutWatch';
+import { logger } from '../../shared/logger';
 import * as fs from 'node:fs';
 import { createEdtProject, validateEdtProject } from '../edt/edtCommands';
 import { edtProjectName } from '../edt/edtRunner';
@@ -81,6 +82,7 @@ import type { ErScope } from './er/erTypes';
 import {
 	defaultMetadataLeafOpenCommand,
 	isMetadataCommonForm,
+	MetadataErrorTreeItem,
 	MetadataLeafTreeItem,
 	MetadataObjectNodeTreeItem,
 	MetadataObjectSectionTreeItem,
@@ -1979,6 +1981,14 @@ export function registerMetadataFeature(
 				await vscode.env.clipboard.writeText(node.resourceUri.fsPath);
 			}
 		),
+		registerMetadataCommand('1c-platform-tools.metadata.copyError', async (item?: MetadataErrorTreeItem) => {
+			if (item instanceof MetadataErrorTreeItem) {
+				await vscode.env.clipboard.writeText(item.errorText);
+			}
+		}),
+		registerMetadataCommand('1c-platform-tools.metadata.showLog', () => {
+			logger.show();
+		}),
 		registerMetadataCommand(
 			'1c-platform-tools.metadata.openExternalConnectionModule',
 			async (item?: MetadataSourceTreeItem) => {
