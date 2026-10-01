@@ -16,6 +16,8 @@ import { extractExpectedActual } from './expectedActual';
 export interface JUnitCase {
 	/** Имя набора (testsuite name) */
 	suiteName: string;
+	/** Атрибут package набора (YAxUnit пишет в него имя расширения) */
+	suitePackage?: string;
 	/** Атрибут classname testcase */
 	className: string;
 	/** Атрибут name testcase */
@@ -89,6 +91,7 @@ function parseTimeMs(time: unknown): number | undefined {
 function parseTestCase(
 	testcase: Record<string, unknown>,
 	suiteName: string,
+	suitePackage: string | undefined,
 	suiteFile: string | undefined
 ): JUnitCase {
 	const failures = toArray(testcase['failure']);
@@ -124,6 +127,7 @@ function parseTestCase(
 	const file = typeof testcase['@_file'] === 'string' ? testcase['@_file'] : suiteFile;
 	return {
 		suiteName,
+		suitePackage,
 		className: typeof testcase['@_classname'] === 'string' ? testcase['@_classname'] : '',
 		name: typeof testcase['@_name'] === 'string' ? testcase['@_name'] : String(testcase['@_name'] ?? ''),
 		file: file && file.length > 0 ? file : undefined,
@@ -141,12 +145,14 @@ function parseTestCase(
  */
 function collectFromSuite(suite: Record<string, unknown>, results: JUnitCase[]): void {
 	const suiteName = typeof suite['@_name'] === 'string' ? suite['@_name'] : '';
+	const suitePackage =
+		typeof suite['@_package'] === 'string' && suite['@_package'].length > 0 ? suite['@_package'] : undefined;
 	// file наследуется кейсами набора, если у самого testcase атрибута нет
 	const suiteFile = typeof suite['@_file'] === 'string' ? suite['@_file'] : undefined;
 
 	for (const testcase of toArray(suite['testcase'])) {
 		if (testcase && typeof testcase === 'object') {
-			results.push(parseTestCase(testcase as Record<string, unknown>, suiteName, suiteFile));
+			results.push(parseTestCase(testcase as Record<string, unknown>, suiteName, suitePackage, suiteFile));
 		}
 	}
 

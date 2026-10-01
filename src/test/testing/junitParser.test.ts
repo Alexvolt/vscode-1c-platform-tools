@@ -1,5 +1,7 @@
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
 import { parseJUnitXml } from '../../features/testing/parsers/junitParser';
+import { fixturePath } from '../fixtures/helpers/fixturePath';
 
 suite('junitParser', () => {
 	test('разбирает отчёт с корнем testsuites', () => {
@@ -114,6 +116,11 @@ suite('junitParser', () => {
 		const cases = parseJUnitXml(xml);
 		assert.strictEqual(cases[0].file, 'tests/Свой.os', 'берётся file самого testcase');
 		assert.strictEqual(cases[1].file, 'tests/Набор.os', 'наследуется file набора');
+	});
+
+	test('читает package набора: YAxUnit пишет в него имя расширения', () => {
+		const cases = parseJUnitXml(fs.readFileSync(fixturePath('yaxunit', 'reports', 'test-presentation.xml'), 'utf8'));
+		assert.deepStrictEqual(cases.map((testCase) => testCase.suitePackage), ['YAXUNIT', 'YAXUNIT']);
 	});
 
 	test('XML без testsuite вызывает ошибку', () => {

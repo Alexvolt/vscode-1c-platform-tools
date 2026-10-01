@@ -4,7 +4,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { VRunnerManager } from '../../shared/vrunnerManager';
-import { YaxunitAdapter, extractModuleName } from '../../features/testing/adapters/yaxunitAdapter';
+import { YaxunitAdapter, extractModuleName, procedureCase } from '../../features/testing/adapters/yaxunitAdapter';
+import { parseJUnitXml, type JUnitCase } from '../../features/testing/parsers/junitParser';
+import { fixturePath } from '../fixtures/helpers/fixturePath';
 
 import { invalidateProjectLayout } from '../../shared/projectLayout';
 
@@ -253,5 +255,64 @@ suite('yaxunitAdapter: раскладка EDT', () => {
 			locate(adapter, DESIGNER_WORKSPACE, 'чужое', 'Другое', 'CommonModules', 'ОМ_Тест', 'Ext', 'Module.bsl').segments,
 			['Другое']
 		);
+	});
+
+	test('модуль назван для отчёта с расширением из метаданных', async () => {
+		const adapter = new YaxunitAdapter(vrunnerAt(DESIGNER_WORKSPACE));
+		await adapter.getIncludeGlobs();
+		const content = await fs.readFile(fixturePath('yaxunit', 'TestPresentation.bsl'), 'utf8');
+		const label = (...segments: string[]) =>
+			adapter.parseFile(content, vscode.Uri.file(path.join(DESIGNER_WORKSPACE, ...segments)))?.label;
+
+		assert.strictEqual(label('tests', 'cfe', 'Тесты', 'CommonModules', 'ОМ_Тест', 'Ext', 'Module.bsl'), 'Тесты.ОМ_Тест');
+		// имя расширения в метаданных отличается от имени каталога
+		assert.strictEqual(
+			label('src', 'cfe', 'МоёРасширение', 'CommonModules', 'ОМ_Тест', 'Ext', 'Module.bsl'),
+			'Расширение.ОМ_Тест'
+		);
+		assert.strictEqual(label('чужое', 'Другое', 'CommonModules', 'ОМ_Тест', 'Ext', 'Module.bsl'), 'ОМ_Тест');
+	});
+
+	test('у проекта EDT модуль назван с расширением проекта, у конфигурации - без расширения', async () => {
+		const adapter = new YaxunitAdapter(vrunnerAt(EDT_WORKSPACE));
+		await adapter.getIncludeGlobs();
+		const content = await fs.readFile(fixturePath('yaxunit', 'TestPresentation.bsl'), 'utf8');
+		const label = (...segments: string[]) =>
+			adapter.parseFile(content, vscode.Uri.file(path.join(EDT_WORKSPACE, ...segments)))?.label;
+
+		assert.strictEqual(label('tests', 'cfe', 'yaxunit-test', 'src', 'CommonModules', 'ОМ_Тест', 'Module.bsl'), 'Тесты.ОМ_Тест');
+		assert.strictEqual(label('ssl31', 'src', 'CommonModules', 'ОбщийТест', 'Module.bsl'), 'ОбщийТест');
+	});
+});
+
+suite('yaxunitAdapter: testcase отчёта', () => {
+	/** testcase отчёта из фикстуры. */
+	async function reportCases(name: string): Promise<JUnitCase[]> {
+		return parseJUnitXml(await fs.readFile(fixturePath('yaxunit', 'reports', name), 'utf8'));
+	}
+
+	test('тест с описанием назван процедурой из classname, модуль - с расширением', async () => {
+		const cases = (await reportCases('test-presentation.xml')).map(procedureCase);
+		assert.deepStrictEqual(cases.map((testCase) => [testCase.className, testCase.name]), [
+			['YAXUNIT.Док_АктыВыполненныхРабот', 'АктВыполненныхРабот_Корректный'],
+			['YAXUNIT.Док_АктыВыполненныхРабот', 'АктВыполненныхРабот_ОшибкаПроведения'],
+		]);
+	});
+
+	test('у теста без описания меняется только модуль, подробности падения сохраняются', async () => {
+		const failed = (await reportCases('ssl31.xml')).find((testCase) => testCase.status === 'failed');
+		assert.ok(failed);
+		assert.deepStrictEqual(procedureCase(failed), { ...failed, className: 'Тесты.ОМ_Тест_ПримерыПадений' });
+	});
+
+	test('без package модуль остаётся без расширения', async () => {
+		const [testCase] = await reportCases('test-presentation.xml');
+		assert.strictEqual(procedureCase({ ...testCase, suitePackage: undefined }).className, 'Док_АктыВыполненныхРабот');
+	});
+
+	test('classname без процедуры не меняется', async () => {
+		const [testCase] = await reportCases('test-presentation.xml');
+		const moduleOnly = { ...testCase, className: 'Док_АктыВыполненныхРабот' };
+		assert.strictEqual(procedureCase(moduleOnly), moduleOnly);
 	});
 });

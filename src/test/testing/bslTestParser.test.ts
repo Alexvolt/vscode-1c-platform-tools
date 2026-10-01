@@ -303,7 +303,7 @@ suite('bslTestParser: регистрация тестов YAxUnit', () => {
 		assert.deepStrictEqual(caseNames('CommentedRegistration'), ['Рабочий', 'ЗагрузкаПоАдресу']);
 	});
 
-	test('представление теста в дерево не идёт: в jUnit имя теста - имя метода', () => {
+	test('представление теста в дерево не идёт: тест назван процедурой', () => {
 		assert.deepStrictEqual(caseNames('TestPresentation'), ['ПроведениеДокумента']);
 	});
 });
