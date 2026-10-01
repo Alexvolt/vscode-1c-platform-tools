@@ -31,13 +31,11 @@ import { buildProcessCommand } from '../../utils/commandUtils';
 import { createVRunnerTask, TaskOutputChain } from '../tasks/vrunnerTask';
 import { ensureMdSparrowRuntime } from '../metadata/mdSparrowBootstrap';
 import { runMdSparrowParamsMutation } from '../metadata/mdSparrowParams';
+import { pickDumpFormat } from '../metadata/dumpFormatPick';
 import { notifyQuiet } from '../../shared/notify';
 import { ensureWorkspaceTrusted } from '../../shared/workspaceTrust';
 
 const log = logger.scope('edt');
-
-/** Версия формата выгрузки-заготовки: свежая, чтобы проект получил новую платформу. */
-const EMPTY_DUMP_SCHEMA = 'V2_21';
 
 /** Проект EDT, над которым идёт работа. */
 interface EdtTarget {
@@ -185,6 +183,10 @@ export async function createEdtProject(context: vscode.ExtensionContext): Promis
 		void vscode.window.showErrorMessage(`Каталог уже есть: ${projectName}`);
 		return undefined;
 	}
+	const schemaVersion = await pickDumpFormat(context, 'Версия формата проекта 1С:EDT');
+	if (!schemaVersion) {
+		return undefined;
+	}
 
 	const emptyDump = path.join(os.tmpdir(), `edt-empty-${Date.now()}`);
 	try {
@@ -193,7 +195,7 @@ export async function createEdtProject(context: vscode.ExtensionContext): Promis
 		const created = await runMdSparrowParamsMutation(
 			runtime,
 			// Версию формата задаёт выгрузка-заготовка: 1С:EDT берёт из неё версию платформы
-			{ op: 'init-empty-cf', targetCfRoot: emptyDump, schemaVersion: EMPTY_DUMP_SCHEMA, name: projectName },
+			{ op: 'init-empty-cf', targetCfRoot: emptyDump, schemaVersion, name: projectName },
 			{ cwd: workspaceRoot }
 		);
 		if (created.exitCode !== 0) {

@@ -67,6 +67,7 @@ import {
 	type SourceSupportState,
 } from './metadataSourcePropertiesPanel';
 import { mdSparrowSchemaFlagFromConfigurationXml } from './mdSparrowSchemaVersion';
+import { pickDumpFormat } from './dumpFormatPick';
 import {
 	runMdSparrowParamsMutation,
 	runMdSparrowParamsRead,
@@ -102,6 +103,8 @@ import { describeComponentState, readComponentStates } from '../../shared/compon
 import { CfDumpFinding, DumpValidationDiagnostics } from './dumpValidationDiagnostics';
 import { edtProjectDirOf, metadataCompileTarget, type MetadataCompileKind } from './metadataCompileTarget';
 import { ArtifactCommands } from '../../commands/artifactCommands';
+import { pickProjectDirectory } from '../../commands/baseCommand';
+import { projectRelativePath } from '../../commands/projectScope';
 
 export interface RegisterMetadataFeatureParams {
 	context: vscode.ExtensionContext;
@@ -1306,12 +1309,7 @@ export function registerMetadataFeature(
 			await fs.promises.access(configurationXmlPath);
 			return await mdSparrowSchemaFlagFromConfigurationXml(configurationXmlPath);
 		} catch {
-			const formats = ['2.21', '2.20', '2.19', '2.18', '2.17', '2.16', '2.15', '2.14', '2.13', '2.12', '2.11', '2.10'];
-			const pick = await vscode.window.showQuickPick(
-				formats.map((f) => ({ label: `V${f.replace('.', '_')}`, description: `Схемы ${f}` })),
-				{ title: 'Версия XSD для пустой выгрузки (нет Configuration.xml)' }
-			);
-			return pick?.label;
+			return pickDumpFormat(context, 'Версия формата выгрузки');
 		}
 	}
 
@@ -2873,15 +2871,26 @@ export function registerMetadataFeature(
 			}
 			await runMdSparrowMutation(async () => {
 				const workspaceRoot = currentRoot();
-				const main = metadataTreeProvider.configurationXml;
-				// Рядом с проектом EDT выгрузка встаёт в привычное место: его src выгрузкой не является
-				const cfRoot =
-					main && formatOfFile(main) === 'edt'
-						? workspaceRoot && path.join(workspaceRoot, CONVENTIONAL_PATHS.cf)
-						: metadataTreeProvider.resolveCfRoot();
-				if (!cfRoot) {
-					void vscode.window.showInformationMessage('Нет открытой папки проекта или выгрузки CF.');
+				if (!workspaceRoot) {
+					void vscode.window.showInformationMessage('Нет открытой папки проекта.');
 					return;
+				}
+				const main = metadataTreeProvider.configurationXml;
+				// Есть выгрузка - её и пересоздаём; новую кладут, куда скажут: src проекта EDT выгрузкой не является
+				let cfRoot: string;
+				if (main && formatOfFile(main) === 'designer' && fs.existsSync(main)) {
+					cfRoot = path.dirname(main);
+				} else {
+					const picked = await pickProjectDirectory(
+						workspaceRoot,
+						CONVENTIONAL_PATHS.cf,
+						'Каталог новой выгрузки',
+						'Куда положить выгрузку конфигурации'
+					);
+					if (!picked) {
+						return;
+					}
+					cfRoot = path.resolve(workspaceRoot, picked);
 				}
 				const configurationXmlPath = path.join(cfRoot, 'Configuration.xml');
 				let occupied = false;
@@ -2892,7 +2901,7 @@ export function registerMetadataFeature(
 				}
 				if (occupied) {
 					const answer = await vscode.window.showWarningMessage(
-						`Каталог ${cfRoot} не пуст. Всё его содержимое будет удалено. Продолжить?`,
+						`Каталог ${projectRelativePath(workspaceRoot, cfRoot)} не пуст. Всё его содержимое будет удалено. Продолжить?`,
 						{ modal: true },
 						'Продолжить'
 					);
@@ -2909,7 +2918,7 @@ export function registerMetadataFeature(
 					const res = await runMdSparrowParamsMutation(
 						runtime,
 						{ op: 'init-empty-cf', targetCfRoot: cfRoot, schemaVersion: schema },
-						{ cwd: cfRoot }
+						{ cwd: workspaceRoot }
 					);
 					if (res.exitCode !== 0) {
 						const errText = (res.stderr.trim() || res.stdout.trim() || `код ${res.exitCode}`).slice(

@@ -7,6 +7,9 @@ const LAUNCH_ADDITIONAL = '/DisplayAllFunctions /L ru';
 export const TEST_ADDITIONAL =
 	`${LAUNCH_ADDITIONAL} /DisableStartupDialogs /DisableStartupMessages /AllowExecuteScheduledJobs -Off`;
 
+/** Версия платформы новых служебных файлов: та, что пишет самый свежий формат выгрузки. */
+export const DEFAULT_PLATFORM = '8.5';
+
 /** Базовые поля секции default, общие для всех env-файлов */
 const DEFAULT_SECTION = {
 	'--ibconnection': '/F./build/ib',
@@ -14,7 +17,7 @@ const DEFAULT_SECTION = {
 	'--db-pwd': '',
 	'--root': '.',
 	'--workspace': '.',
-	'--v8version': '8.3',
+	'--v8version': DEFAULT_PLATFORM,
 	'--locale': 'ru',
 	'--language': 'ru',
 };
@@ -44,7 +47,7 @@ export const AUTUMN_DEFAULTS = {
 		'db-pwd': '',
 		root: '.',
 		workspace: '.',
-		v8version: '8.3',
+		v8version: DEFAULT_PLATFORM,
 		locale: 'ru',
 		language: 'ru',
 		additional: LAUNCH_ADDITIONAL,
