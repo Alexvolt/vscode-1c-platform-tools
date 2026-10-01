@@ -66,11 +66,16 @@ export function designerExtensionBase(
  *
  * @param workspaceRoot - Корень рабочей области
  * @param conversion - Что и куда конвертируется
+ * @param background - Команду ждёт вызывающий: 1cedtcli идёт в фоне, без терминала
  * @returns Итог первой неудавшейся команды 1cedtcli либо последней
  */
-export async function convertSourcesWithEdt(workspaceRoot: string, conversion: EdtConversion): Promise<EdtRunResult> {
+export async function convertSourcesWithEdt(
+	workspaceRoot: string,
+	conversion: EdtConversion,
+	background = false
+): Promise<EdtRunResult> {
 	const workspaceDir = edtWorkspaceDir(workspaceRoot, VRunnerManager.getInstance().getOutPath());
-	const output = new TaskOutputChain();
+	const output = new TaskOutputChain(background);
 
 	if (conversion.baseProjectDir !== undefined) {
 		const registered = await ensureProjectRegistered(conversion.baseProjectDir, workspaceDir, workspaceRoot, output);

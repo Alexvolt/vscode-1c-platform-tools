@@ -739,8 +739,9 @@ export abstract class BaseCommand {
 		}
 		// Базовый проект у каждого шага свой: расширение чужой конфигурации к активной не относится
 		const baseOf = await this.edtBaseProjectResolver(workspaceRoot);
-		// Шаги моста и команда раннера пишут в один терминал подряд, не стирая друг друга
-		const output = new TaskOutputChain();
+		// Шаги моста и команда раннера пишут в один терминал подряд, не стирая друг друга;
+		// команду, которую ждёт вызывающий, мост, как и раннер, выполняет в фоне
+		const output = new TaskOutputChain(opts?.wait === true);
 		const context: EdtBridgeContext = { workspaceRoot, buildDir, output };
 		const withBase = exports.map((step) =>
 			'projectDir' in step ? { ...step, baseProjectDir: baseOf(step.projectDir) } : step
