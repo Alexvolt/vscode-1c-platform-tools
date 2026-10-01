@@ -10,7 +10,7 @@ fixtures/
 │   ├── minimal-1c-project/  # Минимальный проект (Configuration.xml, env.json, etc.)
 │   ├── full-1c-project/      # Полный проект с исходниками
 │   └── empty-project/        # Пустой проект
-├── yaxunit/                  # Модули тестовых расширений YAxUnit для разбора
+├── yaxunit/                  # YAxUnit: модули для разбора, проект и отчёты прогона
 ├── mocks/                    # Моки для VS Code API
 │   └── vscodeMocks.ts
 └── helpers/                  # Утилиты для работы с фикстурами

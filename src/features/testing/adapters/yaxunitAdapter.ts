@@ -9,6 +9,7 @@ import { logger } from '../../../shared/logger';
 import { TestFrameworkAdapter, AdapterRunPlan, RunUnit } from '../frameworkAdapter';
 import { DiscoveredFile } from '../parsers/parserTypes';
 import { parseBslTestModule } from '../parsers/bslTestParser';
+import type { JUnitCase } from '../parsers/junitParser';
 import { resolveConfigPath, yaxunitSectionFromEnv, type YaxunitProfileSection } from '../projectTestConfig';
 import { DEFAULT_TESTING } from '../../../shared/pathDefaults';
 import { projectConfiguration } from '../../../shared/projectConfiguration';
@@ -77,8 +78,15 @@ export class YaxunitAdapter implements TestFrameworkAdapter {
 		return [...designer, ...edt].filter((glob, index, all) => all.indexOf(glob) === index);
 	}
 
-	public parseFile(content: string): DiscoveredFile | undefined {
-		return parseBslTestModule(content, 'yaxunit');
+	public parseFile(content: string, fileUri: vscode.Uri): DiscoveredFile | undefined {
+		const parsed = parseBslTestModule(content, 'yaxunit');
+		// Файл модуля назван Module.bsl, а отчёт называет модуль с расширением:
+		// по этому имени общий отчёт батч-прогона расходится по файлам
+		return parsed && { ...parsed, label: reportModuleName(this.roots, fileUri.fsPath) };
+	}
+
+	public transformReportCases(cases: JUnitCase[]): JUnitCase[] {
+		return cases.map(procedureCase);
 	}
 
 	public isTestFile(content: string): boolean {
@@ -114,7 +122,8 @@ export class YaxunitAdapter implements TestFrameworkAdapter {
 	/**
 	 * Батч-прогон: один запуск 1С со списком модулей в фильтре.
 	 *
-	 * Отчёт общий, кейсы раскладываются по файлам через имя модуля в classname.
+	 * Отчёт общий, кейсы раскладываются по файлам по модулю из classname и
+	 * расширению из package набора.
 	 *
 	 * @param units - Файлы прогона (модули тестового расширения)
 	 * @param reportDir - Каталог отчёта прогона
@@ -287,6 +296,44 @@ function owningRoot(roots: readonly SourceRoot[], file: string): SourceRoot | un
 		}
 	}
 	return found;
+}
+
+/**
+ * Модуль, как его называет отчёт YAxUnit: «Расширение.Модуль».
+ *
+ * У модуля вне известных расширений остаётся одно имя модуля.
+ *
+ * @param roots - Корни раскладки
+ * @param fsPath - Путь к модулю
+ */
+function reportModuleName(roots: readonly SourceRoot[], fsPath: string): string {
+	const root = owningRoot(roots, fsPath);
+	const moduleName = extractModuleName(fsPath);
+	return root?.isExtension && root.name ? `${root.name}.${moduleName}` : moduleName;
+}
+
+/**
+ * testcase YAxUnit с именами, как в дереве тестов.
+ *
+ * В name YAxUnit пишет представление теста: описание из регистрации, без него у
+ * теста с параметрами имя метода с параметрами. Процедура есть только в classname
+ * («Модуль.Метод»), расширение - в package набора. В дереве тест назван
+ * процедурой, а модуль в отчёте называется «Расширение.Модуль».
+ *
+ * @param testCase - testcase из отчёта YAxUnit
+ * @returns testcase с процедурой в name и модулем с расширением в className
+ */
+export function procedureCase(testCase: JUnitCase): JUnitCase {
+	const separator = testCase.className.indexOf('.');
+	if (separator <= 0 || separator === testCase.className.length - 1) {
+		return testCase;
+	}
+	const moduleName = testCase.className.slice(0, separator);
+	return {
+		...testCase,
+		className: testCase.suitePackage ? `${testCase.suitePackage}.${moduleName}` : moduleName,
+		name: testCase.className.slice(separator + 1),
+	};
 }
 
 export function extractModuleName(fsPath: string): string {

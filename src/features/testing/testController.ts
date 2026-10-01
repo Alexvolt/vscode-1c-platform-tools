@@ -205,10 +205,10 @@ export class TestingController implements vscode.Disposable {
 	 */
 	private readonly caseGroupNames = new Map<string, string>();
 	/**
-	 * fileItemId → заголовок файла из его содержимого (имя Функционала, имя модуля).
+	 * fileItemId → заголовок файла из разбора: имя Функционала, модуль YAxUnit с расширением.
 	 *
-	 * Vanessa Automation пишет в отчёт имя функционала, а не имя файла, — по нему
-	 * кейсы общего отчёта раскладываются обратно по узлам-файлам.
+	 * Отчёт называет файл так, а не именем файла, — по заголовку кейсы общего
+	 * отчёта раскладываются обратно по узлам-файлам.
 	 */
 	private readonly fileLabels = new Map<string, string>();
 	private runCounter = 0;
@@ -610,7 +610,7 @@ export class TestingController implements vscode.Disposable {
 			try {
 				const bytes = await vscode.workspace.fs.readFile(uri);
 				const content = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-				discovered = entry.adapter.parseFile(content);
+				discovered = entry.adapter.parseFile(content, uri);
 			} catch (error) {
 				log.warn(`Не удалось прочитать ${uri.fsPath}: ${(error as Error).message}`);
 				discovered = undefined;
@@ -1037,11 +1037,10 @@ export class TestingController implements vscode.Disposable {
 		const { byFile, unrouted } = routeReportCases(junitCases, routable);
 
 		for (const entry of entries) {
-			const cases = byFile.get(entry.item.id);
 			// Раскладка не дала кейсов файлу (нестандартный формат отчёта) — запасной путь:
-			// применяем весь отчёт по совпадению имён, чтобы не пометить пройденный файл
-			// ошибкой; в обычном случае сюда приходят только свои кейсы файла
-			this.applyResults(run, entry, cases && cases.length > 0 ? cases : junitCases, true);
+			// сопоставляем по именам то, что не разошлось по файлам. Кейсы других файлов
+			// сюда не попадают, иначе одноимённый тест получил бы чужой результат
+			this.applyResults(run, entry, byFile.get(entry.item.id) ?? unrouted, true);
 		}
 
 		// unrouted логируем только если он не «съест» весь отчёт запасным путём выше

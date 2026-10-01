@@ -19,9 +19,9 @@ export interface RoutableFile {
 	/** Абсолютный путь к файлу теста */
 	fsPath: string;
 	/**
-	 * Заголовок файла из его содержимого: имя Функционала (.feature) или имя
-	 * модуля. Vanessa Automation пишет в отчёт именно его (testsuite name,
-	 * хвост classname), а не имя файла.
+	 * Заголовок файла: имя Функционала (.feature) или модуль YAxUnit
+	 * «Расширение.Модуль». Отчёт называет файл именно так (у Vanessa Automation
+	 * testsuite name и хвост classname), а не именем файла.
 	 */
 	label?: string;
 }
@@ -106,7 +106,8 @@ function matchCase(testCase: JUnitCase, files: FileKey[]): FileKey | undefined {
 	// classname у OneUnit — имя набора (как правило, имя модуля без расширения);
 	// suiteName — запасной источник того же признака.
 	// У Vanessa Automation classname — «Каталог.Имя функционала», а suiteName —
-	// имя функционала: сопоставляем с заголовком файла.
+	// имя функционала: сопоставляем с заголовком файла. У YAxUnit адаптер
+	// приводит classname к «Расширение.Модуль» — это и есть заголовок файла.
 	for (const suiteKey of [testCase.className, testCase.suiteName]) {
 		const key = suiteKey?.trim().toLowerCase();
 		if (!key) {

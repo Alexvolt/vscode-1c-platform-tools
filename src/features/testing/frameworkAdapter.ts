@@ -97,9 +97,10 @@ export interface TestFrameworkAdapter {
 	/**
 	 * Преобразует testcase из jUnit-отчёта перед сопоставлением с деревом
 	 *
-	 * Нужен инструментам с нестандартной гранулярностью отчёта: например,
+	 * Нужен инструментам, чей отчёт называет тесты не так, как дерево: например,
 	 * 1bdd пишет testcase на каждый шаг (classname = сценарий) — адаптер
-	 * агрегирует шаги в результаты сценариев.
+	 * агрегирует шаги в результаты сценариев; YAxUnit пишет в name представление
+	 * теста, а процедуру — в classname.
 	 */
 	transformReportCases?(cases: JUnitCase[]): JUnitCase[];
 
@@ -144,9 +145,10 @@ export interface TestFrameworkAdapter {
 	 * Разбирает содержимое файла
 	 *
 	 * @param content - Содержимое файла
+	 * @param fileUri - URI файла: по нему называют файл, если имени нет в содержимом
 	 * @returns Структура с кейсами или undefined, если файл не тестовый
 	 */
-	parseFile(content: string): DiscoveredFile | undefined;
+	parseFile(content: string, fileUri: vscode.Uri): DiscoveredFile | undefined;
 
 	/**
 	 * Строит план запуска для одной единицы запуска
