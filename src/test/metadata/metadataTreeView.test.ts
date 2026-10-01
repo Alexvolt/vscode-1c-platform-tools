@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import {
+	MetadataErrorTreeItem,
 	MetadataLeafTreeItem,
 	MetadataMdGroupTreeItem,
 	MetadataMdSubgroupTreeItem,
@@ -733,6 +734,39 @@ suite('metadataTreeView: расширение неподдерживаемого
 		const supported = new MetadataSourceTreeItem('New', 'НовыйФормат', 'extension', undefined, undefined);
 		assert.strictEqual(supported.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
 		assert.strictEqual(supported.contextValue, 'metadataSourceConfigLike');
+	});
+});
+
+suite('metadataTreeView: ошибка чтения дерева', () => {
+	function providerWithError(error: string): MetadataTreeDataProvider {
+		const provider = new MetadataTreeDataProvider(createMockExtensionContext());
+		const mutable = provider as unknown as { _workspaceRoot: string; _lastError: string };
+		mutable._workspaceRoot = 'C:/ws';
+		mutable._lastError = error;
+		return provider;
+	}
+
+	test('в дереве первая строка, копируется текст вместе с подробностями', async () => {
+		const error =
+			'Не удалось прочитать выгрузку конфигуратора\r\n' +
+			'src/cf/Configuration.xml: строка 133, столбец 2: The content of elements must consist of well-formed character data or markup.\r\n';
+		const rows = (await providerWithError(error).getChildren()) as MetadataErrorTreeItem[];
+
+		assert.strictEqual(rows.length, 1);
+		assert.strictEqual(rows[0].label, 'Не удалось прочитать выгрузку конфигуратора');
+		assert.strictEqual(rows[0].errorText, error.trim());
+		assert.strictEqual(rows[0].contextValue, 'metadataError');
+		assert.strictEqual((rows[0].iconPath as vscode.ThemeIcon).id, 'error');
+	});
+
+	test('проект без метаданных - пояснение, а не ошибка', async () => {
+		const provider = providerWithError('');
+		(provider as unknown as { _notice: string })._notice = 'В проекте OneScript нет метаданных 1С';
+		const rows = await provider.getChildren();
+
+		assert.strictEqual(rows.length, 1);
+		assert.ok(!(rows[0] instanceof MetadataErrorTreeItem));
+		assert.strictEqual(rows[0].contextValue, undefined);
 	});
 });
 

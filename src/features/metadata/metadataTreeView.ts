@@ -303,6 +303,18 @@ export class MetadataSourceNoteTreeItem extends vscode.TreeItem {
 	}
 }
 
+/** Ошибка чтения дерева: в подписи первая строка текста, подробности остаются в журнале. */
+export class MetadataErrorTreeItem extends vscode.TreeItem {
+	constructor(
+		/** Текст ошибки целиком: копируется вместе с подробностями. */
+		public readonly errorText: string
+	) {
+		super(errorText.split(/\r?\n/)[0], vscode.TreeItemCollapsibleState.None);
+		this.contextValue = 'metadataError';
+		this.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('list.errorForeground'));
+	}
+}
+
 /** Группа типов метаданных (Общие, Справочники, …). */
 export class MetadataMdGroupTreeItem extends vscode.TreeItem {
 	constructor(
@@ -1436,6 +1448,8 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 
 	private _dto: ProjectMetadataTreeDto | undefined;
 	private _lastError: string | undefined;
+	/** Почему дерева нет, когда это не ошибка: например, проект OneScript. */
+	private _notice: string | undefined;
 	private _workspaceRoot: string | undefined;
 	private _subsystemFilter:
 		| {
@@ -1621,6 +1635,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 	async refresh(): Promise<void> {
 		const generation = ++this._refreshGeneration;
 		this._lastError = undefined;
+		this._notice = undefined;
 		this._dto = undefined;
 		this._sourceItems = [];
 		this._groupsBySource.clear();
@@ -1639,7 +1654,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		this._workspaceRoot = root;
 		this._showsOneScript = false;
 		if (!root) {
-			this._lastError = 'Нет открытой папки workspace';
+			this._notice = 'Нет открытой папки workspace';
 			this._onDidChange.fire(undefined);
 			return;
 		}
@@ -1651,7 +1666,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		if (kind === 'onescript') {
 			this._showsOneScript = true;
 			this._contentConfigurationDir = undefined;
-			this._lastError = 'В проекте OneScript нет метаданных 1С';
+			this._notice = 'В проекте OneScript нет метаданных 1С';
 			this._onDidChange.fire(undefined);
 			return;
 		}
@@ -1942,10 +1957,13 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 			return [];
 		}
 		if (!element) {
+			if (this._notice) {
+				const notice = new vscode.TreeItem(this._notice, vscode.TreeItemCollapsibleState.None);
+				notice.iconPath = new vscode.ThemeIcon('info');
+				return [notice];
+			}
 			if (this._lastError) {
-				const errItem = new vscode.TreeItem(this._lastError, vscode.TreeItemCollapsibleState.None);
-				errItem.iconPath = metadataSvgIcon(this._context.extensionUri, 'common.svg');
-				return [errItem];
+				return [new MetadataErrorTreeItem(this._lastError.trim())];
 			}
 			if (this._textFilter && !this.anySourceHasMatches()) {
 				const empty = new vscode.TreeItem(

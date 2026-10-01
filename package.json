@@ -1110,6 +1110,18 @@
         "category": "1С: Метаданные"
       },
       {
+        "command": "1c-platform-tools.metadata.copyError",
+        "title": "Копировать текст ошибки",
+        "category": "1С: Метаданные",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "1c-platform-tools.metadata.showLog",
+        "title": "Показать журнал",
+        "category": "1С: Метаданные",
+        "icon": "$(output)"
+      },
+      {
         "command": "1c-platform-tools.metadata.getProjectTree",
         "title": "Получить дерево метаданных проекта (JSON)",
         "category": "1С: Метаданные"
@@ -2558,6 +2570,14 @@
           "when": "false"
         },
         {
+          "command": "1c-platform-tools.metadata.copyError",
+          "when": "false"
+        },
+        {
+          "command": "1c-platform-tools.metadata.showLog",
+          "when": "false"
+        },
+        {
           "command": "1c-platform-tools.metadata.getProjectTree",
           "when": "false"
         },
@@ -3705,6 +3725,26 @@
           "command": "1c-platform-tools.metadata.copyObjectPath",
           "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )(metadataObjectProperties(Subsystem)?|metadataLeafFile)( |$)/",
           "group": "6_copy@2"
+        },
+        {
+          "command": "1c-platform-tools.metadata.copyError",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataError( |$)/",
+          "group": "6_copy@1"
+        },
+        {
+          "command": "1c-platform-tools.metadata.showLog",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataError( |$)/",
+          "group": "7_log@1"
+        },
+        {
+          "command": "1c-platform-tools.metadata.copyError",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataError( |$)/",
+          "group": "inline"
+        },
+        {
+          "command": "1c-platform-tools.metadata.showLog",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataError( |$)/",
+          "group": "inline"
         },
         {
           "command": "1c-platform-tools.pipelines.run",
