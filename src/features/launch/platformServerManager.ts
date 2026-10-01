@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { resolveFileIbAbsolutePath } from '../../shared/ibConnectionPath';
-import { logger } from '../../shared/logger';
+import { logger, revealOutputChannel } from '../../shared/logger';
 import { notifyQuiet } from '../../shared/notify';
 import { ProcessOutputDecoder } from '../../shared/processOutput';
 import { PLATFORM_PATH_SETTING_TITLE, resolvePlatformBinaryInRoots } from '../../shared/platformBinary';
@@ -451,7 +451,7 @@ export class PlatformServerManager {
 
 	/** Показывает журнал сервера. */
 	public showLogs(): void {
-		this.output.show(true);
+		revealOutputChannel(this.output);
 	}
 
 	/**

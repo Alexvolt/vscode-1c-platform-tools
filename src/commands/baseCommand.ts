@@ -154,6 +154,44 @@ async function finishTracked(exitCode: number, finish: FinishStep | undefined): 
 }
 
 /**
+ * Спрашивает каталог проекта: по умолчанию или выбранный вручную.
+ *
+ * @param root - Корень проекта
+ * @param defaultPath - Каталог по умолчанию относительно корня
+ * @param title - Заголовок выбора
+ * @param placeHolder - Подсказка в поле выбора
+ * @returns Путь относительно корня, вне проекта абсолютный; undefined, если выбор отменён
+ */
+export async function pickProjectDirectory(
+	root: string,
+	defaultPath: string,
+	title: string,
+	placeHolder: string
+): Promise<string | undefined> {
+	const DEFAULT_LABEL = '$(folder-opened) По умолчанию';
+	const picked = await vscode.window.showQuickPick(
+		[
+			{ label: DEFAULT_LABEL, description: defaultPath },
+			{ label: '$(file-directory) Выбрать каталог...', description: '' },
+		],
+		{ title, placeHolder }
+	);
+	if (!picked) {
+		return undefined;
+	}
+	if (picked.label === DEFAULT_LABEL) {
+		return defaultPath;
+	}
+	const uris = await vscode.window.showOpenDialog({
+		canSelectFolders: true,
+		canSelectMany: false,
+		defaultUri: vscode.Uri.file(root),
+		title,
+	});
+	return uris?.length ? projectRelativePath(root, uris[0].fsPath) : undefined;
+}
+
+/**
  * Базовый класс для всех команд
  * Предоставляет общие методы для проверки workspace и работы с файловой системой
  */
@@ -932,29 +970,7 @@ export abstract class BaseCommand {
 		if (!workspaceRoot) {
 			return undefined;
 		}
-
-		const DEFAULT_LABEL = '$(folder-opened) По умолчанию';
-		const picked = await vscode.window.showQuickPick(
-			[
-				{ label: DEFAULT_LABEL, description: defaultPath },
-				{ label: '$(file-directory) Выбрать каталог...', description: '' },
-			],
-			{ title, placeHolder: 'Каталог для выходных файлов' }
-		);
-		if (!picked) {
-			return undefined;
-		}
-		if (picked.label === DEFAULT_LABEL) {
-			return defaultPath;
-		}
-
-		const uris = await vscode.window.showOpenDialog({
-			canSelectFolders: true,
-			canSelectMany: false,
-			defaultUri: vscode.Uri.file(workspaceRoot),
-			title,
-		});
-		return uris?.length ? projectRelativePath(workspaceRoot, uris[0].fsPath) : undefined;
+		return pickProjectDirectory(workspaceRoot, defaultPath, title, 'Каталог для выходных файлов');
 	}
 
 

@@ -14,6 +14,20 @@ function getChannel(): vscode.LogOutputChannel {
 	return outputChannel;
 }
 
+/**
+ * Раскрывает панель Output на заданном канале.
+ *
+ * Панель раскрывается штатной командой до выбора канала: у части сборок (в том числе Cursor)
+ * один только `show()` канал переключает, но панель не открывает, а панель, открываясь
+ * после него, показывает канал, выбранный в ней прежде, а не наш.
+ *
+ * @param channel - Канал расширения
+ */
+export function revealOutputChannel(channel: vscode.OutputChannel): void {
+	const show = () => channel.show(true);
+	void vscode.commands.executeCommand('workbench.panel.output.focus').then(show, show);
+}
+
 /** Добавляет к сообщению префикс компонента: `[компонент] сообщение`. */
 function withScope(scope: string, message: string): string {
 	return `[${scope}] ${message}`;
@@ -83,16 +97,9 @@ export const logger = {
 		return isVerboseLevel(getChannel().logLevel);
 	},
 
-	/**
-	 * Показать панель Output с журналом расширения.
-	 *
-	 * Канал выбираем без перехвата фокуса, а панель раскрываем штатной командой: у части сборок
-	 * (в том числе Cursor) один только `show()` канал переключает, но панель не открывает, и по
-	 * кнопке «Показать журнал» внешне ничего не происходит.
-	 */
+	/** Показать панель Output с журналом расширения. */
 	show(): void {
-		getChannel().show(true);
-		void vscode.commands.executeCommand('workbench.panel.output.focus');
+		revealOutputChannel(getChannel());
 	},
 
 	/** Освободить канал (вызывать при деактивации расширения) */
