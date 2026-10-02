@@ -19,6 +19,7 @@
 
 import * as vscode from 'vscode';
 import { notifyQuiet } from '../../shared/notify';
+import { registerFormPanel } from '../editors/formPanels';
 import { CHROME_LABELS, chromeScript, chromeStyles, saveBarHtml } from '../editors/webviewChrome';
 import { DEFAULT_RAS_PORT } from './constants';
 import { projectPlatformRoots } from '../../shared/platformSettings';
@@ -235,6 +236,7 @@ export class ClusterConnectionsEditor {
 				{ enableScripts: true, retainContextWhenHidden: true }
 			);
 			this.panel.webview.html = buildHtml();
+			registerFormPanel(this.panel);
 			this.panel.webview.onDidReceiveMessage((message: EditorMessage) =>
 				this.handleMessage(message)
 			);

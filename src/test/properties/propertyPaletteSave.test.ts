@@ -110,6 +110,9 @@ suite('панель свойств: запись по Ctrl+S', () => {
 		assert.ok(binding.when?.includes(PROPERTY_PALETTE_VIEW_ID));
 		assert.ok(binding.when?.includes(PROPERTY_PALETTE_FOCUSED));
 		assert.ok(binding.when?.includes('1cMetadataObjectProperties'));
+		assert.ok(binding.when?.includes('1cClusterObjectProperties'));
+		assert.ok(binding.when?.includes('1cClusterAdminProperties'));
+		assert.ok(binding.when?.includes('1cClusterConnections'));
 		assert.ok(
 			!pkg.contributes.commands.some((item) => item.command === '1c-platform-tools.properties.save')
 		);
