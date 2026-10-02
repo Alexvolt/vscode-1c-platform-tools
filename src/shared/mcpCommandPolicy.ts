@@ -104,7 +104,7 @@ const HIDDEN_EXACT = [
 	`${COMMAND_PREFIX}pipelines.openEditor`,
 	`${COMMAND_PREFIX}pipelines.addTemplates`,
 	`${COMMAND_PREFIX}hooks.openEditor`,
-	// Сохранение формы: приходит по Ctrl+S из активного редактора
+	// Сохранение формы: приходит по Ctrl+S из активного редактора или панели свойств
 	`${COMMAND_PREFIX}editors.save`,
 	// Обновление внешних компонентов: спрашивает список галочками и загружает
 	// выбранное. Ответить на такой вопрос агент не может

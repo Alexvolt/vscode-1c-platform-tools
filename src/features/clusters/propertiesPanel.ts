@@ -8,6 +8,7 @@
  */
 
 import * as vscode from 'vscode';
+import { registerFormPanel } from '../editors/formPanels';
 import { CHROME_LABELS, chromeScript, chromeStyles, saveBarHtml } from '../editors/webviewChrome';
 import type { PropertySection, PropertyValues } from './propertiesForm';
 
@@ -164,6 +165,7 @@ export class PropertiesPanel {
 			{ enableScripts: true, retainContextWhenHidden: true }
 		);
 		panel.webview.html = buildHtml();
+		registerFormPanel(panel);
 		panel.webview.onDidReceiveMessage((message: PanelMessage) =>
 			this.handleMessage(descriptor.key, message)
 		);

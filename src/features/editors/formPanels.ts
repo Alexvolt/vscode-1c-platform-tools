@@ -14,6 +14,31 @@ export const SAVE_REQUEST_MESSAGE = { type: 'saveRequested' } as const;
 /** Открытые формы: и custom editor, и панели свойств */
 const panels = new Set<vscode.WebviewPanel>();
 
+/** Сохранение боковой панели. */
+interface FocusedSave {
+	focused: () => boolean;
+	save: () => void;
+}
+
+const focusedSaves: FocusedSave[] = [];
+
+/**
+ * Подключает сохранение боковой панели.
+ *
+ * @param focused - Панель в фокусе
+ * @param save - Записать изменения
+ */
+export function registerFocusedSave(focused: () => boolean, save: () => void): vscode.Disposable {
+	const entry: FocusedSave = { focused, save };
+	focusedSaves.push(entry);
+	return new vscode.Disposable(() => {
+		const index = focusedSaves.indexOf(entry);
+		if (index >= 0) {
+			focusedSaves.splice(index, 1);
+		}
+	});
+}
+
 /**
  * Ставит форму на учёт и снимает её при закрытии.
  *
@@ -24,13 +49,13 @@ export function registerFormPanel(panel: vscode.WebviewPanel): void {
 	panel.onDidDispose(() => panels.delete(panel));
 }
 
-/**
- * Просит активную форму сохранить изменения.
- *
- * Активной считается видимая форма в фокусе: именно её пользователь имел в
- * виду, нажимая Ctrl+S.
- */
+/** Просит сохранить форму в фокусе: боковую панель, иначе активную вкладку. */
 export function requestSaveInActiveForm(): void {
+	const focused = focusedSaves.find((entry) => entry.focused());
+	if (focused) {
+		focused.save();
+		return;
+	}
 	for (const panel of panels) {
 		if (panel.active) {
 			void panel.webview.postMessage(SAVE_REQUEST_MESSAGE);
