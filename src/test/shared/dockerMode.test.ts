@@ -93,7 +93,7 @@ suite('Docker: версия vrunner', () => {
 
 			await config().update('docker.enabled', true, vscode.ConfigurationTarget.Workspace);
 			assert.strictEqual(await vrunner.getVRunnerVersion(), undefined);
-			assert.strictEqual(vrunner.getActiveSettingsSchema(), 'v2');
+			assert.strictEqual(vrunner.getActiveSettingsSchema(), 'v3');
 
 			await config().update('docker.enabled', undefined, vscode.ConfigurationTarget.Workspace);
 			assert.strictEqual(vrunner.getCachedVRunnerVersionLabel(), '3.0.0');

@@ -183,3 +183,16 @@ export function isAtLeast(version: VRunnerVersion, target: string): boolean {
 export function supportsFeature(version: VRunnerVersion, feature: VRunnerFeature): boolean {
 	return isAtLeast(version, VRUNNER_FEATURES[feature]);
 }
+
+/** Версия, пока vanessa-runner не прочитан. */
+const ASSUMED_V3: VRunnerVersion = { major: 3, minor: 0, patch: 0, raw: '3.0.0' };
+
+/** Прочитанная версия или 3.0.0. */
+export function withAssumedV3(version: VRunnerVersion | null | undefined): VRunnerVersion {
+	return version ?? ASSUMED_V3;
+}
+
+/** Не ниже 3.0.0. */
+export function isV3Cli(version: VRunnerVersion | null | undefined): boolean {
+	return isAtLeast(withAssumedV3(version), VRUNNER_FEATURES.cli3);
+}

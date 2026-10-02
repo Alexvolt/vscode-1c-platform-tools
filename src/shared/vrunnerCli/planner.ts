@@ -9,7 +9,7 @@
 
 import { VRunnerIntent } from './intents';
 import { selectCliAdapter } from './index';
-import { VRunnerVersion, VRUNNER_FEATURES, isAtLeast } from '../vrunnerVersion';
+import { isV3Cli, VRunnerVersion } from '../vrunnerVersion';
 
 /** Формат файла настроек vanessa-runner. */
 export type SettingsFileFormat = 'v2' | 'v3' | 'unknown';
@@ -137,7 +137,7 @@ function withoutIncrementOnCli2(intent: VRunnerIntent, cli3: boolean, notices: s
 export function planIntents(intents: VRunnerIntent[], context: PlanContext): PlanResult {
 	const notices: string[] = [];
 	const adapter = selectCliAdapter(context.version);
-	const cli3 = context.version !== undefined && isAtLeast(context.version, VRUNNER_FEATURES.cli3);
+	const cli3 = isV3Cli(context.version);
 
 	// «Перекрытия профиля» — общий термин: временные параметры интерфейса,
 	// env.local.json и значения активного профиля с ${gitBranch}

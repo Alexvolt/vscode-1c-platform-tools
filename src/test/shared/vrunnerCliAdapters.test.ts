@@ -426,10 +426,10 @@ suite('vrunnerCli: адаптеры v2/v3', () => {
 	});
 
 	// ---- Выбор адаптера ----
-	test('selectCliAdapter: 2.6 → v2, 3.0-предрелиз → v3, неизвестно → v2', () => {
+	test('selectCliAdapter: 2.6 → v2, 3.0-предрелиз → v3, неизвестно → v3', () => {
 		assert.ok(selectCliAdapter(parseVRunnerVersion('2.6.1')) instanceof V2CliAdapter);
 		assert.ok(selectCliAdapter(parseVRunnerVersion('3.0.0_beta')) instanceof V3CliAdapter);
-		assert.ok(selectCliAdapter(undefined) instanceof V2CliAdapter);
+		assert.ok(selectCliAdapter(undefined) instanceof V3CliAdapter);
 	});
 });
 

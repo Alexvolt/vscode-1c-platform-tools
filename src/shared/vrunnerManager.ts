@@ -65,8 +65,8 @@ import {
 	parseVRunnerVersion,
 	parseVRunnerVersionFromOpmMetadata,
 	supportsFeature,
-	isAtLeast,
-	VRUNNER_FEATURES,
+	isV3Cli,
+	withAssumedV3,
 } from './vrunnerVersion';
 import { VRunnerIntent } from './vrunnerCli';
 import { planIntents, SettingsFileFormat } from './vrunnerCli/planner';
@@ -736,8 +736,6 @@ export class VRunnerManager {
 		if (previous !== undefined && (previous?.raw ?? null) !== (version?.raw ?? null)) {
 			log.info(`Версия vrunner изменилась: ${previous?.raw ?? 'не определена'} -> ${version?.raw ?? 'не определена'}`);
 		}
-		// Первое определение тоже событие: до него схема настроек считается 2.x,
-		// и построенные раньше панели не видят autumn-properties.json
 		if (previous === undefined || (previous?.raw ?? null) !== (version?.raw ?? null)) {
 			this._onDidChangeVRunnerVersion.fire(version);
 		}
@@ -837,38 +835,23 @@ export class VRunnerManager {
 	}
 
 	/**
-	 * Поддерживает ли установленный vrunner указанную возможность.
+	 * Поддерживает ли vanessa-runner возможность.
 	 *
-	 * Используется для гейтинга возможностей, доступных только в vrunner 3.x
-	 * (новый CLI, флаги автономного сервера `--ibsrv*`). Если версию определить
-	 * не удалось, считаем возможность недоступной (консервативно).
-	 *
-	 * @param feature - Идентификатор возможности (см. VRUNNER_FEATURES)
+	 * @param feature - Идентификатор возможности
 	 * @returns true, если возможность доступна
 	 */
 	public async supportsVRunnerFeature(feature: VRunnerFeature): Promise<boolean> {
 		const version = await this.getVRunnerVersion();
-		return version ? supportsFeature(version, feature) : false;
+		return supportsFeature(withAssumedV3(version), feature);
 	}
 
-	/**
-	 * Синхронная проверка «установлен vrunner 3.x» по кэшу версии.
-	 *
-	 * Версия прогревается в planIntents/публичных методах выполнения; если она
-	 * ещё не определена — консервативно считаем, что установлен 2.x.
-	 *
-	 * @returns true, если установлен vrunner >= 3.0.0
-	 */
+	/** В кэше vanessa-runner 3.x. */
 	private isCli3(): boolean {
-		const cached = this.vrunnerVersionCacheByRoot.get(this.versionCacheKey());
-		return cached ? isAtLeast(cached, VRUNNER_FEATURES.cli3) : false;
+		return isV3Cli(this.vrunnerVersionCacheByRoot.get(this.versionCacheKey()));
 	}
 
 	/**
-	 * Схема файлов настроек установленного vrunner: 2.x читает env.json,
-	 * 3.x — autumn-properties.json (оба из корня проекта автоматически).
-	 *
-	 * @returns Схема настроек по кэшу версии (консервативно 2.x)
+	 * Схема файлов настроек: 2.x читает env.json, 3.x — autumn-properties.json.
 	 */
 	private activeSettingsSchema(): SettingsSchema {
 		return this.isCli3() ? 'v3' : 'v2';
