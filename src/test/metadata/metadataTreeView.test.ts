@@ -12,6 +12,7 @@ import {
 	MetadataSourceTreeItem,
 	MetadataTreeDataProvider,
 	defaultMetadataLeafOpenCommand,
+	extensionDirsOf,
 	isMetadataCommonForm,
 	objectModuleFilePath,
 	objectModuleKindsForType,
@@ -786,14 +787,39 @@ suite('metadataTreeView: раскладка проекта', () => {
 	test('раскладка с той же конфигурацией проекта дерево не перерисовывает', async () => {
 		const workspace = path.join(LAYOUTS, 'edt-workspace');
 		const provider = providerAt(workspace);
-		(provider as unknown as { _contentConfigurationDir?: string })._contentConfigurationDir =
-			(await configurationScope(workspace)).configuration?.dir;
+		const scope = await configurationScope(workspace);
+		const internals = provider as unknown as {
+			_contentConfigurationDir?: string;
+			_contentExtensionDirs?: readonly string[];
+		};
+		internals._contentConfigurationDir = scope.configuration?.dir;
+		internals._contentExtensionDirs = extensionDirsOf(scope);
 		let fired = 0;
 		provider.onDidChangeTreeData(() => fired++);
 
 		await provider.syncWithProjectLayout();
 
 		assert.strictEqual(fired, 0);
+	});
+
+	test('раскладка с новым расширением дерево перерисовывает', async () => {
+		const workspace = path.join(LAYOUTS, 'designer');
+		const provider = providerAt(workspace);
+		const scope = await configurationScope(workspace);
+		const internals = provider as unknown as {
+			_contentConfigurationDir?: string;
+			_contentExtensionDirs?: readonly string[];
+		};
+		internals._contentConfigurationDir = scope.configuration?.dir;
+		internals._contentExtensionDirs = [];
+		let refreshed = 0;
+		provider.refresh = async () => {
+			refreshed += 1;
+		};
+
+		await provider.syncWithProjectLayout();
+
+		assert.strictEqual(refreshed, 1);
 	});
 });
 

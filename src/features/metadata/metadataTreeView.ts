@@ -19,7 +19,7 @@ import { ensureMdSparrowRuntime } from './mdSparrowBootstrap';
 import { runMdSparrowParamsRead, supportEnabled } from './mdSparrowParams';
 import { mdSparrowSchemaFlagFromConfigurationXml } from './mdSparrowSchemaVersion';
 import { offerGithubTokenOnRateLimit } from '../../shared/githubToken';
-import { configurationScope } from '../../shared/activeConfiguration';
+import { configurationScope, type ConfigurationScope } from '../../shared/activeConfiguration';
 import { detectProjectKind } from '../../shared/projectKind';
 import { currentRoot, outsideProject, sameProjectRoot } from '../../shared/workspaceProjects';
 import { METADATA_EXPANDED_SOURCES_STATE, projectMemento } from '../../shared/projectState';
@@ -1442,6 +1442,17 @@ export function metadataCommandRoot(
 	return undefined;
 }
 
+/** Каталоги расширений раскладки в стабильном порядке: ими дерево сверяет состав. */
+export function extensionDirsOf(scope: ConfigurationScope): readonly string[] {
+	return [...scope.extensions, ...scope.testExtensions]
+		.map((item) => item.dir)
+		.sort((left, right) => left.localeCompare(right));
+}
+
+function sameExtensionDirs(left: readonly string[], right: readonly string[]): boolean {
+	return left.length === right.length && left.every((dir, index) => dir === right[index]);
+}
+
 export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
 	private readonly _onDidChange = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
 	readonly onDidChangeTreeData = this._onDidChange.event;
@@ -1482,6 +1493,8 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 	private readonly _subsystemsBySource = new Map<string, Map<string, MetadataLeafTreeItem>>();
 	/** Конфигурация, чей состав прочитан в дерево. */
 	private _contentConfigurationDir: string | undefined;
+	/** Расширения, чей состав прочитан в дерево. Пусто, пока дерево ещё не читали. */
+	private _contentExtensionDirs: readonly string[] | undefined;
 	/** Дерево показывает проект OneScript: метаданных 1С в нём нет. */
 	private _showsOneScript = false;
 
@@ -1500,7 +1513,7 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		await refreshing;
 	}
 
-	/** Раскладка проекта изменилась: дерево перечитывается, когда сменилась конфигурация или вид проекта. */
+	/** Раскладка проекта изменилась: дерево перечитывается, когда сменились конфигурация, расширения или вид проекта. */
 	async syncWithProjectLayout(): Promise<void> {
 		const root = this._workspaceRoot;
 		if (!root) {
@@ -1508,7 +1521,11 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		}
 		try {
 			const [scope, kind] = await Promise.all([configurationScope(root), detectProjectKind(root)]);
-			if (scope.configuration?.dir !== this._contentConfigurationDir || (kind === 'onescript') !== this._showsOneScript) {
+			if (
+				scope.configuration?.dir !== this._contentConfigurationDir
+				|| !sameExtensionDirs(this._contentExtensionDirs ?? [], extensionDirsOf(scope))
+				|| (kind === 'onescript') !== this._showsOneScript
+			) {
 				await this.refresh();
 			}
 		} catch (e) {
@@ -1666,18 +1683,20 @@ export class MetadataTreeDataProvider implements vscode.TreeDataProvider<vscode.
 		if (kind === 'onescript') {
 			this._showsOneScript = true;
 			this._contentConfigurationDir = undefined;
+			this._contentExtensionDirs = undefined;
 			this._notice = 'В проекте OneScript нет метаданных 1С';
 			this._onDidChange.fire(undefined);
 			return;
 		}
 
 		try {
-			const configurationDir = (await configurationScope(root)).configuration?.dir;
+			const scope = await configurationScope(root);
 			const dto = await loadProjectMetadataTree(this._context, root);
 			if (generation !== this._refreshGeneration) {
 				return;
 			}
-			this._contentConfigurationDir = configurationDir;
+			this._contentConfigurationDir = scope.configuration?.dir;
+			this._contentExtensionDirs = extensionDirsOf(scope);
 			this._dto = dto;
 			this.rebuildItemCache(root, dto);
 			// Панель дерева показывает проверку выгрузки только конфигуратору: у проекта EDT своя проверка
