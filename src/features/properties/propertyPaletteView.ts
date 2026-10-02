@@ -9,8 +9,12 @@
  */
 
 import * as vscode from 'vscode';
+import { registerFocusedSave, SAVE_REQUEST_MESSAGE } from '../editors/formPanels';
 
 export const PROPERTY_PALETTE_VIEW_ID = '1c-platform-tools-properties-palette';
+
+/** Панель свойств в фокусе. */
+export const PROPERTY_PALETTE_FOCUSED = '1c-platform-tools.propertiesPaletteFocused';
 
 /** Вид редактора значения. */
 export type PropertyControlKind = 'text' | 'multiline' | 'number' | 'boolean' | 'select' | 'reference';
@@ -78,6 +82,9 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 	private _onApply: PropertyApplyHandler | undefined;
 	private _onPreview: PropertyPreviewHandler | undefined;
 	private readonly _onDidChangeVisibility = new vscode.EventEmitter<void>();
+	/** Фокус в этой панели. */
+	private _inputFocused = false;
+	private _focusedSave: vscode.Disposable | undefined;
 
 	/** Панель открыта: пока она закрыта, источникам незачем читать свойства. */
 	readonly onDidChangeVisibility = this._onDidChangeVisibility.event;
@@ -95,6 +102,11 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 
 	resolveWebviewView(view: vscode.WebviewView): void {
 		this._view = view;
+		this._focusedSave?.dispose();
+		this._focusedSave = registerFocusedSave(
+			() => this._inputFocused,
+			() => this.requestSave()
+		);
 		view.onDidChangeVisibility(() => this._onDidChangeVisibility.fire());
 		view.webview.options = {
 			enableScripts: true,
@@ -109,10 +121,17 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 				void this.apply(msg.edits ?? {});
 			} else if (msg?.type === 'preview') {
 				void this.preview(msg.edits ?? {});
+			} else if (msg?.type === 'focus') {
+				this.setInputFocused(true);
+			} else if (msg?.type === 'blur') {
+				this.setInputFocused(false);
 			}
 		});
 		view.onDidDispose(() => {
 			this._view = undefined;
+			this._focusedSave?.dispose();
+			this._focusedSave = undefined;
+			this.setInputFocused(false);
 		});
 		this.push();
 		this._onDidChangeVisibility.fire();
@@ -145,6 +164,16 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 		this.reset();
+	}
+
+	/** Просит панель записать черновик. */
+	requestSave(): void {
+		void this._view?.webview.postMessage(SAVE_REQUEST_MESSAGE);
+	}
+
+	private setInputFocused(focused: boolean): void {
+		this._inputFocused = focused;
+		void vscode.commands.executeCommand('setContext', PROPERTY_PALETTE_FOCUSED, focused);
 	}
 
 	/** Убирает свойства, чьи бы они ни были: так панель гаснет при смене проекта. */
@@ -653,6 +682,14 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 				current = message.state;
 				render();
 				syncSaveBar();
+			} else if (message.type === 'saveRequested') {
+				const active = document.activeElement;
+				if (active && active !== saveBtn && typeof active.blur === 'function') {
+					active.blur();
+				}
+				if (!saveBtn.disabled) {
+					saveBtn.click();
+				}
 			} else if (message.type === 'applied') {
 				if (message.ok) {
 					reset(message.state || current, editable);
@@ -664,6 +701,8 @@ export class PropertyPaletteViewProvider implements vscode.WebviewViewProvider {
 				}
 			}
 		});
+		window.addEventListener('focus', () => vscode.postMessage({ type: 'focus' }));
+		window.addEventListener('blur', () => vscode.postMessage({ type: 'blur' }));
 		vscode.postMessage({ type: 'ready' });
 	</script>
 </body>

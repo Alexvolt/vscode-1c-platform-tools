@@ -3926,7 +3926,7 @@
         "command": "1c-platform-tools.editors.save",
         "key": "ctrl+s",
         "mac": "cmd+s",
-        "when": "activeCustomEditorId == '1c-platform-tools.pipelineEditor' || activeCustomEditorId == '1c-platform-tools.hooksEditor' || activeWebviewPanelId == '1cMetadataObjectProperties' || activeWebviewPanelId == '1cMetadataSourceProperties'"
+        "when": "1c-platform-tools.propertiesPaletteFocused || focusedView == '1c-platform-tools-properties-palette' || activeCustomEditorId == '1c-platform-tools.pipelineEditor' || activeCustomEditorId == '1c-platform-tools.hooksEditor' || activeWebviewPanelId == '1cMetadataObjectProperties' || activeWebviewPanelId == '1cMetadataSourceProperties'"
       },
       {
         "command": "1c-platform-tools.metadata.revealInTree",
