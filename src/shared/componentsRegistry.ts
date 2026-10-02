@@ -67,7 +67,7 @@ export const COMPONENTS: ComponentSpec[] = [
 	},
 	{
 		id: 'jre',
-		title: 'Portable JRE 21 (нужна дереву метаданных)',
+		title: 'Portable JRE 25 (нужна дереву метаданных)',
 		pathSetting: 'components.path.java',
 		autoloadSetting: 'components.autoload.java',
 		version: async (context) => portableJreVersion(context),

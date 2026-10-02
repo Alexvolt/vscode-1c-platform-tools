@@ -10,18 +10,22 @@ export const MD_SPARROW_DEFAULT_REPO = 'yellow-hammer/md-sparrow';
 export const MD_SPARROW_JAR_REGEX = /md-sparrow-.*-all\.jar$/i;
 
 
-/** API Temurin JRE 21 (ga) — редирект на архив */
+/** Java, под которую собран md-sparrow: более старая его jar не запустит. */
+export const MD_SPARROW_JAVA = 25;
+
+/** API Temurin JRE (ga) — редирект на архив */
 export function adoptiumBinaryUrl(): string {
 	const { os, arch } = adoptiumOsArch();
 	// https://api.adoptium.net/swagger
-	return `https://api.adoptium.net/v3/binary/latest/21/ga/${os}/${arch}/jre/hotspot/normal/eclipse`;
+	return `https://api.adoptium.net/v3/binary/latest/${MD_SPARROW_JAVA}/ga/${os}/${arch}/jre/hotspot/normal/eclipse`;
 }
 
 function adoptiumOsArch(): { os: string; arch: string } {
 	const platform = process.platform;
 	const a = process.arch;
 	if (platform === 'win32') {
-		return { os: 'windows', arch: a === 'arm64' ? 'aarch64' : 'x64' };
+		// Temurin 25 под Windows собирается только для x64: на ARM он идёт через эмуляцию Windows 11
+		return { os: 'windows', arch: 'x64' };
 	}
 	if (platform === 'darwin') {
 		return { os: 'mac', arch: a === 'arm64' ? 'aarch64' : 'x64' };

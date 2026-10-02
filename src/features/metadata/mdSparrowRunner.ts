@@ -7,6 +7,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { spawn } from 'node:child_process';
 import { logger } from '../../shared/logger';
 import type { MdSparrowRuntime } from './mdSparrowBootstrap';
+import { MD_SPARROW_JAVA } from './mdSparrowConstants';
 import { MdSparrowResidentPool, type ResidentCancellation, type ResidentStopMode } from './mdSparrowResident';
 
 const log = logger.scope('md-sparrow');
@@ -38,6 +39,19 @@ const JVM_OPTIONS = [
 	'-Dsun.stdout.encoding=UTF-8',
 	'-Dsun.stderr.encoding=UTF-8',
 ];
+
+/**
+ * Причина отказа, когда java старше сборки md-sparrow: JVM сообщает об этом стеком про версию class file.
+ *
+ * @param stderr - Вывод запуска
+ * @returns Сообщение пользователю либо undefined, если отказ другой
+ */
+export function javaTooOldMessage(stderr: string): string | undefined {
+	if (!stderr.includes('UnsupportedClassVersionError')) {
+		return undefined;
+	}
+	return `Дереву метаданных нужна Java ${MD_SPARROW_JAVA} или новее. Укажите её в components.path.java или очистите эту настройку и включите components.autoload.java.`;
+}
 
 /** Резиденты md-sparrow текущего окна. */
 const residents = new MdSparrowResidentPool({
@@ -123,7 +137,7 @@ export function runMdSparrowOnce(
 			} else {
 				log.warn(`${label}: код выхода ${code ?? -1} за ${duration} мс${stderr ? `: ${stderr.trim().split('\n')[0]}` : ''}`);
 			}
-			resolve({ exitCode: code ?? -1, stdout, stderr });
+			resolve({ exitCode: code ?? -1, stdout, stderr: code === 0 ? stderr : (javaTooOldMessage(stderr) ?? stderr) });
 		});
 	});
 }
