@@ -110,32 +110,22 @@ suite('yaxunitAdapter', () => {
 
 		try {
 			const fullPlan = await adapter.buildRunPlan({ fileUri }, reportDir);
-			// Запуск через vrunner run --command RunUnitTests=<конфиг>
 			assert.strictEqual(fullPlan.tool, 'vrunner');
-			assert.strictEqual(fullPlan.args[0], 'run');
-			assert.strictEqual(fullPlan.args[1], '--command');
-			assert.ok(fullPlan.args[2].startsWith('RunUnitTests='), 'Передаётся параметр RunUnitTests');
+			assert.strictEqual(fullPlan.args[0], 'test');
+			assert.strictEqual(fullPlan.args[1], 'yaxunit');
+			assert.strictEqual(fullPlan.args[fullPlan.args.indexOf('--modules') + 1], 'ОМ_Тесты');
 			assert.ok(fullPlan.reportTarget, 'Должна быть цель отчёта');
 			assert.strictEqual(fullPlan.reportTarget.format, 'junit');
-
-			const fullConfig = JSON.parse(
-				await fs.readFile(path.join(reportDir, 'yaxunit-config.json'), 'utf8')
-			);
-			assert.deepStrictEqual(fullConfig.filter.modules, ['ОМ_Тесты']);
-			assert.strictEqual(fullConfig.filter.tests, null);
-			assert.strictEqual(fullConfig.reportFormat, 'jUnit');
-			assert.strictEqual(fullConfig.closeAfterTests, true);
 
 			const subsetPlan = await adapter.buildRunPlan(
 				{ fileUri, caseNames: ['ПроверитьЗапись'] },
 				reportDir
 			);
-			assert.ok(subsetPlan.args.some((arg) => arg.startsWith('RunUnitTests=')));
-			const subsetConfig = JSON.parse(
-				await fs.readFile(path.join(reportDir, 'yaxunit-config.json'), 'utf8')
+			assert.strictEqual(
+				subsetPlan.args[subsetPlan.args.indexOf('--tests') + 1],
+				'ОМ_Тесты.ПроверитьЗапись'
 			);
-			assert.deepStrictEqual(subsetConfig.filter.tests, ['ОМ_Тесты.ПроверитьЗапись']);
-			assert.strictEqual(subsetConfig.filter.modules, null);
+			assert.strictEqual(subsetPlan.args.includes('--modules'), false);
 		} finally {
 			await fs.rm(reportDir, { recursive: true, force: true });
 		}

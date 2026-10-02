@@ -22,7 +22,16 @@ suite('версия vanessa-runner: событие первого определ
 		fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
 	});
 
-	test('первое определение оповещает подписчиков и меняет схему настроек', async () => {
+	test('определённая 2.x переключает схему настроек', async () => {
+		writeLocalRunner(root, '2.6.0');
+		await vrunner.runWithProjectRoot(root, async () => {
+			assert.strictEqual(vrunner.getActiveSettingsSchema(), 'v3');
+			await vrunner.getVRunnerVersion();
+			assert.strictEqual(vrunner.getActiveSettingsSchema(), 'v2');
+		});
+	});
+
+	test('первое определение оповещает подписчиков', async () => {
 		writeLocalRunner(root, '3.0.0');
 		let fired = 0;
 		const subscription = vrunner.onDidChangeVRunnerVersion(() => {
@@ -30,7 +39,7 @@ suite('версия vanessa-runner: событие первого определ
 		});
 		try {
 			await vrunner.runWithProjectRoot(root, async () => {
-				assert.strictEqual(vrunner.getActiveSettingsSchema(), 'v2', 'до детекта схема считается 2.x');
+				assert.strictEqual(vrunner.getActiveSettingsSchema(), 'v3', 'до детекта схема считается 3.x');
 
 				await vrunner.getVRunnerVersion();
 				assert.strictEqual(fired, 1, 'после первого определения панели должны перестроиться');

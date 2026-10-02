@@ -13,6 +13,16 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { VRunnerManager } from '../../shared/vrunnerManager';
 import { LOCAL_OVERRIDES_FILE } from '../../shared/envProfiles';
+import { writeLocalRunner } from '../fixtures/helpers/vrunnerStub';
+
+/** Профиль env.json — файл vanessa-runner 2.x. */
+async function runAsV2(vrunner: VRunnerManager, root: string, run: () => Promise<void>): Promise<void> {
+	writeLocalRunner(root, '2.6.0');
+	await vrunner.runWithProjectRoot(root, async () => {
+		await vrunner.getVRunnerVersion();
+		await run();
+	});
+}
 
 function writeJson(root: string, fileName: string, data: unknown): void {
 	fs.writeFileSync(path.join(root, fileName), JSON.stringify(data, null, 2), 'utf8');
@@ -50,7 +60,7 @@ suite('перекрытия профиля запуска (интеграция)
 		writeHead(root, 'ref: refs/heads/feature/RS-123\n');
 		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/${gitBranch}', '--v8version': '8.3.27' } });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.strictEqual(vrunner.getGitBranchDirName(), 'feature-RS-123');
 			// значение с переменной — флагом, значение без переменной — нет
 			assert.deepStrictEqual(
@@ -69,7 +79,7 @@ suite('перекрытия профиля запуска (интеграция)
 		writeHead(root, 'ref: refs/heads/dev\n');
 		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/${gitBranch}' } });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.deepStrictEqual(vrunner.getActiveEnvOverrideArgs(), ['--ibconnection', '/F./build/dev']);
 
 			writeHead(root, 'ref: refs/heads/hotfix/x\n');
@@ -87,7 +97,7 @@ suite('перекрытия профиля запуска (интеграция)
 		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/${gitBranch}' } });
 		writeJson(root, LOCAL_OVERRIDES_FILE, { '--ibconnection': '/F./build/local-${gitBranch}', '--db-user': 'admin' });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.strictEqual(vrunner.hasLocalEnvOverrides(), true);
 			// приоритет env.local.json над профилем, переменная работает и в нём
 			assert.deepStrictEqual(
@@ -114,7 +124,7 @@ suite('перекрытия профиля запуска (интеграция)
 		writeHead(root, 'ref: refs/heads/main\n');
 		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/ib', '--v8version': '8.3.27' } });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.deepStrictEqual(vrunner.getActiveEnvOverrideArgs(), []);
 			assert.strictEqual(vrunner.getEffectiveEnvOverrides(), undefined);
 		});
@@ -126,7 +136,7 @@ suite('перекрытия профиля запуска (интеграция)
 		writeJson(root, 'env.dev.json', { default: {} });
 		writeJson(root, LOCAL_OVERRIDES_FILE, { '--db-user': 'admin' });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.deepStrictEqual(
 				vrunner.discoverEnvProfiles().map((profile) => profile.fileName),
 				['env.json', 'env.dev.json']
@@ -138,7 +148,7 @@ suite('перекрытия профиля запуска (интеграция)
 		const root = makeProject();
 		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/${gitBranch}' } });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.strictEqual(vrunner.getGitBranchDirName(), undefined);
 			assert.deepStrictEqual(
 				vrunner.getActiveEnvOverrideArgs(),
@@ -154,7 +164,7 @@ suite('перекрытия профиля запуска (интеграция)
 		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/ib' } });
 		fs.writeFileSync(path.join(root, LOCAL_OVERRIDES_FILE), '{ не json', 'utf8');
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.strictEqual(vrunner.hasLocalEnvOverrides(), false);
 			assert.deepStrictEqual(vrunner.getActiveEnvOverrideArgs(), []);
 		});
@@ -177,7 +187,7 @@ suite('строка подключения команды с явным файл
 		writeJson(root, 'env.json', { default: { '--ibconnection': '/F./build/ib' } });
 		writeJson(root, 'env.dev.json', { default: { '--ibconnection': '/F./build/ib-dev' } });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			await vrunner.setActiveEnvOverrides({ ibConnection: '/F./build/временная' });
 			try {
 				assert.strictEqual(await vrunner.getIbConnectionValue(), '/F./build/временная');
@@ -193,7 +203,7 @@ suite('строка подключения команды с явным файл
 	test('строка подключения не задана, пока её нет ни в профиле, ни в перекрытиях', async () => {
 		writeJson(root, 'env.json', { default: { '--v8version': '8.3.27' } });
 
-		await vrunner.runWithProjectRoot(root, async () => {
+		await runAsV2(vrunner, root, async () => {
 			assert.strictEqual(await vrunner.getConfiguredIbConnection(), undefined);
 			assert.strictEqual(await vrunner.getIbConnectionValue(), '/F./build/ib');
 			await vrunner.setActiveEnvOverrides({ ibConnection: '/F./build/временная' });
