@@ -265,6 +265,9 @@ export class MetadataSourceTreeItem extends vscode.TreeItem {
 		} else if (sourceKind === 'externalErf' || sourceKind === 'externalEpf') {
 			this.contextValue = 'metadataSourceExternalArtifact';
 		}
+		if (sourceKind === 'extension') {
+			this.contextValue = `${this.contextValue} metadataExtensionRoot`;
+		}
 		const onSupport = support === 'locked' || support === 'editable' || supportEditingEnabled === true;
 		if (onSupport) {
 			this.contextValue = `${this.contextValue} mdSupportRules`;

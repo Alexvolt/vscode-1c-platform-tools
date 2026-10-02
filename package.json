@@ -940,6 +940,12 @@
         "category": "1С: Метаданные"
       },
       {
+        "command": "1c-platform-tools.metadata.deleteExtension",
+        "title": "Удалить",
+        "icon": "$(trash)",
+        "category": "1С: Метаданные"
+      },
+      {
         "command": "1c-platform-tools.metadata.openExternalConnectionModule",
         "title": "Открыть модуль внешнего соединения",
         "category": "1С: Метаданные"
@@ -2530,6 +2536,10 @@
           "when": "false"
         },
         {
+          "command": "1c-platform-tools.metadata.deleteExtension",
+          "when": "false"
+        },
+        {
           "command": "1c-platform-tools.metadata.duplicateObject",
           "when": "false"
         },
@@ -3704,6 +3714,11 @@
         {
           "command": "1c-platform-tools.metadata.deleteObject",
           "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )(metadataObjectProperties(Subsystem)?|metadataLeafFile)( |$)/",
+          "group": "7_delete@1"
+        },
+        {
+          "command": "1c-platform-tools.metadata.deleteExtension",
+          "when": "view == 1c-platform-tools-metadata-tree && viewItem =~ /(^| )metadataExtensionRoot( |$)/",
           "group": "7_delete@1"
         },
         {

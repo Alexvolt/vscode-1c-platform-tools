@@ -208,6 +208,19 @@ suite('контекстное меню дерева метаданных', () =>
 		}
 	});
 
+	test('«Удалить» у корня расширения и не у основной конфигурации', () => {
+		for (const viewItem of [
+			'metadataSourceConfigLike metadataExtensionRoot mdDesigner',
+			'metadataSourceUnsupported metadataExtensionRoot mdDesigner',
+			'metadataSourceConfigLike metadataExtensionRoot mdEdt',
+		]) {
+			assert.ok(menuFor(viewItem).includes('Удалить'), `нет «Удалить» у ${viewItem}`);
+		}
+		for (const viewItem of [NODES.source, NODES.edtSource, NODES.group, NODES.externalRoot]) {
+			assert.ok(!menuFor(viewItem).includes('Удалить'), `лишнее «Удалить» у ${viewItem}`);
+		}
+	});
+
 	test('на корне выгрузки: смотрим, собираем, проверяем, свойства замыкают', () => {
 		assert.deepStrictEqual(menuFor(NODES.source), [
 			'Открыть модуль внешнего соединения',
