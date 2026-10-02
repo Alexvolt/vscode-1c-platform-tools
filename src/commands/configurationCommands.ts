@@ -316,11 +316,15 @@ export class ConfigurationCommands extends BaseCommand {
 			return;
 		}
 
-		const converted = await convertSourcesWithEdt(workspaceRoot, {
-			sourceDir: source.dir,
-			format: source.format,
-			outputPath: path.resolve(workspaceRoot, outputPath),
-		});
+		const converted = await convertSourcesWithEdt(
+			workspaceRoot,
+			{
+				sourceDir: source.dir,
+				format: source.format,
+				outputPath: path.resolve(workspaceRoot, outputPath),
+			},
+			opts?.wait === true
+		);
 		return this.edtCommandResult(converted, outputPath, opts);
 	}
 

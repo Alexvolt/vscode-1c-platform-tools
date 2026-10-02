@@ -89,8 +89,9 @@ async function baseProjectResolver(workspaceRoot: string): Promise<(projectDir: 
 /**
  * Выгружает проекты планов; без выгрузки собирать нечего.
  *
- * Планы одной рабочей области идут одной серией: у них общий контекст и общий
- * терминал, а одинаковая выгрузка из двух планов делается один раз.
+ * Планы одной рабочей области идут одной серией с общим контекстом, а одинаковая
+ * выгрузка из двух планов делается один раз. Выгрузка идёт в фоне, как остальные
+ * шаги прогона.
  *
  * @param bridges - Планы сборки
  * @throws {Error} Если выгрузка не удалась
@@ -103,7 +104,7 @@ export async function runEdtBuildExports(bridges: readonly EdtBuildBridge[]): Pr
 	for (const step of bridges.flatMap((bridge) => bridge.exports)) {
 		exports.set(JSON.stringify(step), step);
 	}
-	const context = { ...bridges[0].context, output: new TaskOutputChain() };
+	const context = { ...bridges[0].context, output: new TaskOutputChain(true) };
 	const exported = await runEdtExports([...exports.values()], context);
 	if (exported.exitCode !== 0) {
 		throw new EdtCommandError(

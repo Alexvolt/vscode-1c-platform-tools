@@ -785,12 +785,16 @@ export class ExtensionsCommands extends BaseCommand {
 			return;
 		}
 
-		const converted = await convertSourcesWithEdt(workspaceRoot, {
-			sourceDir: absolute(selected.dir),
-			format: selected.format,
-			outputPath: absolute(outputPath),
-			baseProjectDir,
-		});
+		const converted = await convertSourcesWithEdt(
+			workspaceRoot,
+			{
+				sourceDir: absolute(selected.dir),
+				format: selected.format,
+				outputPath: absolute(outputPath),
+				baseProjectDir,
+			},
+			opts?.wait === true
+		);
 		return this.edtCommandResult(converted, outputPath, opts);
 	}
 

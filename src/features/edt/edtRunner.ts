@@ -3,7 +3,8 @@
  *
  * Команды EDT идут долго - импорт большой конфигурации занимает десятки минут, -
  * поэтому выполняются задачей VS Code: с выводом в терминал, отменой и повтором,
- * как команды vanessa-runner.
+ * как команды vanessa-runner. Когда команду ждёт вызывающий (цепочка, агент),
+ * 1cedtcli, как и vanessa-runner, идёт в фоне: без терминала, с выводом в журнал.
  *
  * Рабочую область `1cedtcli` занимает монопольно: пока идёт одна команда, вторая
  * в том же каталоге падает с сообщением о занятой рабочей области. Поэтому у
@@ -17,6 +18,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { buildProcessCommand } from '../../utils/commandUtils';
 import { createVRunnerTask, type TaskOutputChain } from '../tasks/vrunnerTask';
+import { runCancellableCommand } from '../../shared/cancellableProcess';
 import { logger } from '../../shared/logger';
 import { findEdtInstallations, pickEdtInstallation, type EdtInstallation } from '../../shared/edtLocator';
 import { isEdtProject } from '../../shared/projectLayout';
@@ -300,7 +302,7 @@ export interface EdtCommand {
 	workspaceDir: string;
 	/** Каталог запуска процесса. */
 	cwd: string;
-	/** Общий терминал шагов команды: без него задача очищает терминал. */
+	/** Вывод шагов команды: общий терминал или фон; без него задача очищает терминал. */
 	output?: TaskOutputChain;
 }
 
@@ -364,7 +366,7 @@ export function isProjectRegistered(workspaceDir: string, projectName: string): 
  * @param projectDir - Каталог проекта EDT
  * @param workspaceDir - Каталог рабочей области
  * @param cwd - Каталог запуска
- * @param output - Общий терминал шагов команды
+ * @param output - Вывод шагов команды
  * @returns Итог отключения; успех, если проекта в рабочей области не было
  */
 export async function detachProject(
@@ -399,7 +401,7 @@ export async function detachProject(
  * @param projectDir - Каталог проекта EDT
  * @param workspaceDir - Каталог рабочей области
  * @param cwd - Каталог запуска
- * @param output - Общий терминал шагов команды
+ * @param output - Вывод шагов команды
  * @returns Итог подключения; успех, если проект уже был подключён
  */
 export async function ensureProjectRegistered(
@@ -424,16 +426,17 @@ export async function ensureProjectRegistered(
 }
 
 /**
- * Выполняет команду EDT задачей VS Code.
+ * Выполняет команду EDT задачей VS Code, а команду, которую ждёт вызывающий, - в фоне.
  *
  * Пока идёт одна команда, вторая ждёт: `1cedtcli` не делит рабочую область.
- * Отказ запущенной команды виден в терминале задачи, сообщением показывается
- * только причина, по которой задача не запустилась.
+ * Отказ запущенной команды виден в терминале задачи, у фоновой - в журнале;
+ * сообщением показывается только причина, по которой задача не запустилась.
  *
  * @param request - Команда и её аргументы
  * @returns Код возврата процесса и причина неудачи
  */
 export async function runEdtCommand(request: EdtCommand): Promise<EdtRunResult> {
+	const background = request.output?.background === true;
 	// 1cedtcli работает над исходным кодом проекта, а путь к нему задают настройки edt.*
 	if (!ensureWorkspaceTrusted(`EDT ${request.command}`)) {
 		return { exitCode: 1, error: WORKSPACE_TRUST_REQUIRED };
@@ -442,7 +445,7 @@ export async function runEdtCommand(request: EdtCommand): Promise<EdtRunResult> 
 	const settings = readEdtSettings();
 	const installation = resolveEdt(settings);
 	if (!installation) {
-		return notStarted(EDT_NOT_FOUND_MESSAGE);
+		return notStarted(EDT_NOT_FOUND_MESSAGE, background);
 	}
 
 	// Рабочую область 1cedtcli не делит: следующая команда ждёт, пока закончится текущая
@@ -452,7 +455,8 @@ export async function runEdtCommand(request: EdtCommand): Promise<EdtRunResult> 
 
 	if (editorHoldsWorkspace(request.workspaceDir)) {
 		return notStarted(
-			'1С:EDT открыта на рабочей области проекта, а 1cedtcli с занятой рабочей областью не работает. Закройте EDT и повторите команду.'
+			'1С:EDT открыта на рабочей области проекта, а 1cedtcli с занятой рабочей областью не работает. Закройте EDT и повторите команду.',
+			background
 		);
 	}
 
@@ -463,28 +467,37 @@ export async function runEdtCommand(request: EdtCommand): Promise<EdtRunResult> 
 
 	let output = '';
 	let cancelled = false;
-	running = new Promise<number>((resolve) => {
-		const task = createVRunnerTask({
-			name: request.title,
-			command: () => ({
-				command,
-				onCancel: () => {
-					cancelled = true;
-				},
-			}),
-			cwd: request.cwd,
-			definition: { type: EDT_TASK_TYPE, command: request.command },
-			exitCallback: resolve,
-			appendOutput: request.output?.append(),
-			onOutput: (chunk) => {
-				output = outputTail(output + chunk);
-			},
+	const onOutput = (chunk: string): void => {
+		output = outputTail(output + chunk);
+	};
+	if (background) {
+		running = runInBackground(command, request.cwd, onOutput);
+	} else {
+		running = new Promise<number>((resolve) => {
+			const task = createVRunnerTask({
+				name: request.title,
+				command: () => ({
+					command,
+					onCancel: () => {
+						cancelled = true;
+					},
+				}),
+				cwd: request.cwd,
+				definition: { type: EDT_TASK_TYPE, command: request.command },
+				exitCallback: resolve,
+				appendOutput: request.output?.append(),
+				onOutput,
+			});
+			void vscode.tasks.executeTask(task);
 		});
-		void vscode.tasks.executeTask(task);
-	});
+	}
 
 	try {
 		const exitCode = await running;
+		// Терминала у фоновой команды нет: вывод остаётся только в журнале
+		if (background && output.trim() !== '') {
+			log.info(`Вывод «${request.title}»:\n${output.trim()}`);
+		}
 		if (exitCode !== 0) {
 			const line = edtErrorLine(output);
 			log.warn(`EDT ${request.command}: код возврата ${exitCode}${line === undefined ? '' : `: ${line}`}`);
@@ -496,10 +509,23 @@ export async function runEdtCommand(request: EdtCommand): Promise<EdtRunResult> 
 }
 
 /**
- * Итог команды, для которой задача не запускалась: терминала нет, причина
- * показывается сообщением.
+ * Запускает 1cedtcli процессом без терминала. Процесс, который не запустился,
+ * получает код 1, как у задачи.
  */
-function notStarted(error: string): EdtRunResult {
-	void vscode.window.showErrorMessage(error);
+async function runInBackground(command: string, cwd: string, onOutput: (chunk: string) => void): Promise<number> {
+	const { exitCode } = await runCancellableCommand(command, { cwd, onOutput });
+	return exitCode >= 0 ? exitCode : 1;
+}
+
+/**
+ * Итог команды, для которой процесс не запускался. Причину показывает окно, у фоновой
+ * команды окна нет: причина уходит вызывающему и в журнал.
+ */
+function notStarted(error: string, background: boolean): EdtRunResult {
+	if (background) {
+		log.warn(error);
+	} else {
+		void vscode.window.showErrorMessage(error);
+	}
 	return { exitCode: 1, error };
 }

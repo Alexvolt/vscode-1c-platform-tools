@@ -1,9 +1,12 @@
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import * as vscode from 'vscode';
 import {
 	buildEdtArgs,
 	describeEdtFailure,
+	EDT_NOT_FOUND_MESSAGE,
 	edtErrorLine,
 	edtFailureMessage,
 	edtRunResult,
@@ -11,9 +14,15 @@ import {
 	edtWorkspaceDir,
 	explainEdtFailure,
 	outputTail,
+	runEdtCommand,
+	type EdtCommand,
 	type EdtSettings,
 } from '../../features/edt/edtRunner';
+import { TaskOutputChain } from '../../features/tasks/vrunnerTask';
 import { decodeProcessOutput } from '../../shared/processOutput';
+
+type GetConfiguration = typeof vscode.workspace.getConfiguration;
+type ShowErrorMessage = typeof vscode.window.showErrorMessage;
 
 /** Настройки по умолчанию для сборки вызова. */
 function settings(overrides: Partial<EdtSettings> = {}): EdtSettings {
@@ -297,5 +306,85 @@ suite('нераспознанный отказ 1cedtcli', () => {
 		assert.strictEqual(outputTail(output, UNKNOWN_COMMAND.length + 9), `прогресс\n${UNKNOWN_COMMAND}`);
 		assert.strictEqual(outputTail(output, output.length), output);
 		assert.strictEqual(edtErrorLine(outputTail(output, UNKNOWN_COMMAND.length + 3)), UNKNOWN_COMMAND.trim());
+	});
+});
+
+suite('команда EDT, которую ждёт вызывающий', () => {
+	const workspace = vscode.workspace as unknown as { getConfiguration: GetConfiguration };
+	const window = vscode.window as unknown as { showErrorMessage: ShowErrorMessage };
+	const originalConfiguration = workspace.getConfiguration;
+	const originalShowError = window.showErrorMessage;
+	let installDir: string;
+	let errors: string[];
+
+	setup(() => {
+		installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'edt-установка-'));
+		errors = [];
+		// Настроенный каталог установки единственный: EDT этой машины тест не найдёт
+		workspace.getConfiguration = ((section?: string, scope?: vscode.ConfigurationScope | null) => {
+			const config = originalConfiguration(section, scope);
+			if (section !== '1c-platform-tools') {
+				return config;
+			}
+			return {
+				get: (key: string, defaultValue?: unknown) => (key === 'edt.path' ? installDir : config.get(key, defaultValue)),
+				has: (key: string) => config.has(key),
+				inspect: (key: string) => config.inspect(key),
+				update: config.update.bind(config),
+			} as vscode.WorkspaceConfiguration;
+		}) as GetConfiguration;
+		window.showErrorMessage = ((message: string) => {
+			errors.push(message);
+			return Promise.resolve(undefined);
+		}) as ShowErrorMessage;
+	});
+
+	teardown(() => {
+		workspace.getConfiguration = originalConfiguration;
+		window.showErrorMessage = originalShowError;
+		fs.rmSync(installDir, { recursive: true, force: true });
+	});
+
+	function request(output: TaskOutputChain): EdtCommand {
+		return {
+			command: 'project-info',
+			args: ['проект'],
+			title: 'EDT: сведения о проекте',
+			workspaceDir: path.join(installDir, 'edt-workspace'),
+			cwd: installDir,
+			output,
+		};
+	}
+
+	test('отказ запуска уходит вызывающему без окна, при ручном запуске показывается окном', async () => {
+		const notFound = { exitCode: 1, error: EDT_NOT_FOUND_MESSAGE };
+
+		assert.deepStrictEqual(await runEdtCommand(request(new TaskOutputChain(true))), notFound);
+		assert.deepStrictEqual(errors, []);
+
+		assert.deepStrictEqual(await runEdtCommand(request(new TaskOutputChain())), notFound);
+		assert.deepStrictEqual(errors, [EDT_NOT_FOUND_MESSAGE]);
+	});
+
+	test('1cedtcli идёт без терминала, причина отказа доходит до вызывающего', async function () {
+		// На Windows установка EDT - это 1cedtcli.exe: сценарием её не подставить
+		if (process.platform === 'win32') {
+			this.skip();
+		}
+		this.timeout(10_000);
+		const cli = path.join(installDir, '1cedtcli');
+		fs.writeFileSync(cli, '#!/bin/sh\necho "edtsh: Не найдено проекта с именем проект в рабочей области" >&2\nexit 13\n', 'utf8');
+		fs.chmodSync(cli, 0o755);
+		const opened: vscode.Terminal[] = [];
+		const listener = vscode.window.onDidOpenTerminal((terminal) => opened.push(terminal));
+
+		try {
+			const result = await runEdtCommand(request(new TaskOutputChain(true)));
+
+			assert.deepStrictEqual(result, { exitCode: 13, error: 'Проекта проект нет в рабочей области 1С:EDT.' });
+			assert.deepStrictEqual(opened, []);
+		} finally {
+			listener.dispose();
+		}
 	});
 });
