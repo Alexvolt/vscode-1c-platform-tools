@@ -1,5 +1,5 @@
 import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
-import { invalidateProjectLayout, resolveProjectLayout, sameOrUnder } from '../../shared/projectLayout';
+import { directoryKey, invalidateProjectLayout, resolveProjectLayout, sameOrUnder } from '../../shared/projectLayout';
 import {
 	currentRoot,
 	onDidChangeCurrentProject,
@@ -101,7 +101,7 @@ import { showComponentError } from '../../shared/githubToken';
 import { uiOnlyHandler } from '../../shared/agentGate';
 import { describeComponentState, readComponentStates } from '../../shared/componentsRegistry';
 import { CfDumpFinding, DumpValidationDiagnostics } from './dumpValidationDiagnostics';
-import { edtProjectDirOf, metadataCompileTarget, type MetadataCompileKind } from './metadataCompileTarget';
+import { edtProjectDirOf, metadataCompileTarget, sourceDirectoryOf, type MetadataCompileKind } from './metadataCompileTarget';
 import { ArtifactCommands } from '../../commands/artifactCommands';
 import { pickProjectDirectory } from '../../commands/baseCommand';
 import { projectRelativePath } from '../../commands/projectScope';
@@ -2653,6 +2653,52 @@ export function registerMetadataFeature(
 				});
 			}
 		),
+		registerMetadataCommand('1c-platform-tools.metadata.deleteExtension', async (item?: vscode.TreeItem) => {
+			const selected = item instanceof MetadataSourceTreeItem ? item : metadataTreeView.selection[0];
+			const source = selected instanceof MetadataSourceTreeItem ? selected : undefined;
+			if (!source || source.sourceKind !== 'extension') {
+				void vscode.window.showInformationMessage('Выберите расширение в дереве.');
+				return;
+			}
+			const root = currentRoot();
+			const dir = sourceDirectoryOf(source);
+			const mainXml = metadataTreeProvider.configurationXml;
+			let mainDir: string | undefined;
+			if (mainXml) {
+				mainDir = formatOfFile(mainXml) === 'edt' ? edtProjectDirOf(mainXml) : path.dirname(mainXml);
+			}
+			if (
+				!root
+				|| !dir
+				|| !fs.existsSync(dir)
+				|| !fs.statSync(dir).isDirectory()
+				|| !sameOrUnder(dir, root)
+				|| directoryKey(dir) === directoryKey(root)
+				|| (mainDir !== undefined && directoryKey(dir) === directoryKey(mainDir))
+			) {
+				void vscode.window.showErrorMessage('Удалить это расширение нельзя.');
+				return;
+			}
+			const name = typeof source.label === 'string' ? source.label : source.sourceId;
+			const answer = await vscode.window.showWarningMessage(
+				`Удалить расширение «${name}»?`,
+				{ modal: true },
+				'Удалить'
+			);
+			if (answer !== 'Удалить') {
+				return;
+			}
+			try {
+				await fs.promises.rm(dir, { recursive: true });
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e);
+				void vscode.window.showErrorMessage(msg.slice(0, MD_SPARROW_CLI_ERR_PREVIEW));
+				return;
+			}
+			invalidateProjectLayout(root);
+			await metadataTreeProvider.refresh();
+			notifyQuiet(`Расширение «${name}» удалено`);
+		}),
 		registerMetadataCommand('1c-platform-tools.metadata.initEmptyCfe', async () => {
 			await runMdSparrowMutation(async () => {
 				const root = currentRoot();

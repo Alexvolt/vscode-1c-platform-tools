@@ -719,7 +719,7 @@ suite('metadataTreeView: расширение неподдерживаемого
 		const old = roots[2];
 		assert.strictEqual(old.label, 'СтарыйФормат');
 		assert.strictEqual(old.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
-		assert.strictEqual(old.contextValue, 'metadataSourceUnsupported mdDesigner');
+		assert.strictEqual(old.contextValue, 'metadataSourceUnsupported metadataExtensionRoot mdDesigner');
 		const children = await provider.getChildren(old);
 		assert.strictEqual(children.length, 1);
 		assert.ok(children[0] instanceof MetadataSourceNoteTreeItem);
@@ -734,7 +734,7 @@ suite('metadataTreeView: расширение неподдерживаемого
 	test('поддерживаемый источник узла о версии не получает', () => {
 		const supported = new MetadataSourceTreeItem('New', 'НовыйФормат', 'extension', undefined, undefined);
 		assert.strictEqual(supported.collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
-		assert.strictEqual(supported.contextValue, 'metadataSourceConfigLike');
+		assert.strictEqual(supported.contextValue, 'metadataSourceConfigLike metadataExtensionRoot');
 	});
 });
 
