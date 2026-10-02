@@ -4513,7 +4513,7 @@
             "type": "boolean",
             "default": true,
             "scope": "resource",
-            "description": "Скачивать portable JRE 21 для дерева метаданных. Выключите, если путь задан в components.path.java или java доступна в PATH."
+            "description": "Скачивать portable JRE 25 для дерева метаданных. Выключите, если путь задан в components.path.java или java доступна в PATH."
           },
           "1c-platform-tools.components.path.java": {
             "type": "string",

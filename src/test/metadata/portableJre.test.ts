@@ -38,7 +38,7 @@ suite('кэш portable JRE', () => {
 	const files = (dir: string): string[] => (fs.readdirSync(dir, { recursive: true }) as string[]).sort();
 
 	setup(() => {
-		jreRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jre-cache-')), 'jre-temurin-21');
+		jreRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'jre-cache-')), 'jre-temurin-25');
 	});
 
 	teardown(() => {

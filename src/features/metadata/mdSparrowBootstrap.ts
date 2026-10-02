@@ -1,6 +1,6 @@
 /**
  * Загрузка fat-JAR md-sparrow с GitHub Releases (через общий {@link githubReleaseLoader})
- * и portable JRE 21 (Eclipse Temurin).
+ * и portable JRE (Eclipse Temurin) той версии, на которой собирается md-sparrow.
  * @module mdSparrowBootstrap
  */
 
@@ -27,6 +27,7 @@ import {
 import {
 	MD_SPARROW_DEFAULT_REPO,
 	MD_SPARROW_JAR_REGEX,
+	MD_SPARROW_JAVA,
 	adoptiumBinaryUrl,
 } from './mdSparrowConstants';
 import { stopMdSparrowResidents } from './mdSparrowRunner';
@@ -57,12 +58,13 @@ const MD_SPARROW_SPEC: ReleaseComponentSpec = {
 
 /** Каталог кэша portable JRE. */
 function jreRootOf(baseDir: string): string {
-	return path.join(baseDir, 'jre-temurin-21');
+	return path.join(baseDir, `jre-temurin-${MD_SPARROW_JAVA}`);
 }
 
 /** Качает архив Temurin в каталог установки и распаковывает его там же. */
 async function downloadJreInto(dir: string): Promise<void> {
-	const archivePath = path.join(dir, process.platform === 'win32' ? 'temurin-jre-21.zip' : 'temurin-jre-21.tar.gz');
+	const archiveName = process.platform === 'win32' ? `temurin-jre-${MD_SPARROW_JAVA}.zip` : `temurin-jre-${MD_SPARROW_JAVA}.tar.gz`;
+	const archivePath = path.join(dir, archiveName);
 	await streamDownload(adoptiumBinaryUrl(), archivePath, { 'User-Agent': 'vscode-1c-platform-tools' });
 	await extractArchive(archivePath, dir);
 	await fs.rm(archivePath, { force: true });
@@ -87,8 +89,8 @@ async function ensurePortableJre(baseDir: string, download: boolean, javaOverrid
 	}
 
 	return preparedOnce(`jre-install|${jreRoot}`, async () => {
-		log.info('загрузка portable JRE 21 (Eclipse Temurin)…');
-		const status = showStatus('md-sparrow: загружаем JRE 21...');
+		log.info(`загрузка portable JRE ${MD_SPARROW_JAVA} (Eclipse Temurin)…`);
+		const status = showStatus(`md-sparrow: загружаем JRE ${MD_SPARROW_JAVA}...`);
 		try {
 			const java = await installJre(jreRoot, downloadJreInto);
 			log.info(`JRE готова: ${java}`);

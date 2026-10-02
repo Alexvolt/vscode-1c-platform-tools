@@ -4,7 +4,7 @@
 
 > <img src="../resources/brand/cat-sleep.png" alt="" width="26" align="left"> Обычно расширение приносит всё само; когда сети нет, приносите вы.
 
-Отладчик [onec-debug-adapter](https://github.com/yellow-hammer/onec-debug-adapter), дерево метаданных [md-sparrow](https://github.com/yellow-hammer/md-sparrow) с [portable JRE 21](https://adoptium.net/temurin/releases/?version=21&package=jre), [OVM](https://github.com/oscript-library/ovm) и [Allure](https://github.com/allure-framework/allure2) не входят в VSIX: расширение загружает их из релизов в свой кэш при первом обращении и обновляет само. Ставить и настраивать для этого нечего.
+Отладчик [onec-debug-adapter](https://github.com/yellow-hammer/onec-debug-adapter), дерево метаданных [md-sparrow](https://github.com/yellow-hammer/md-sparrow) с [portable JRE 25](https://adoptium.net/temurin/releases/?version=25&package=jre), [OVM](https://github.com/oscript-library/ovm) и [Allure](https://github.com/allure-framework/allure2) не входят в VSIX: расширение загружает их из релизов в свой кэш при первом обращении и обновляет само. Ставить и настраивать для этого нечего.
 
 ## Что и откуда
 
@@ -12,7 +12,7 @@
 |-----------|---------------------|---------------------|----------|
 | Отладчик | архив [onec-debug-adapter](https://github.com/yellow-hammer/onec-debug-adapter/releases) для своей системы: `win-x64`, `linux-x64`, `osx-arm64`, `osx-x64`; внутри `OnecDebugAdapter.exe` | `components.path.adapter` | `components.autoload.adapter` |
 | Дерево метаданных | файл `md-sparrow-*-all.jar` из [релизов](https://github.com/yellow-hammer/md-sparrow/releases) | `components.path.metadataJar` | `components.autoload.metadataJar` |
-| Java для дерева | [Temurin JRE 21](https://adoptium.net/temurin/releases/?version=21&package=jre) для своей системы; внутри `bin/java` | `components.path.java` | `components.autoload.java` |
+| Java для дерева | [Temurin JRE 25](https://adoptium.net/temurin/releases/?version=25&package=jre) для своей системы; внутри `bin/java` | `components.path.java` | `components.autoload.java` |
 | OVM | файл `ovm.exe` из [релизов](https://github.com/oscript-library/ovm/releases) | `components.path.ovm` | `components.autoload.ovm` |
 | Allure | архив `allure-<версия>.zip` из [релизов](https://github.com/allure-framework/allure2/releases); внутри `bin/allure.bat` | `components.path.allure` | `components.autoload.allure` |
 | OneScript | архив [OneScript](https://github.com/EvilBeaver/OneScript/releases) для своей системы; внутри `bin/oscript.exe` | `components.path.oscript` | загрузки нет: [ставится через OVM](tools.md#установка-onescript) |
