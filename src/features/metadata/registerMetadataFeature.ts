@@ -1,5 +1,5 @@
 import { CONVENTIONAL_PATHS, projectPaths } from '../../shared/projectPaths';
-import { resolveProjectLayout, sameOrUnder } from '../../shared/projectLayout';
+import { invalidateProjectLayout, resolveProjectLayout, sameOrUnder } from '../../shared/projectLayout';
 import {
 	currentRoot,
 	onDidChangeCurrentProject,
@@ -2736,6 +2736,8 @@ export function registerMetadataFeature(
 						void vscode.window.showErrorMessage(errText);
 						return;
 					}
+					// Иначе дерево читает прежнюю раскладку без нового каталога и кэш отвечает старым составом
+					invalidateProjectLayout(root);
 					await metadataTreeProvider.refresh();
 					notifyQuiet(`Расширение ${name.trim()} создано`);
 				} catch (e) {
