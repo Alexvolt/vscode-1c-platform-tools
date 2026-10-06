@@ -201,6 +201,38 @@ export function getAdd1cptSkillsCommandName(): CommandNameAndTitle {
 	};
 }
 
+export function getAddOnescriptSkillsCommandName(): CommandNameAndTitle {
+	return {
+		id: '1c-platform-tools.skills.addOnescript',
+		name: 'Добавить навыки OneScript',
+		title: 'Добавить навыки OneScript'
+	};
+}
+
+export function getAddVanessaAutomationSkillsCommandName(): CommandNameAndTitle {
+	return {
+		id: '1c-platform-tools.skills.addVanessaAutomation',
+		name: 'Добавить навыки Vanessa Automation',
+		title: 'Добавить навыки Vanessa Automation'
+	};
+}
+
+export function getAddYaxunitSkillsCommandName(): CommandNameAndTitle {
+	return {
+		id: '1c-platform-tools.skills.addYaxunit',
+		name: 'Добавить навыки YAxUnit',
+		title: 'Добавить навыки YAxUnit'
+	};
+}
+
+export function getAddXunitSkillsCommandName(): CommandNameAndTitle {
+	return {
+		id: '1c-platform-tools.skills.addXunit',
+		name: 'Добавить навыки xUnit',
+		title: 'Добавить навыки xUnit'
+	};
+}
+
 /**
  * Получить название и заголовок для команды установки OPM
  */

@@ -144,6 +144,30 @@ export function registerCommands(
 			}
 			void commands.skills.add1cptSkills(context, typeof destination === 'string' ? destination : undefined);
 		}),
+		registerProjectCommand('1c-platform-tools.skills.addOnescript', (destination?: unknown) => {
+			if (isAgentOptions(destination)) {
+				return agentInteractiveError('Передайте назначение строкой: claude, cursor, copilot или путь к папке.');
+			}
+			void commands.skills.addOnescriptSkills(context, typeof destination === 'string' ? destination : undefined);
+		}),
+		registerProjectCommand('1c-platform-tools.skills.addVanessaAutomation', (destination?: unknown) => {
+			if (isAgentOptions(destination)) {
+				return agentInteractiveError('Передайте назначение строкой: claude, cursor, copilot или путь к папке.');
+			}
+			void commands.skills.addVanessaAutomationSkills(context, typeof destination === 'string' ? destination : undefined);
+		}),
+		registerProjectCommand('1c-platform-tools.skills.addYaxunit', (destination?: unknown) => {
+			if (isAgentOptions(destination)) {
+				return agentInteractiveError('Передайте назначение строкой: claude, cursor, copilot или путь к папке.');
+			}
+			void commands.skills.addYaxunitSkills(context, typeof destination === 'string' ? destination : undefined);
+		}),
+		registerProjectCommand('1c-platform-tools.skills.addXunit', (destination?: unknown) => {
+			if (isAgentOptions(destination)) {
+				return agentInteractiveError('Передайте назначение строкой: claude, cursor, copilot или путь к папке.');
+			}
+			void commands.skills.addXunitSkills(context, typeof destination === 'string' ? destination : undefined);
+		}),
 	];
 	disposables.push(...skillsCommands);
 

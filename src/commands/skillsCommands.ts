@@ -27,6 +27,31 @@ const DESTINATION_OPTIONS = [
 	{ id: 'custom', label: 'Указать папку…', folder: '' }
 ] as const;
 
+const AGENT_CATALOGS = {
+	onescript: {
+		title: 'OneScript',
+		zipUrl: 'https://github.com/yellow-hammer/skills-onescript/archive/refs/heads/main.zip',
+		archiveRoot: 'skills-onescript-main'
+	},
+	'vanessa-automation': {
+		title: 'Vanessa Automation',
+		zipUrl: 'https://github.com/yellow-hammer/skills-vanessa-automation/archive/refs/heads/main.zip',
+		archiveRoot: 'skills-vanessa-automation-main'
+	},
+	yaxunit: {
+		title: 'YAxUnit',
+		zipUrl: 'https://github.com/yellow-hammer/skills-yaxunit/archive/refs/heads/main.zip',
+		archiveRoot: 'skills-yaxunit-main'
+	},
+	xunit: {
+		title: 'xUnit',
+		zipUrl: 'https://github.com/yellow-hammer/skills-xunit/archive/refs/heads/main.zip',
+		archiveRoot: 'skills-xunit-main'
+	}
+} as const;
+
+type AgentCatalogId = keyof typeof AGENT_CATALOGS;
+
 const ONE_CPT_SKILL_IDS = [
 	'1c-platform-tools',
 	'1c-platform-tools-configuration',
@@ -218,6 +243,81 @@ async function rewriteSkillPathPrefixes(targetDir: string): Promise<number> {
 	return rewrittenFiles;
 }
 
+/** Куда положить правила рядом с выбранной папкой навыков. */
+type RuleLayout = 'cursor' | 'claude' | 'copilot' | 'plain';
+
+function rulePlacement(skillsTarget: string): { dir: string; layout: RuleLayout } {
+	const normalized = skillsTarget.replaceAll('\\', '/');
+	const lower = normalized.toLowerCase();
+	const markers: { marker: string; layout: RuleLayout; rulesFolder: string }[] = [
+		{ marker: '/.cursor/skills', layout: 'cursor', rulesFolder: '.cursor/rules' },
+		{ marker: '/.claude/skills', layout: 'claude', rulesFolder: '.claude/rules' },
+		{ marker: '/.github/copilot/skills', layout: 'copilot', rulesFolder: '.github/instructions' },
+		{ marker: '/.github/skills', layout: 'copilot', rulesFolder: '.github/instructions' }
+	];
+	for (const item of markers) {
+		const index = lower.lastIndexOf(item.marker);
+		if (index < 0) {
+			continue;
+		}
+		const after = lower.charAt(index + item.marker.length);
+		if (after !== '' && after !== '/') {
+			continue;
+		}
+		return {
+			dir: path.join(normalized.slice(0, index), ...item.rulesFolder.split('/')),
+			layout: item.layout
+		};
+	}
+	return { dir: path.join(path.dirname(skillsTarget), 'rules'), layout: 'plain' };
+}
+
+function splitRule(content: string): { globs: string; alwaysApply: boolean; body: string } {
+	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+	if (!match) {
+		return { globs: '', alwaysApply: false, body: content };
+	}
+	let globs = '';
+	let alwaysApply = false;
+	for (const line of match[1].split(/\r?\n/)) {
+		const separator = line.indexOf(':');
+		if (separator < 0) {
+			continue;
+		}
+		const key = line.slice(0, separator).trim();
+		const value = line.slice(separator + 1).trim().replace(/^["']|["']$/g, '');
+		if (key === 'globs') {
+			globs = value;
+		}
+		if (key === 'alwaysApply') {
+			alwaysApply = value === 'true';
+		}
+	}
+	return { globs, alwaysApply, body: match[2].replace(/^\r?\n/, '') };
+}
+
+/** Пишет правило в формате выбранного агента. Исходник в каталоге — .mdc для Cursor. */
+async function writeAgentRule(sourcePath: string, rulesDir: string, layout: RuleLayout): Promise<void> {
+	const raw = await fs.readFile(sourcePath, 'utf8');
+	const baseName = path.basename(sourcePath, path.extname(sourcePath));
+	if (layout === 'cursor' || layout === 'plain') {
+		await fs.copyFile(sourcePath, path.join(rulesDir, path.basename(sourcePath)));
+		return;
+	}
+	const rule = splitRule(raw);
+	if (layout === 'claude') {
+		const header = rule.alwaysApply || !rule.globs ? '' : `---\npaths: "${rule.globs}"\n---\n\n`;
+		await fs.writeFile(path.join(rulesDir, `${baseName}.md`), header + rule.body, 'utf8');
+		return;
+	}
+	const applyTo = rule.alwaysApply || !rule.globs ? '**' : rule.globs;
+	await fs.writeFile(
+		path.join(rulesDir, `${baseName}.instructions.md`),
+		`---\napplyTo: "${applyTo}"\n---\n\n${rule.body}`,
+		'utf8'
+	);
+}
+
 export class SkillsCommands {
 	/**
 	 * Добавляет навыки разработки 1С (cc-1c-skills) из GitHub: XML, формы, роли, СКД, метаданные, EPF/ERF и т.д.
@@ -329,5 +429,122 @@ export class SkillsCommands {
 				'Не найдено ни одного шаблона навыка в расширении. Обратитесь к разработчикам.'
 			);
 		}
+	}
+
+	/** Навыки OneScript, Autumn и Winow и правила в каталог выбранного агента. */
+	async addOnescriptSkills(context: vscode.ExtensionContext, destination?: string): Promise<void> {
+		return this.addAgentCatalog(context, 'onescript', destination);
+	}
+
+	/** Навыки и правила Vanessa Automation. */
+	async addVanessaAutomationSkills(context: vscode.ExtensionContext, destination?: string): Promise<void> {
+		return this.addAgentCatalog(context, 'vanessa-automation', destination);
+	}
+
+	/** Навыки и правила YAxUnit. Движок тестов эта команда не ставит. */
+	async addYaxunitSkills(context: vscode.ExtensionContext, destination?: string): Promise<void> {
+		return this.addAgentCatalog(context, 'yaxunit', destination);
+	}
+
+	/** Навыки и правила xUnit (Vanessa-ADD). */
+	async addXunitSkills(context: vscode.ExtensionContext, destination?: string): Promise<void> {
+		return this.addAgentCatalog(context, 'xunit', destination);
+	}
+
+	private async addAgentCatalog(
+		_context: vscode.ExtensionContext,
+		catalogId: AgentCatalogId,
+		destination?: string
+	): Promise<void> {
+		const source = AGENT_CATALOGS[catalogId];
+		const title = source.title;
+		const workspaceRoot = skillsWorkspaceRoot();
+		const skillsTarget = destination
+			? resolveDestination(destination, workspaceRoot)
+			: await pickDestination(workspaceRoot);
+		if (!skillsTarget) {
+			return;
+		}
+
+		await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title: `Загрузка навыков ${title} с GitHub`,
+				cancellable: false
+			},
+			async () => {
+				let zipPath: string | null = null;
+				try {
+					zipPath = await downloadToTemp(source.zipUrl);
+					const extractDir = await extractZip(zipPath);
+					const catalogDir = path.join(extractDir, source.archiveRoot);
+					const skillsSource = path.join(catalogDir, 'skills');
+					try {
+						await fs.access(skillsSource);
+					} catch {
+						throw new Error(`В архиве не найдена папка ${source.archiveRoot}/skills`);
+					}
+					let copied = 0;
+					const entries = await fs.readdir(skillsSource, { withFileTypes: true });
+					for (const entry of entries) {
+						if (!entry.isDirectory()) {
+							continue;
+						}
+						const sourceDir = path.join(skillsSource, entry.name);
+						try {
+							await fs.access(path.join(sourceDir, 'SKILL.md'));
+						} catch {
+							continue;
+						}
+						await fs.cp(sourceDir, path.join(skillsTarget, entry.name), { recursive: true });
+						copied++;
+					}
+					if (copied === 0) {
+						throw new Error(`В архиве нет навыков ${title}`);
+					}
+
+					const rulesDir = path.join(catalogDir, 'rules');
+					const placement = rulePlacement(skillsTarget);
+					let rulesCopied = 0;
+					try {
+						await fs.access(rulesDir);
+						const ruleFiles = await fs.readdir(rulesDir);
+						await fs.mkdir(placement.dir, { recursive: true });
+						for (const fileName of ruleFiles) {
+							if (!fileName.toLowerCase().endsWith('.mdc')) {
+								continue;
+							}
+							await writeAgentRule(path.join(rulesDir, fileName), placement.dir, placement.layout);
+							rulesCopied++;
+						}
+					} catch (error) {
+						const errMsg = error instanceof Error ? error.message : String(error);
+						log.info(`Правила ${title} в архиве не установлены: ${errMsg}`);
+					}
+
+					const where = displayDestination(skillsTarget, workspaceRoot);
+					const rulesWhere = displayDestination(placement.dir, workspaceRoot);
+					notifyQuiet(
+						rulesCopied > 0
+							? `Навыки ${title} установлены в ${where}, правила — в ${rulesWhere}`
+							: `Навыки ${title} установлены в ${where}`
+					);
+				} catch (error) {
+					const errMsg = error instanceof Error ? error.message : String(error);
+					log.error(`Не удалось установить навыки ${title}: ${errMsg}`);
+					vscode.window.showErrorMessage(
+						`Не удалось установить навыки ${title}: ${errMsg}. Проверьте подключение к интернету и доступ к GitHub.`
+					);
+				} finally {
+					if (zipPath) {
+						try {
+							await fs.rm(path.dirname(zipPath), { recursive: true, force: true });
+						} catch {
+							// ignore cleanup errors
+						}
+					}
+				}
+			}
+		);
 	}
 }
