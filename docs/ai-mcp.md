@@ -14,6 +14,7 @@
 
 - **Добавить навыки разработки 1С (cc-1c-skills)** — XML, формы, роли, СКД, метаданные; скачиваются с GitHub при каждом вызове.
 - **Добавить навыки расширения (команды и MCP)** — инструкции по командам расширения и MCP по доменам.
+- **Добавить навыки OneScript**, **Vanessa Automation**, **YAxUnit** и **xUnit** — скачиваются с GitHub при каждом вызове (репозитории `yellow-hammer/skills-onescript`, `skills-vanessa-automation`, `skills-yaxunit`, `skills-xunit`). Папка зависит от кнопки: Cursor (`.cursor/skills` и `.cursor/rules`), GitHub Copilot (`.github/skills` и `.github/instructions`), Claude Code (`.claude/skills` и `.claude/rules`). Команда «Добавить навыки YAxUnit» не ставит движок тестов: для движка есть «Добавить YAxUnit».
 
 При установке выбирается папка назначения: `.cursor/skills/`, `.github/skills/`, `.claude/skills/` или другая, которую использует агент.
 

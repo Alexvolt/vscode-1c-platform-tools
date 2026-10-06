@@ -82,7 +82,11 @@ import {
 	getCreateDistributionFilesCommandName,
 	getConfigureCursorMcpCommandName,
 	getAddDevSkillsCommandName,
-	getAdd1cptSkillsCommandName
+	getAdd1cptSkillsCommandName,
+	getAddOnescriptSkillsCommandName,
+	getAddVanessaAutomationSkillsCommandName,
+	getAddYaxunitSkillsCommandName,
+	getAddXunitSkillsCommandName
 } from './commandNames';
 
 /** Формат исходников активной конфигурации: выгрузка конфигуратора или проект 1С:EDT. */
@@ -307,6 +311,10 @@ export const TREE_GROUPS: TreeGroup[] = [
 			{ command: '1c-platform-tools.mcp.configureCursor', title: getConfigureCursorMcpCommandName().title, treeLabel: '🔌 Настроить MCP для Cursor' },
 			{ command: '1c-platform-tools.skills.add1cpt', title: getAdd1cptSkillsCommandName().title, treeLabel: '🤖 Добавить навыки расширения (команды и MCP)' },
 			{ command: '1c-platform-tools.skills.addDevSkills', title: getAddDevSkillsCommandName().title, treeLabel: '📐 Добавить навыки разработки 1С (cc-1c-skills)' },
+			{ command: '1c-platform-tools.skills.addOnescript', title: getAddOnescriptSkillsCommandName().title, treeLabel: '🤖 Добавить навыки OneScript' },
+			{ command: '1c-platform-tools.skills.addVanessaAutomation', title: getAddVanessaAutomationSkillsCommandName().title, treeLabel: '🤖 Добавить навыки Vanessa Automation' },
+			{ command: '1c-platform-tools.skills.addYaxunit', title: getAddYaxunitSkillsCommandName().title, treeLabel: '🤖 Добавить навыки YAxUnit' },
+			{ command: '1c-platform-tools.skills.addXunit', title: getAddXunitSkillsCommandName().title, treeLabel: '🤖 Добавить навыки xUnit' },
 		],
 	},
 	{
