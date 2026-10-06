@@ -18,6 +18,7 @@
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>4</kbd> | 1С: Метаданные |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>5</kbd> | 1С: Свойства |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>6</kbd> | 1С: Список дел |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>7</kbd> | 1С: Артефакты |
 
 На macOS вместо <kbd>Ctrl</kbd> — <kbd>Cmd</kbd>.
 
@@ -27,6 +28,7 @@
 | --- | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>F7</kbd> | Синтаксический контроль | то же сочетание |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd> | Запустить автономный сервер | — |
+| <kbd>Alt</kbd>+<kbd>F5</kbd> | Отладка через автономный сервер | — |
 | <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd> | Остановить автономный сервер | — |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>F5</kbd> | Перезапустить автономный сервер | — |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>P</kbd> | Открыть список проектов | — |

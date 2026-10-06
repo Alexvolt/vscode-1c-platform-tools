@@ -3980,6 +3980,11 @@
         "mac": "cmd+alt+6"
       },
       {
+        "command": "1c-platform-tools-artifacts.focus",
+        "key": "ctrl+alt+7",
+        "mac": "cmd+alt+7"
+      },
+      {
         "command": "1c-platform-tools.syntaxCheck.run",
         "key": "ctrl+f7",
         "when": "1c-platform-tools.is1CProject == true"
@@ -3988,6 +3993,12 @@
         "command": "1c-platform-tools.server.start",
         "key": "ctrl+alt+f5",
         "mac": "cmd+alt+f5",
+        "when": "1c-platform-tools.is1CProject == true"
+      },
+      {
+        "command": "1c-platform-tools.server.debug",
+        "key": "alt+f5",
+        "mac": "alt+f5",
         "when": "1c-platform-tools.is1CProject == true"
       },
       {
