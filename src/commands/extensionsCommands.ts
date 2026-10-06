@@ -211,9 +211,13 @@ export class ExtensionsCommands extends BaseCommand {
 	}
 
 	/**
-	 * Расширения области; без них команда отвечает сообщением.
+	 * Расширения области; без них команда сообщает, что делать нечего.
 	 *
-	 * @returns Список, результат агенту либо undefined после сообщения в UI
+	 * Пустой каталог — не сбой загрузки: кнопка показывает сообщение, прогон
+	 * цепочки получает успех. Иначе шаг «Загрузить расширения» обрывает
+	 * развёртывание базы, в которой расширений нет.
+	 *
+	 * @returns Список, успех с пояснением для цепочки либо undefined после сообщения в UI
 	 */
 	private async requireExtensions(
 		scope: ExtensionScope,
@@ -226,7 +230,7 @@ export class ExtensionsCommands extends BaseCommand {
 		const message = `${scope === 'tests' ? 'Тестовых расширений' : 'Расширений'} в рабочей области нет`;
 		log.info(message);
 		if (opts?.wait === true) {
-			return this.executionError(message);
+			return { success: true, exitCode: 0, stdout: message, stderr: '' };
 		}
 		vscode.window.showInformationMessage(message);
 		return undefined;
