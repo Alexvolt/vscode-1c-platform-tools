@@ -173,7 +173,7 @@
         {
           "id": "1c-platform-tools-properties",
           "title": "1С: Свойства",
-          "icon": "resources/property-palette.svg",
+          "icon": "resources/activitybar-properties.svg",
           "when": "1c-platform-tools.is1CProject == true"
         }
       ],
@@ -286,7 +286,7 @@
           "id": "1c-platform-tools-properties-palette",
           "name": "Палитра",
           "type": "webview",
-          "icon": "resources/property-palette.svg",
+          "icon": "resources/activitybar-properties.svg",
           "when": "1c-platform-tools.is1CProject == true"
         }
       ],
